@@ -16,30 +16,54 @@ struct UtteranceFrame: Identifiable, Hashable, Sendable {
     var isFinal: Bool
     var asrConfidence: Double?
     var hasTerminalPause: Bool
+    var multimodalSignal: QuestionMultimodalSignal?
 }
 
 struct UtteranceFrameBuilder {
-    func frames(from segment: TranscriptSegment, context: TranscriptContext) -> [UtteranceFrame] {
+    func frames(from segment: TranscriptSegment, context: TranscriptContext, signal: QuestionMultimodalSignal? = nil) -> [UtteranceFrame] {
         let text = segment.text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard text.count >= 4 else { return [] }
 
         let spans = sentenceSpans(in: text)
         guard !spans.isEmpty else {
-            return [frame(text: text, segment: segment, index: 0, count: 1)]
+            return [frame(text: text, segment: segment, index: 0, count: 1, signal: signal)]
         }
 
         return spans.enumerated().compactMap { index, span in
             let value = span.trimmingCharacters(in: .whitespacesAndNewlines)
             guard value.count >= 4 else { return nil }
-            return frame(text: value, segment: segment, index: index, count: spans.count)
+            return frame(text: value, segment: segment, index: index, count: spans.count, signal: signal)
         }
     }
 
-    private func frame(text: String, segment: TranscriptSegment, index: Int, count: Int) -> UtteranceFrame {
+    private func frame(text: String, segment: TranscriptSegment, index: Int, count: Int, signal: QuestionMultimodalSignal?) -> UtteranceFrame {
         let duration = max(segment.endTime - segment.startTime, 0)
         let step = count > 0 ? duration / Double(count) : 0
         let start = segment.startTime + (Double(index) * step)
         let end = duration > 0 ? start + step : segment.endTime
+        let frameSignal = signal.map {
+            QuestionMultimodalSignal(
+                language: $0.language,
+                asrConfidence: $0.asrConfidence,
+                isFinal: $0.isFinal,
+                isPartial: $0.isPartial,
+                speakerLabel: $0.speakerLabel,
+                audioSource: $0.audioSource,
+                duration: step > 0 ? step : $0.duration,
+                hasTerminalPause: index == count - 1 && $0.hasTerminalPause,
+                partialStability: $0.partialStability,
+                partialRevisionCount: $0.partialRevisionCount,
+                rms: $0.rms,
+                peak: $0.peak,
+                isClipping: $0.isClipping,
+                isSilence: $0.isSilence,
+                isTooQuiet: $0.isTooQuiet,
+                gapCount: $0.gapCount,
+                noiseFloor: $0.noiseFloor,
+                audioEnergy: $0.audioEnergy,
+                createdAt: $0.createdAt
+            )
+        }
         return UtteranceFrame(
             id: index == 0 ? segment.id : UUID(),
             meetingId: segment.meetingId,
@@ -55,7 +79,8 @@ struct UtteranceFrameBuilder {
             isPartial: !segment.isFinal,
             isFinal: segment.isFinal,
             asrConfidence: segment.confidence,
-            hasTerminalPause: segment.isFinal
+            hasTerminalPause: segment.isFinal,
+            multimodalSignal: frameSignal
         )
     }
 
@@ -508,9 +533,97 @@ struct QuestionCandidateExtractor {
                 startTime: frame.startTime,
                 endTime: frame.endTime,
                 sourceSegmentIds: [frame.sourceSegmentId],
-                isPartial: frame.isPartial
+                isPartial: frame.isPartial,
+                multimodalSignal: frame.multimodalSignal
             )
         }
+    }
+}
+
+struct QuestionSpanExtractor: Sendable {
+    var rulePack: QuestionIntentRulePack = .default
+
+    func extractedQuestion(
+        from rawText: String,
+        language: String?,
+        profile: UserMeetingProfile? = nil
+    ) -> String {
+        let trimmed = rawText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return rawText }
+
+        var text = trimmed
+        text = removeLeadingAddress(from: text, profile: profile)
+        text = removeLeadingDiscourse(from: text)
+        text = removeTrailingSelfAnswer(from: text)
+        text = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        text = text.trimmingCharacters(in: CharacterSet(charactersIn: " ,.;:"))
+        return text.isEmpty ? trimmed : text
+    }
+
+    private func removeLeadingAddress(from text: String, profile: UserMeetingProfile?) -> String {
+        var aliases = ([profile?.userName].compactMap { $0 } + (profile?.userAliases ?? []))
+        aliases.append(contentsOf: ["ryan", "team", "pessoal", "galera", "equipo", "チーム"])
+        for alias in aliases.sorted(by: { $0.count > $1.count }) {
+            let normalizedAlias = QuestionDetectionService.normalize(alias)
+            let normalizedText = QuestionDetectionService.normalize(text)
+            guard !normalizedAlias.isEmpty,
+                  normalizedText == normalizedAlias || normalizedText.hasPrefix("\(normalizedAlias) ") || normalizedText.hasPrefix("\(normalizedAlias),") else { continue }
+            let dropCount = min(alias.count, text.count)
+            let remainder = String(text.dropFirst(dropCount))
+                .trimmingCharacters(in: .whitespacesAndNewlines.union(CharacterSet(charactersIn: ",:;-")))
+            if isQuestionLike(remainder) {
+                return remainder
+            }
+        }
+        return text
+    }
+
+    private func removeLeadingDiscourse(from text: String) -> String {
+        let prefixes = [
+            "quick question", "one question", "one quick question", "small question", "so quick question", "okay quick question",
+            "uma pergunta", "uma duvida", "uma dúvida", "tenho uma duvida", "tenho uma dúvida", "minha duvida e", "minha dúvida é",
+            "a minha duvida e", "a minha dúvida é", "a duvida e", "a dúvida é", "a pergunta e", "a pergunta é", "entao", "então", "bom", "beleza",
+            "pregunta rapida", "pregunta rápida", "una pregunta", "una duda", "la duda es", "la pregunta es", "entonces", "bueno",
+            "質問ですが", "質問は", "確認ですが", "疑問は"
+        ]
+        for prefix in prefixes.sorted(by: { $0.count > $1.count }) {
+            let normalizedPrefix = QuestionDetectionService.normalize(prefix)
+            let normalizedText = QuestionDetectionService.normalize(text)
+            guard normalizedText == normalizedPrefix || normalizedText.hasPrefix("\(normalizedPrefix) ") else { continue }
+            let remainder = String(text.dropFirst(min(prefix.count, text.count)))
+                .trimmingCharacters(in: .whitespacesAndNewlines.union(CharacterSet(charactersIn: ",:;-")))
+            if isQuestionLike(remainder) {
+                return remainder
+            }
+        }
+        return text
+    }
+
+    private func removeTrailingSelfAnswer(from text: String) -> String {
+        let markers = ["? yes", "? no", "? sim", "? nao", "? não", "? si", "? sí", "？はい", "？いいえ", "? はい", "? いいえ"]
+        let normalized = QuestionDetectionService.normalize(text)
+        for marker in markers {
+            let normalizedMarker = QuestionDetectionService.normalize(marker)
+            guard let range = normalized.range(of: normalizedMarker) else { continue }
+            let distance = normalized.distance(from: normalized.startIndex, to: range.lowerBound)
+            guard distance > 0, distance < text.count else { continue }
+            let index = text.index(text.startIndex, offsetBy: distance)
+            return String(text[..<index]).trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+        return text
+    }
+
+    private func isQuestionLike(_ text: String) -> Bool {
+        let normalized = QuestionDetectionService.normalize(text)
+        guard !normalized.isEmpty else { return false }
+        let plain = QuestionIntentGate.plainQuestionText(normalized)
+        return normalized.contains("?")
+            || normalized.contains("？")
+            || normalized.contains("¿")
+            || rulePack.directQuestionMarkers.contains { plain == $0 || plain.hasPrefix("\($0) ") || (QuestionDetectionService.containsCJK($0) && plain.contains($0)) }
+            || rulePack.indirectQuestionMarkers.contains { plain == $0 || plain.hasPrefix("\($0) ") || plain.contains($0) }
+            || rulePack.actionRequestMarkers.contains { plain == $0 || plain.hasPrefix("\($0) ") || (QuestionDetectionService.containsCJK($0) && plain.contains($0)) }
+            || rulePack.modalQuestionStarters.contains { plain == $0 || plain.hasPrefix("\($0) ") }
     }
 }
 
@@ -534,7 +647,11 @@ struct QuestionDetectionService {
     }
 
     func detectCandidates(from segment: TranscriptSegment, context: TranscriptContext) -> [QuestionCandidate] {
-        let frames = frameBuilder.frames(from: segment, context: context)
+        detectCandidates(from: segment, context: context, signal: nil)
+    }
+
+    func detectCandidates(from segment: TranscriptSegment, context: TranscriptContext, signal: QuestionMultimodalSignal?) -> [QuestionCandidate] {
+        let frames = frameBuilder.frames(from: segment, context: context, signal: signal)
         guard !frames.isEmpty else { return [] }
         return extractor.candidates(from: frames, context: context).map { candidate in
             if candidate.language != nil { return candidate }
@@ -551,6 +668,7 @@ struct QuestionDetectionService {
                 sourceSegmentIds: candidate.sourceSegmentIds,
                 isPartial: candidate.isPartial,
                 detectedAt: candidate.detectedAt,
+                multimodalSignal: candidate.multimodalSignal,
                 classification: candidate.classification,
                 status: candidate.status
             )

@@ -66,7 +66,7 @@ final class AppleKeychainService {
     }
 
     static func runtimeDefault() -> AppleKeychainService {
-        ProcessInfo.processInfo.isRunningXCTest ? .inMemory() : AppleKeychainService()
+        ProcessInfo.processInfo.usesEphemeralSecurityStores ? .inMemory() : AppleKeychainService()
     }
 
     static func inMemory(
@@ -271,5 +271,14 @@ extension ProcessInfo {
             environment["XCTestBundlePath"] != nil ||
             NSClassFromString("XCTest.XCTestCase") != nil ||
             NSClassFromString("XCTestCase") != nil
+    }
+
+    var isQuestionAnsweringUITestHarness: Bool {
+        arguments.contains("--qa-ui-harness") ||
+            environment["NOTCHCOPILOT_QA_UI_HARNESS"] == "1"
+    }
+
+    var usesEphemeralSecurityStores: Bool {
+        isRunningXCTest || isQuestionAnsweringUITestHarness
     }
 }

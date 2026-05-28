@@ -1998,3 +1998,21 @@
 {"id":"pos-0797","text":"このAPIの状態はどうですか #18","language":"ja-JP","responseNeeded":true,"label":"answerable_question"}
 {"id":"pos-0798","text":"認証の移行は本番に影響しますか #0","language":"ja-JP","responseNeeded":true,"label":"answerable_question"}
 {"id":"pos-0799","text":"レビューしてもらえますか #1","language":"ja-JP","responseNeeded":true,"label":"action_request"}
+{"id":"multiqt-neg-0001","text":"uh quick question summaries are useful after meetings","language":"en-US","responseNeeded":false,"label":"statement"}
+{"id":"multiqt-neg-0002","text":"Ryan asked whether we could ship Friday and I already said no","language":"en-US","responseNeeded":false,"label":"reported_question"}
+{"id":"multiqt-neg-0003","text":"Can you hear me over the deploy noise","language":"en-US","responseNeeded":false,"label":"operational_check"}
+{"id":"multiqt-neg-0004","text":"What could possibly go wrong with production right","language":"en-US","responseNeeded":false,"label":"rhetorical"}
+{"id":"multiqt-neg-0005","text":"entao uma duvida era se isso quebrava mas ja resolvemos","language":"pt-BR","responseNeeded":false,"label":"reported_question"}
+{"id":"multiqt-neg-0006","text":"da pra ver minha tela com o grafico de risco","language":"pt-BR","responseNeeded":false,"label":"operational_check"}
+{"id":"multiqt-neg-0007","text":"quem nunca quebrou producao ne","language":"pt-BR","responseNeeded":false,"label":"rhetorical"}
+{"id":"multiqt-neg-0008","text":"y si","language":"es-ES","responseNeeded":false,"label":"fragment"}
+{"id":"multiqt-neg-0009","text":"me preguntaron si el deploy estaba listo y ya respondimos","language":"es-ES","responseNeeded":false,"label":"reported_question"}
+{"id":"multiqt-neg-0010","text":"画面見えますか","language":"ja-JP","responseNeeded":false,"label":"operational_check"}
+{"id":"multiqt-pos-0001","text":"quick question can we ship the endpoint by Friday","language":"en-US","responseNeeded":true,"label":"answerable_question"}
+{"id":"multiqt-pos-0002","text":"Ryan can you own the rollback follow up","language":"en-US","responseNeeded":true,"label":"action_request"}
+{"id":"multiqt-pos-0003","text":"uma duvida sabe se isso impacta o login em producao","language":"pt-BR","responseNeeded":true,"label":"answerable_question"}
+{"id":"multiqt-pos-0004","text":"quem fica responsavel pelo follow up do cliente","language":"pt-BR","responseNeeded":true,"label":"answerable_question"}
+{"id":"multiqt-pos-0005","text":"sabes si esto rompe autenticacion en produccion","language":"es-ES","responseNeeded":true,"label":"answerable_question"}
+{"id":"multiqt-pos-0006","text":"puedes revisar el riesgo antes del release","language":"es-ES","responseNeeded":true,"label":"action_request"}
+{"id":"multiqt-pos-0007","text":"本番への影響は何ですか","language":"ja-JP","responseNeeded":true,"label":"answerable_question"}
+{"id":"multiqt-pos-0008","text":"このフォローアップは誰が担当しますか","language":"ja-JP","responseNeeded":true,"label":"answerable_question"}

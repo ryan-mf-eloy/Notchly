@@ -9,6 +9,122 @@ protocol QuestionClassifierProvider {
     ) async throws -> QuestionClassification
 }
 
+struct QuestionMultimodalDecision: Hashable, Sendable {
+    var textualConfidence: Double
+    var multimodalConfidence: Double
+    var decisionScore: Double
+    var shouldAllow: Bool
+    var decisionSignals: [String]
+    var suppressionSignals: [String]
+}
+
+struct QuestionMultimodalScorer: Sendable {
+    func score(
+        understanding: LocalQuestionUnderstanding,
+        signal: QuestionMultimodalSignal?,
+        precisionMode: QAPrecisionMode,
+        isPartial: Bool
+    ) -> QuestionMultimodalDecision {
+        let textual = min(max(understanding.confidence, 0.05), 0.98)
+        guard let signal else {
+            return QuestionMultimodalDecision(
+                textualConfidence: textual,
+                multimodalConfidence: textual,
+                decisionScore: textual,
+                shouldAllow: true,
+                decisionSignals: ["text_only"],
+                suppressionSignals: []
+            )
+        }
+
+        var multimodal = textual
+        var decisionSignals: [String] = []
+        var suppressionSignals: [String] = []
+
+        if signal.isFinal {
+            multimodal += 0.05
+            decisionSignals.append("final")
+        } else if signal.partialStability >= 0.82 {
+            multimodal += 0.04
+            decisionSignals.append("partial_stable")
+        } else if isPartial {
+            multimodal -= 0.18
+            suppressionSignals.append("partial_unstable")
+        }
+
+        if let asr = signal.asrConfidence {
+            if asr >= 0.82 {
+                multimodal += 0.03
+                decisionSignals.append("asr_confident")
+            } else if asr < 0.45 {
+                multimodal -= 0.12
+                suppressionSignals.append("low_asr_confidence")
+            }
+        }
+
+        if signal.hasTerminalPause {
+            multimodal += 0.03
+            decisionSignals.append("terminal_pause")
+        }
+
+        if signal.duration >= 0.45 && signal.duration <= 18 {
+            multimodal += 0.02
+            decisionSignals.append("duration_plausible")
+        } else if signal.duration > 0 && signal.duration < 0.30 {
+            multimodal -= 0.10
+            suppressionSignals.append("too_short_audio")
+        } else if signal.duration > 30 {
+            multimodal -= 0.04
+            suppressionSignals.append("too_long_audio")
+        }
+
+        let energy = signal.audioEnergy ?? signal.rms
+        if let energy {
+            if energy >= 0.002 && energy <= 0.35 {
+                multimodal += 0.02
+                decisionSignals.append("energy_present")
+            } else if energy < 0.001 {
+                multimodal -= 0.08
+                suppressionSignals.append("near_silence")
+            }
+        }
+
+        if signal.isSilence {
+            multimodal -= 0.10
+            suppressionSignals.append("silence")
+        }
+        if signal.isTooQuiet {
+            multimodal -= 0.08
+            suppressionSignals.append("too_quiet")
+        }
+        if signal.isClipping {
+            multimodal -= 0.08
+            suppressionSignals.append("clipping")
+        }
+        if signal.gapCount >= 2 {
+            multimodal -= 0.04
+            suppressionSignals.append("audio_gaps")
+        }
+
+        multimodal = min(max(multimodal, 0.05), 0.98)
+        let decisionScore = min(max((textual * 0.65) + (multimodal * 0.35), 0.05), 0.98)
+        let threshold = isPartial ? precisionMode.partialConfidenceThreshold : precisionMode.confidenceThreshold
+        let hardSuppression = suppressionSignals.contains("partial_unstable")
+            || suppressionSignals.contains("silence")
+            || suppressionSignals.contains("near_silence")
+        let shouldAllow = !hardSuppression && decisionScore >= min(threshold, textual)
+
+        return QuestionMultimodalDecision(
+            textualConfidence: textual,
+            multimodalConfidence: multimodal,
+            decisionScore: decisionScore,
+            shouldAllow: shouldAllow,
+            decisionSignals: decisionSignals.isEmpty ? ["multimodal_neutral"] : decisionSignals,
+            suppressionSignals: suppressionSignals
+        )
+    }
+}
+
 struct QuestionTypeRule: Codable, Hashable, Sendable {
     var type: QuestionType
     var markers: [String]
@@ -24,17 +140,17 @@ struct QuestionClassificationRulePack: Codable, Hashable, Sendable {
 
     static let `default` = QuestionClassificationRulePack(
         typeRules: [
-            QuestionTypeRule(type: .statusCheck, markers: ["status", "estado", "situacao", "api pronta", "progress", "progreso", "terminou", "finished", "ready", "pronto", "進捗", "状況", "状態", "終わりました"]),
+            QuestionTypeRule(type: .statusCheck, markers: ["status", "estado", "situacao", "situación", "api pronta", "progress", "progreso", "terminou", "finished", "ready", "pronto", "done", "está listo", "esta listo", "進捗", "状況", "状態", "終わりました"]),
             QuestionTypeRule(type: .riskAssessment, markers: ["risk", "risco", "blocker", "blockers", "bloqueio", "bloqueio", "break", "quebra", "rompe", "impacta", "afeta", "security", "seguranca", "production", "producao", "migration", "migracao", "migracion", "リスク", "影響", "壊れ", "セキュリティ", "移行"]),
             QuestionTypeRule(type: .technicalDecision, markers: ["approach", "abordagem", "arquitetura", "architecture", "faz mais sentido", "which option", "decision", "decisao", "decisión", "scale", "scalable", "highly available", "alta disponibilidade", "altamente disponivel", "escalaria", "escalar", "system design", "lidar com", "como vamos lidar", "handle authentication", "how should we handle", "how do we handle", "アプローチ", "設計", "判断"]),
             QuestionTypeRule(type: .technicalExplanation, markers: ["explain", "explicar", "como funciona", "how does", "what is", "what's", "o que e", "que es", "hashid", "hash id", "python", "binary tree", "binary three", "binary dream", "arvore binaria", "invert a tree", "invert tree", "inverter uma arvore", "data structure", "algorithm", "algoritmo", "説明", "仕組み", "どう動く"]),
-            QuestionTypeRule(type: .deadlineOrEstimate, markers: ["sexta", "friday", "deadline", "prazo", "entregar", "ship", "timeline", "estimate", "estimativa", "fecha", "plazo", "いつ", "期限", "金曜", "金曜日"]),
-            QuestionTypeRule(type: .ownership, markers: ["quem vai", "responsavel", "owner", "who will", "quem cuida", "responsable", "quien se encarga", "誰が", "担当", "オーナー"]),
+            QuestionTypeRule(type: .deadlineOrEstimate, markers: ["sexta", "friday", "deadline", "prazo", "entregar", "ship", "timeline", "estimate", "estimativa", "fecha", "plazo", "quando entregamos", "when can we ship", "いつ", "期限", "金曜", "金曜日"]),
+            QuestionTypeRule(type: .ownership, markers: ["quem vai", "quem fica", "responsavel", "responsável", "owner", "owns this", "who owns", "who will", "who is responsible", "quem cuida", "responsable", "quien se encarga", "quién se encarga", "誰が", "担当", "オーナー"]),
             QuestionTypeRule(type: .productScope, markers: ["scope", "escopo", "mvp", "roadmap", "alcance", "スコープ"]),
-            QuestionTypeRule(type: .businessContext, markers: ["business", "cliente", "customer", "impacto", "impact", "negocio", "顧客", "ビジネス"]),
+            QuestionTypeRule(type: .businessContext, markers: ["business", "cliente", "customer", "impacto", "impact", "negocio", "negócio", "revenue", "receita", "ventas", "顧客", "ビジネス"]),
             QuestionTypeRule(type: .clarification, markers: ["clarify", "claro", "duvida", "doubt", "not clear", "nao ficou claro", "no queda claro", "no esta claro", "明確", "はっきり"]),
             QuestionTypeRule(type: .approvalRequest, markers: ["approve", "approval", "aprovar", "aprovacao", "aprobacion", "sign off", "承認"]),
-            QuestionTypeRule(type: .actionRequest, markers: ["review", "validate", "revisar", "validar", "consegue", "can you", "could you", "puedes", "podrias", "レビュー", "確認して", "見てもらえ"]),
+            QuestionTypeRule(type: .actionRequest, markers: ["review", "validate", "revisar", "validar", "checar", "confirmar", "consegue", "can you", "could you", "please", "puedes", "podrias", "podrías", "レビュー", "確認して", "見てもらえ"]),
             QuestionTypeRule(type: .opinionRequest, markers: ["think", "acha", "opinion", "opiniao", "what do you think", "o que voces acham", "que opinan", "どう思"]),
             QuestionTypeRule(type: .followUp, markers: ["follow up", "next step", "proximo passo", "acompanhar", "siguiente paso", "次のステップ", "フォロー"])
         ],
@@ -165,14 +281,18 @@ struct QuestionClassifier: QuestionClassifierProvider {
     var rulePack: QuestionClassificationRulePack
     var understandingProvider: LocalQuestionUnderstandingProvider
     var decisionGate: QuestionDecisionGate
+    var multimodalScorer: QuestionMultimodalScorer
+    var spanExtractor: QuestionSpanExtractor
     var precisionMode: QAPrecisionMode
+    var multimodalMode: QAMultimodalMode
 
     init(
         intentRulePack: QuestionIntentRulePack = .default,
         classificationRulePack: QuestionClassificationRulePack = .default,
         adaptiveProfile: QuestionAnsweringAdaptiveProfile = QuestionAnsweringAdaptiveProfile(),
         priorityScorer: QuestionPriorityScorer = QuestionPriorityScorer(),
-        precisionMode: QAPrecisionMode = .highPrecision
+        precisionMode: QAPrecisionMode = .highPrecision,
+        multimodalMode: QAMultimodalMode = .shadow
     ) {
         self.rhetoricalFilter = RhetoricalQuestionFilter(rulePack: intentRulePack)
         self.intentGate = QuestionIntentGate(rulePack: intentRulePack, adaptiveProfile: adaptiveProfile)
@@ -180,7 +300,10 @@ struct QuestionClassifier: QuestionClassifierProvider {
         self.priorityScorer = priorityScorer
         self.understandingProvider = LocalQuestionUnderstandingProvider(rulePack: intentRulePack, precisionMode: precisionMode)
         self.decisionGate = QuestionDecisionGate()
+        self.multimodalScorer = QuestionMultimodalScorer()
+        self.spanExtractor = QuestionSpanExtractor(rulePack: intentRulePack)
         self.precisionMode = precisionMode
+        self.multimodalMode = multimodalMode
     }
 
     func classifyQuestion(
@@ -210,7 +333,15 @@ struct QuestionClassifier: QuestionClassifierProvider {
             precisionMode: precisionMode,
             isPartial: candidate.isPartial
         )
+        let multimodalDecision = multimodalScorer.score(
+            understanding: understanding,
+            signal: candidate.multimodalSignal,
+            precisionMode: precisionMode,
+            isPartial: candidate.isPartial
+        )
+        let acceptedByMultimodalGate = multimodalMode == .enforced ? multimodalDecision.shouldAllow : true
         let responseNeeded = acceptedByDecisionGate
+            && acceptedByMultimodalGate
             && understanding.responseNeeded
             && !filter.rhetorical
             && filter.complete
@@ -224,11 +355,16 @@ struct QuestionClassifier: QuestionClassifierProvider {
             responseNeeded: responseNeeded
         )
         let confidence = min(
-            max(confidence(for: candidate, filter: filter, directedToUser: directedToUser, type: type), understanding.confidence),
+            max(confidence(for: candidate, filter: filter, directedToUser: directedToUser, type: type), multimodalMode == .enforced ? multimodalDecision.decisionScore : understanding.confidence),
             0.98
         )
+        let extractedQuestion = spanExtractor.extractedQuestion(
+            from: understanding.extractedQuestion,
+            language: candidate.language,
+            profile: userProfile
+        )
 
-        if !acceptedByDecisionGate {
+        if !acceptedByDecisionGate || !acceptedByMultimodalGate {
             return QuestionClassification(
                 isQuestion: false,
                 rhetorical: filter.rhetorical || understanding.intent == .rhetorical,
@@ -241,9 +377,16 @@ struct QuestionClassifier: QuestionClassifierProvider {
                 questionType: type,
                 priority: .low,
                 confidence: min(confidence, 0.72),
-                reason: "Rejected by high-precision local decision gate: \(understanding.reason)",
-                extractedQuestion: candidate.rawText,
-                expectedAnswerStyle: .concise
+                reason: !acceptedByMultimodalGate
+                    ? "Rejected by multimodal stability gate: \(multimodalDecision.suppressionSignals.joined(separator: ", "))"
+                    : "Rejected by high-precision local decision gate: \(understanding.reason)",
+                extractedQuestion: extractedQuestion,
+                expectedAnswerStyle: .concise,
+                textualConfidence: multimodalDecision.textualConfidence,
+                multimodalConfidence: multimodalDecision.multimodalConfidence,
+                decisionScore: multimodalDecision.decisionScore,
+                decisionSignals: multimodalDecision.decisionSignals,
+                suppressionSignals: multimodalDecision.suppressionSignals
             )
         }
 
@@ -260,8 +403,13 @@ struct QuestionClassifier: QuestionClassifierProvider {
             priority: priority,
             confidence: confidence,
             reason: understanding.reason,
-            extractedQuestion: understanding.extractedQuestion,
-            expectedAnswerStyle: answerStyle(for: type, filter: filter)
+            extractedQuestion: extractedQuestion,
+            expectedAnswerStyle: answerStyle(for: type, filter: filter),
+            textualConfidence: multimodalDecision.textualConfidence,
+            multimodalConfidence: multimodalDecision.multimodalConfidence,
+            decisionScore: multimodalDecision.decisionScore,
+            decisionSignals: multimodalDecision.decisionSignals,
+            suppressionSignals: multimodalDecision.suppressionSignals
         )
     }
 

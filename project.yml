@@ -29,8 +29,18 @@ targets:
   NotchCopilot:
     type: application
     platform: macOS
+    productName: Notchly
     sources:
       - path: NotchCopilot
+        excludes:
+          - Resources/CopilotIntentPolicy
+          - Resources/CopilotSpeechPolicy
+      - path: NotchCopilot/Resources/CopilotIntentPolicy
+        type: folder
+        buildPhase: resources
+      - path: NotchCopilot/Resources/CopilotSpeechPolicy
+        type: folder
+        buildPhase: resources
     dependencies:
       - package: mlx-swift-lm
         product: MLXLLM
@@ -78,12 +88,32 @@ targets:
         GENERATE_INFOPLIST_FILE: YES
         CODE_SIGN_STYLE: Manual
         CODE_SIGN_IDENTITY: Atlas Voice Dev
+  NotchCopilotUITests:
+    type: bundle.ui-testing
+    platform: macOS
+    sources:
+      - path: NotchCopilotUITests
+    dependencies:
+      - target: NotchCopilot
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.notchcopilot.uitests
+        TEST_TARGET_NAME: NotchCopilot
+        GENERATE_INFOPLIST_FILE: YES
+        CODE_SIGN_STYLE: Manual
+        CODE_SIGN_IDENTITY: Atlas Voice Dev
 schemes:
   NotchCopilot:
     build:
       targets:
         NotchCopilot: all
         NotchCopilotTests: [test]
+        NotchCopilotUITests: [test]
+    run:
+      disableMainThreadChecker: true
+      disableThreadPerformanceChecker: true
     test:
+      disableMainThreadChecker: true
       targets:
         - NotchCopilotTests
+        - NotchCopilotUITests

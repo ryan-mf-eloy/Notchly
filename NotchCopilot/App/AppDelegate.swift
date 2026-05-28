@@ -126,12 +126,13 @@ struct DoubleEscapeShortcutDetector {
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
     private var appState: AppState!
-    private var notchWindowController: NotchIslandWindowController!
+    private var notchWindowController: NotchIslandWindowController?
     private var statusItem: NSStatusItem!
     private var stealthModeMenuItem: NSMenuItem?
     private var settingsWindow: NSWindowController?
     private var historyWindow: NSWindowController?
     private var summaryWindow: NSWindowController?
+    private var questionAnsweringHarnessWindow: NSWindowController?
     private var meetingDetectionService: MeetingDetectionService?
     private var meetingAutomationController: MeetingAutomationController?
     private var ambientCopilotController: AmbientCopilotController?
@@ -142,15 +143,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var cancellables = Set<AnyCancellable>()
 
     func applicationDidFinishLaunching(_ notification: Notification) {
-        NSApp.setActivationPolicy(.accessory)
+        let isQuestionAnsweringUITestHarness = ProcessInfo.processInfo.isQuestionAnsweringUITestHarness
+        NSApp.setActivationPolicy(isQuestionAnsweringUITestHarness ? .regular : .accessory)
         NSApp.appearance = NSAppearance(named: .darkAqua)
         bootstrap()
+        if isQuestionAnsweringUITestHarness {
+            runQuestionAnsweringUITestHarness()
+            showQuestionAnsweringUITestHarnessWindow()
+            return
+        }
         configureKeyboardShortcuts()
         configureStatusItem()
         observeStealthMode()
         observeCopilotLifecycle()
         observeLaunchAtLogin()
-        notchWindowController.show()
+        notchWindowController?.show()
         applyStealthMode(appState.preferences.stealthModeEnabled)
         appState.reloadHistory()
         appState.reloadKnowledgeDocuments()
@@ -180,16 +187,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func bootstrap() {
-        let isRunningXCTest = ProcessInfo.processInfo.isRunningXCTest
-        let keychain = AppleKeychainService.runtimeDefault()
+        let isQuestionAnsweringUITestHarness = ProcessInfo.processInfo.isQuestionAnsweringUITestHarness
+        let usesEphemeralStores = ProcessInfo.processInfo.usesEphemeralSecurityStores
+        let keychain = usesEphemeralStores
+            ? AppleKeychainService.inMemory(service: "com.notchcopilot.qa-harness.keychain.\(UUID().uuidString)")
+            : AppleKeychainService.runtimeDefault()
         let cryptor: LocalDataCryptor
         do {
-            cryptor = try LocalDataCryptor(keychain: keychain)
+            cryptor = usesEphemeralStores
+                ? try LocalDataCryptor.ephemeralForTests()
+                : try LocalDataCryptor(keychain: keychain)
         } catch {
             fatalError("Local encryption key unavailable: \(error.localizedDescription)")
         }
         let settingsRepository: SettingsRepository
-        if isRunningXCTest {
+        if usesEphemeralStores {
             let suiteName = "NotchCopilotTests.bootstrap.\(UUID().uuidString)"
             let defaults = UserDefaults(suiteName: suiteName)!
             defaults.removePersistentDomain(forName: suiteName)
@@ -198,10 +210,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             settingsRepository = SettingsRepository(cryptor: cryptor)
         }
         let preferences = settingsRepository.load()
-        settingsRepository.save(preferences)
+        if !usesEphemeralStores {
+            settingsRepository.save(preferences)
+        }
         let appState = AppState(preferences: preferences)
         let tokenStore = KeychainTokenStore(keychain: keychain)
-        let cliTokenStore: TokenStore? = isRunningXCTest ? tokenStore : nil
+        let cliTokenStore: TokenStore? = usesEphemeralStores ? tokenStore : nil
         let openAIAccountOAuthProvider = OpenAIAccountOAuthProvider(
             configuration: OpenAIAccountOAuthConfiguration.fromBundle(),
             tokenStore: tokenStore,
@@ -270,12 +284,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         )
         let container: ModelContainer
         do {
-            container = try DatabaseFactory.makeContainer(inMemory: isRunningXCTest)
+            container = try DatabaseFactory.makeContainer(inMemory: usesEphemeralStores)
         } catch {
             AppLog.persistence.error("Persistent SwiftData failed, using in-memory store: \(error.localizedDescription, privacy: .public)")
             container = try! DatabaseFactory.makeContainer(inMemory: true)
         }
-        let fileStorageRoot = isRunningXCTest
+        let fileStorageRoot = usesEphemeralStores
             ? FileManager.default.temporaryDirectory.appending(path: "NotchCopilotTests-\(UUID().uuidString)", directoryHint: .isDirectory)
             : nil
         let fileStorage = try! FileStorageService(root: fileStorageRoot, cryptor: cryptor)
@@ -340,13 +354,149 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         self.appState = appState
         self.ambientCopilotController = ambientCopilotController
-        self.notchWindowController = NotchIslandWindowController(appState: appState)
-        let meetingDetectionService = MeetingDetectionService()
-        self.meetingDetectionService = meetingDetectionService
-        self.meetingAutomationController = MeetingAutomationController(
-            appState: appState,
-            meetingDetectionService: meetingDetectionService
+        if isQuestionAnsweringUITestHarness {
+            self.notchWindowController = nil
+            self.meetingDetectionService = nil
+            self.meetingAutomationController = nil
+        } else {
+            self.notchWindowController = NotchIslandWindowController(appState: appState)
+            let meetingDetectionService = MeetingDetectionService()
+            self.meetingDetectionService = meetingDetectionService
+            self.meetingAutomationController = MeetingAutomationController(
+                appState: appState,
+                meetingDetectionService: meetingDetectionService
+            )
+        }
+    }
+
+    private func runQuestionAnsweringUITestHarness() {
+        let meetingId = UUID()
+        let segment = TranscriptSegment(
+            meetingId: meetingId,
+            speakerLabel: "Speaker",
+            audioSource: .system,
+            text: "Ryan, quick question can we ship the endpoint by Friday?",
+            originalLanguage: "en-US",
+            startTime: 0,
+            endTime: 2.4,
+            confidence: 0.96,
+            isFinal: true
         )
+        let meeting = MeetingSession(
+            id: meetingId,
+            title: "QA UI Harness",
+            status: .listening,
+            primaryLanguage: "en-US",
+            transcriptSegments: [segment],
+            meetingType: .engineering
+        )
+        let signal = QuestionMultimodalSignal(
+            language: "en-US",
+            asrConfidence: 0.96,
+            isFinal: true,
+            isPartial: false,
+            speakerLabel: "Speaker",
+            audioSource: .system,
+            duration: 2.4,
+            hasTerminalPause: true,
+            partialStability: 1,
+            rms: 0.018,
+            peak: 0.06,
+            audioEnergy: 0.018
+        )
+        let candidate = QuestionCandidate(
+            meetingId: meetingId,
+            rawText: segment.text,
+            normalizedText: QuestionDetectionService.normalize(segment.text),
+            language: "en-US",
+            speakerLabel: "Speaker",
+            startTime: segment.startTime,
+            endTime: segment.endTime,
+            sourceSegmentIds: [segment.id],
+            isPartial: false,
+            multimodalSignal: signal
+        )
+        let classification = QuestionClassification(
+            isQuestion: true,
+            rhetorical: false,
+            complete: true,
+            actionable: true,
+            responseNeeded: true,
+            userAttentionNeeded: true,
+            directedToUser: true,
+            directedToGroup: false,
+            questionType: .deadlineOrEstimate,
+            priority: .high,
+            confidence: 0.94,
+            reason: "ui_harness",
+            extractedQuestion: "can we ship the endpoint by Friday?",
+            expectedAnswerStyle: .cautious,
+            textualConfidence: 0.92,
+            multimodalConfidence: 0.96,
+            decisionScore: 0.94,
+            decisionSignals: ["final", "terminal_pause", "energy_present"],
+            suppressionSignals: []
+        )
+        let answer = SuggestedAnswer(
+            questionId: candidate.id,
+            answerText: "Do not promise Friday yet. Say we can commit after checking PR status, tests, rollout risk, and rollback readiness.",
+            shortAnswer: "Do not promise Friday yet. Commit after PR, tests, rollout risk, and rollback are checked.",
+            confidence: 0.9,
+            riskLevel: .requiresApproval,
+            usedSources: [AnswerSource(type: .transcript, title: "Transcript", snippet: segment.text, reference: nil)],
+            assumptions: [],
+            caveats: ["Confirm before committing."],
+            latencyMs: 12,
+            suggestedTone: .cautious,
+            language: "en-US",
+            provider: .unavailable,
+            usedCloud: false,
+            usedRAG: false
+        )
+
+        appState.currentMeeting = meeting
+        appState.upsertQuestionInQueue(candidate: candidate, classification: classification, stage: .ready, decision: "ui_harness", select: true)
+        appState.updateQueuedQuestionAnswer(candidate: candidate, answer: answer)
+        appState.showQuestionAnswerPanel(mode: .answer, selecting: candidate.id)
+        appState.statusMessage = "Suggested answer"
+    }
+
+    private func showQuestionAnsweringUITestHarnessWindow() {
+        let width = max(appState.expandedPanelContentWidth + 36, 560)
+        let height = max(appState.expandedPanelContentHeight + 36, 360)
+        let rootView = ZStack {
+            Color.black
+                .ignoresSafeArea()
+            MeetingPanelView(appState: appState)
+                .environment(\.islandDesignMode, .solid)
+        }
+        .frame(width: width, height: height)
+
+        let hostingController = NSHostingController(rootView: rootView)
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: width, height: height),
+            styleMask: [.titled, .closable, .resizable],
+            backing: .buffered,
+            defer: false
+        )
+        window.title = "Notchly QA UI Harness"
+        window.contentViewController = hostingController
+        window.isReleasedWhenClosed = false
+        if let visibleFrame = NSScreen.main?.visibleFrame {
+            let origin = NSPoint(
+                x: visibleFrame.minX + 24,
+                y: max(visibleFrame.minY + 24, visibleFrame.midY - height / 2)
+            )
+            window.setFrameOrigin(origin)
+        } else {
+            window.center()
+        }
+
+        let controller = NSWindowController(window: window)
+        questionAnsweringHarnessWindow = controller
+        controller.showWindow(nil)
+        window.makeKeyAndOrderFront(nil)
+        NSApp.activate(ignoringOtherApps: true)
     }
 
     private func configureKeyboardShortcuts() {

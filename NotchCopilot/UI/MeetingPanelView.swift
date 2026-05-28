@@ -79,6 +79,8 @@ struct MeetingPanelView: View {
             }
         }
         .frame(width: panelWidth, height: panelHeight)
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("meeting-panel")
         .animation(.easeInOut(duration: 0.14), value: appState.questionAnswerPresentationMode)
         .animation(.easeInOut(duration: 0.14), value: appState.selectedQuestionId)
         .animation(.easeOut(duration: 0.14), value: appState.streamingAnswerText)
@@ -115,6 +117,9 @@ struct MeetingPanelView: View {
                     .contentShape(Rectangle())
                 }
                 .help(mode.title)
+                .accessibilityElement(children: .ignore)
+                .accessibilityLabel(mode.title)
+                .accessibilityIdentifier("qa-toggle-\(mode.rawValue)")
             }
         }
         .padding(2)
@@ -181,11 +186,13 @@ struct MeetingPanelView: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .protectedContentRegion(appState.preferences.stealthModeEnabled)
+        .accessibilityIdentifier("qa-answer-scroll")
     }
 
     private var questionTitleText: String {
-        appState.activeQuestion?.rawText ??
+        appState.questionClassification?.extractedQuestion ??
             appState.detectedQuestion ??
+            appState.activeQuestion?.rawText ??
             (appState.isShowingCopilotAnswerDetail ? appState.activeCopilotInteraction?.prompt : nil) ??
             ""
     }
@@ -207,6 +214,9 @@ struct MeetingPanelView: View {
                 .lineSpacing(4.4)
                 .fixedSize(horizontal: false, vertical: true)
                 .frame(maxWidth: .infinity, alignment: .leading)
+                .accessibilityElement(children: .ignore)
+                .accessibilityLabel(questionTitleText)
+                .accessibilityIdentifier("qa-question-title")
 
             if appState.questionAnswerQueue.count > 1 {
                 questionNavigationTextButton("›", help: "Next question") {
@@ -235,7 +245,7 @@ struct MeetingPanelView: View {
         if appState.currentMeeting != nil, appState.copilotRuntimeState == .paused {
             return "Notchly paused during recording"
         }
-        return "\(appState.copilotRuntimeState.displayText)..."
+        return "\(appState.answerStage.displayName)..."
     }
 
     private var copilotQuickActions: some View {
@@ -243,6 +253,7 @@ struct MeetingPanelView: View {
             IconButton(systemName: "doc.on.doc", help: "Copy", size: .compact) {
                 appState.copySelectedAnswerToPasteboard()
             }
+            .accessibilityIdentifier("qa-action-copy")
             IconButton(systemName: "link", help: "Open sources", isDisabled: !hasSourceLink, size: .compact) {
                 appState.openSelectedAnswerSources()
             }
@@ -255,6 +266,14 @@ struct MeetingPanelView: View {
             IconButton(systemName: "globe", help: "Regenerate with web", isDisabled: appState.currentMeeting != nil, size: .compact) {
                 appState.regenerateSelectedCopilotAnswerWithWeb()
             }
+            IconButton(systemName: appState.isSelectedQuestionSaved ? "bookmark.fill" : "bookmark", help: "Save", size: .compact) {
+                appState.saveSelectedQuestionAnswer()
+            }
+            .accessibilityIdentifier("qa-action-save")
+            IconButton(systemName: "xmark", help: "Dismiss", role: .destructive, size: .compact) {
+                appState.dismissActiveQuestion()
+            }
+            .accessibilityIdentifier("qa-action-dismiss")
             Spacer(minLength: 0)
             if appState.currentMeeting == nil {
                 IconButton(systemName: "pause", help: "Pause Notchly", size: .compact) {
@@ -374,6 +393,7 @@ struct MeetingPanelView: View {
         }
         .animation(.easeOut(duration: 0.12), value: segments.isEmpty)
         .animation(.easeOut(duration: 0.16), value: appState.shouldShowTranscriptQuestionLoadingIndicator)
+        .accessibilityIdentifier("qa-transcript-stream")
     }
 
     private var transcriptDiagnosticsBadgeText: String? {
@@ -399,7 +419,7 @@ struct MeetingPanelView: View {
         if appState.currentMeeting != nil, appState.copilotRuntimeState == .paused {
             return "Notchly paused during recording"
         }
-        return appState.copilotRuntimeState.displayText
+        return appState.answerStage.displayName
     }
 
     private var bottomScrollFade: some View {
@@ -485,8 +505,9 @@ private struct CopilotIsolatedAnswerPanelView: View {
 
     private var questionText: String {
         let candidates = [
-            appState.activeQuestion?.rawText,
+            appState.questionClassification?.extractedQuestion,
             appState.detectedQuestion,
+            appState.activeQuestion?.rawText,
             appState.copilotPushToTalkTranscript,
             appState.activeCopilotInteraction?.prompt
         ]
@@ -549,7 +570,7 @@ private struct CopilotIsolatedAnswerPanelView: View {
                     .controlSize(.small)
                     .scaleEffect(0.64)
                     .tint(secondaryColor)
-                Text(appState.currentMeeting != nil && appState.copilotRuntimeState == .paused ? "Notchly paused during recording" : appState.copilotRuntimeState.displayText)
+                Text(appState.currentMeeting != nil && appState.copilotRuntimeState == .paused ? "Notchly paused during recording" : appState.answerStage.displayName)
                     .font(.system(size: 13, weight: .medium))
                     .foregroundStyle(secondaryColor)
                     .lineLimit(1)
@@ -591,9 +612,9 @@ private struct CopilotIsolatedAnswerPanelView: View {
             return .errorState
         case .answerSynthesis, .none:
             return nil
+            }
         }
     }
-}
 
 private struct CopilotTimelinePanelView: View {
     @ObservedObject var appState: AppState
@@ -1486,6 +1507,7 @@ private struct TranscriptQuestionLoadingIndicator: View {
         }
             .padding(.horizontal, 7)
             .frame(height: 22)
+            .accessibilityIdentifier("qa-stage-indicator")
             .background(
                 IslandGlassFill(
                     shape: Capsule(style: .continuous),

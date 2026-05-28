@@ -34,7 +34,7 @@
 	<key>LSMinimumSystemVersion</key>
 	<string>14.0</string>
 	<key>LSUIElement</key>
-	<true/>
+	<false/>
 	<key>NSCalendarsUsageDescription</key>
 	<string>Notchly can inspect calendar events to detect meetings. Calendar access is optional.</string>
 	<key>NSMicrophoneUsageDescription</key>

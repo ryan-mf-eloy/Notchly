@@ -304,7 +304,7 @@ final class AppState: ObservableObject {
         case .translationTranscript:
             return presentationTranscriptSegments.isEmpty ? 274 : 372
         case .question:
-            let questionText = activeQuestion?.rawText ?? detectedQuestion ?? ""
+            let questionText = questionClassification?.extractedQuestion ?? detectedQuestion ?? activeQuestion?.rawText ?? ""
             let lineBias = min(CGFloat(estimatedLineCount(for: questionText, charactersPerLine: 60)) * 10, 44)
             return clamped(298 + lineBias, min: 312, max: 376)
         case .answer:
@@ -349,7 +349,7 @@ final class AppState: ObservableObject {
            !response.isEmpty {
             return response
         }
-        return detectedQuestion ?? activeQuestion?.rawText ?? ""
+        return questionClassification?.extractedQuestion ?? detectedQuestion ?? activeQuestion?.rawText ?? ""
     }
 
     var visibleAnswerText: String {
@@ -408,7 +408,7 @@ final class AppState: ObservableObject {
 
     private var answerLayoutSizingText: String {
         var parts: [String] = []
-        if let questionText = activeQuestion?.rawText ?? detectedQuestion ?? (isShowingCopilotAnswerDetail ? activeCopilotInteraction?.prompt : nil) {
+        if let questionText = questionClassification?.extractedQuestion ?? detectedQuestion ?? activeQuestion?.rawText ?? (isShowingCopilotAnswerDetail ? activeCopilotInteraction?.prompt : nil) {
             parts.append(questionText)
         }
         parts.append(visibleAnswerText)
@@ -845,6 +845,34 @@ final class AppState: ObservableObject {
         }
     }
 
+    func mergeQuestionInQueue(source: QuestionCandidate, target: QuestionCandidate) {
+        let sourceIndex = questionAnswerQueue.firstIndex(where: { $0.id == source.id })
+        let targetIndex = questionAnswerQueue.firstIndex(where: { $0.id == target.id })
+
+        if let targetIndex {
+            questionAnswerQueue[targetIndex].candidate = target
+            questionAnswerQueue[targetIndex].classification = target.classification ?? questionAnswerQueue[targetIndex].classification
+            questionAnswerQueue[targetIndex].updatedAt = Date()
+            if let sourceIndex, sourceIndex != targetIndex {
+                let sourceItem = questionAnswerQueue[sourceIndex]
+                if questionAnswerQueue[targetIndex].streamingText.isEmpty {
+                    questionAnswerQueue[targetIndex].streamingText = sourceItem.streamingText
+                }
+                questionAnswerQueue.remove(at: sourceIndex)
+            }
+        } else if let sourceIndex {
+            questionAnswerQueue[sourceIndex].candidate = target
+            questionAnswerQueue[sourceIndex].classification = target.classification ?? questionAnswerQueue[sourceIndex].classification
+            questionAnswerQueue[sourceIndex].updatedAt = Date()
+        }
+
+        if selectedQuestionId == source.id {
+            selectedQuestionId = target.id
+        }
+        sortQuestionAnswerQueue()
+        syncSelectedQuestionPresentation()
+    }
+
     func selectQuestion(_ id: UUID) {
         guard questionAnswerQueue.contains(where: { $0.id == id }) else { return }
         selectedQuestionId = id
@@ -1023,6 +1051,7 @@ final class AppState: ObservableObject {
         guard let selectedQuestionId else { return }
         savedQuestionAnswerIds.insert(selectedQuestionId)
         statusMessage = suggestedAnswer == nil ? "Question saved" : "Answer saved"
+        guard !ProcessInfo.processInfo.isQuestionAnsweringUITestHarness else { return }
         recordAnswerFeedback(.usedInMeeting, note: suggestedAnswer == nil ? "Question saved" : "Answer saved")
     }
 
@@ -1043,9 +1072,12 @@ final class AppState: ObservableObject {
     func copySelectedAnswerToPasteboard() {
         let text = suggestedAnswer?.answerText ?? (streamingAnswerText.isEmpty ? activeCopilotInteraction?.response ?? "" : streamingAnswerText)
         guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
-        NSPasteboard.general.clearContents()
-        NSPasteboard.general.setString(text, forType: .string)
+        if !ProcessInfo.processInfo.isQuestionAnsweringUITestHarness {
+            NSPasteboard.general.clearContents()
+            NSPasteboard.general.setString(text, forType: .string)
+        }
         statusMessage = "Answer copied"
+        guard !ProcessInfo.processInfo.isQuestionAnsweringUITestHarness else { return }
         recordAnswerFeedback(.copied)
         recordCopilotFeedback(.copied)
     }
@@ -1115,6 +1147,7 @@ final class AppState: ObservableObject {
     }
 
     func recordAnswerFeedback(_ kind: QuestionAnswerFeedbackKind, note: String? = nil) {
+        guard !ProcessInfo.processInfo.isQuestionAnsweringUITestHarness else { return }
         sessionManager?.recordAnswerFeedback(kind, note: note)
     }
 
@@ -1400,6 +1433,7 @@ final class AppState: ObservableObject {
     }
 
     func recordCopilotFeedback(_ kind: QuestionAnswerFeedbackKind, note: String? = nil, for targetInteraction: CopilotInteraction? = nil) {
+        guard !ProcessInfo.processInfo.isQuestionAnsweringUITestHarness else { return }
         guard var interaction = targetInteraction ?? activeCopilotInteraction else { return }
         interaction.feedbackEvents.append(QuestionAnswerFeedbackEvent(kind: kind, note: note))
         applyCopilotInteraction(interaction)

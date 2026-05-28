@@ -27,6 +27,7 @@ struct QuestionDeduplicator {
             sourceSegmentIds: Array(Set(existing.sourceSegmentIds + candidate.sourceSegmentIds)),
             isPartial: existing.isPartial && candidate.isPartial,
             detectedAt: existing.detectedAt,
+            multimodalSignal: candidate.multimodalSignal ?? existing.multimodalSignal,
             classification: candidate.classification ?? existing.classification,
             status: candidate.isPartial ? existing.status : .confirmed
         )
@@ -43,4 +44,3 @@ struct QuestionDeduplicator {
         return min(1, tokenScore + prefixScore)
     }
 }
-

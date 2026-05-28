@@ -14,6 +14,7 @@ struct QuestionCandidate: Identifiable, Codable, Hashable, Sendable {
     let sourceSegmentIds: [UUID]
     let isPartial: Bool
     let detectedAt: Date
+    let multimodalSignal: QuestionMultimodalSignal?
     var classification: QuestionClassification?
     var status: QuestionStatus
 
@@ -30,6 +31,7 @@ struct QuestionCandidate: Identifiable, Codable, Hashable, Sendable {
         sourceSegmentIds: [UUID],
         isPartial: Bool,
         detectedAt: Date = Date(),
+        multimodalSignal: QuestionMultimodalSignal? = nil,
         classification: QuestionClassification? = nil,
         status: QuestionStatus = .candidate
     ) {
@@ -45,8 +47,105 @@ struct QuestionCandidate: Identifiable, Codable, Hashable, Sendable {
         self.sourceSegmentIds = sourceSegmentIds
         self.isPartial = isPartial
         self.detectedAt = detectedAt
+        self.multimodalSignal = multimodalSignal
         self.classification = classification
         self.status = status
+    }
+}
+
+struct QuestionMultimodalSignal: Codable, Hashable, Sendable {
+    var language: String?
+    var asrConfidence: Double?
+    var isFinal: Bool
+    var isPartial: Bool
+    var speakerLabel: String?
+    var audioSource: TranscriptAudioSource
+    var duration: TimeInterval
+    var hasTerminalPause: Bool
+    var partialStability: Double
+    var partialRevisionCount: Int
+    var rms: Double?
+    var peak: Double?
+    var isClipping: Bool
+    var isSilence: Bool
+    var isTooQuiet: Bool
+    var gapCount: Int
+    var noiseFloor: Double?
+    var audioEnergy: Double?
+    var createdAt: Date
+
+    init(
+        language: String? = nil,
+        asrConfidence: Double? = nil,
+        isFinal: Bool,
+        isPartial: Bool,
+        speakerLabel: String? = nil,
+        audioSource: TranscriptAudioSource = .unknown,
+        duration: TimeInterval,
+        hasTerminalPause: Bool,
+        partialStability: Double = 1,
+        partialRevisionCount: Int = 0,
+        rms: Double? = nil,
+        peak: Double? = nil,
+        isClipping: Bool = false,
+        isSilence: Bool = false,
+        isTooQuiet: Bool = false,
+        gapCount: Int = 0,
+        noiseFloor: Double? = nil,
+        audioEnergy: Double? = nil,
+        createdAt: Date = Date()
+    ) {
+        self.language = language
+        self.asrConfidence = asrConfidence
+        self.isFinal = isFinal
+        self.isPartial = isPartial
+        self.speakerLabel = speakerLabel
+        self.audioSource = audioSource
+        self.duration = max(0, duration)
+        self.hasTerminalPause = hasTerminalPause
+        self.partialStability = min(max(partialStability, 0), 1)
+        self.partialRevisionCount = max(0, partialRevisionCount)
+        self.rms = rms.map { min(max($0, 0), 1) }
+        self.peak = peak.map { min(max($0, 0), 1) }
+        self.isClipping = isClipping
+        self.isSilence = isSilence
+        self.isTooQuiet = isTooQuiet
+        self.gapCount = max(0, gapCount)
+        self.noiseFloor = noiseFloor.map { min(max($0, 0), 1) }
+        self.audioEnergy = audioEnergy.map { min(max($0, 0), 1) }
+        self.createdAt = createdAt
+    }
+
+    init(segment: TranscriptSegment, quality: SpeechAudioQualitySnapshot? = nil, partialStability: Double = 1, partialRevisionCount: Int = 0) {
+        let duration = segment.endTime > segment.startTime ? segment.endTime - segment.startTime : 0
+        self.init(
+            language: segment.originalLanguage ?? segment.sourceLanguage,
+            asrConfidence: segment.engineConfidence ?? segment.confidence,
+            isFinal: segment.isFinal,
+            isPartial: !segment.isFinal,
+            speakerLabel: segment.speakerLabel,
+            audioSource: segment.audioSource,
+            duration: duration,
+            hasTerminalPause: segment.isFinal,
+            partialStability: partialStability,
+            partialRevisionCount: partialRevisionCount,
+            rms: quality.map { Double($0.rms) },
+            peak: quality.map { Double($0.peak) },
+            isClipping: quality?.isClipping ?? false,
+            isSilence: quality.map { SpeechActivityPolicy().classify($0) == .silence } ?? false,
+            isTooQuiet: quality?.isTooQuiet ?? false,
+            gapCount: quality?.gapCount ?? 0,
+            noiseFloor: quality.map { Double($0.noiseFloor) },
+            audioEnergy: segment.audioEnergy,
+            createdAt: segment.createdAt
+        )
+    }
+
+    func withPartialStability(_ stability: Double, revisionCount: Int) -> QuestionMultimodalSignal {
+        var copy = self
+        copy.partialStability = min(max(stability, 0), 1)
+        copy.partialRevisionCount = max(0, revisionCount)
+        return copy
     }
 }
 
@@ -77,6 +176,11 @@ struct QuestionClassification: Codable, Hashable, Sendable {
     let reason: String
     let extractedQuestion: String
     let expectedAnswerStyle: AnswerStyle
+    var textualConfidence: Double? = nil
+    var multimodalConfidence: Double? = nil
+    var decisionScore: Double? = nil
+    var decisionSignals: [String]? = nil
+    var suppressionSignals: [String]? = nil
 }
 
 enum LocalQuestionIntent: String, Codable, CaseIterable, Identifiable, Sendable {
@@ -2549,9 +2653,9 @@ enum AnswerGenerationStage: String, Codable, CaseIterable, Identifiable, Sendabl
 
     var displayName: String {
         switch self {
-        case .idle: "Idle"
-        case .classifying: "Understanding question"
-        case .retrievingContext: "Retrieving context"
+        case .idle: "Listening"
+        case .classifying: "Understanding"
+        case .retrievingContext: "Retrieving Context"
         case .drafting: "Drafting"
         case .finalizing: "Finalizing"
         case .ready: "Ready"

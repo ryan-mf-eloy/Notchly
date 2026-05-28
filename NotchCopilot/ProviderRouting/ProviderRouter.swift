@@ -209,7 +209,8 @@ struct ProviderRouter {
     func questionClassifierProvider(preferences: AppPreferences) -> any QuestionClassifierProvider {
         let classifier = QuestionClassifier(
             adaptiveProfile: preferences.questionAnsweringProfile,
-            precisionMode: preferences.qaPrecisionMode
+            precisionMode: preferences.qaPrecisionMode,
+            multimodalMode: preferences.qaMultimodalMode
         )
         return classifier
     }

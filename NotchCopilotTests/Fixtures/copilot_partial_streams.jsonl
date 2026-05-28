@@ -1,3 +1,5 @@
 {"id":"partial-001","sequence":["Quanto","Quanto é","Quanto é 2","Quanto é 2 + 2"],"final":"Quanto é 2 + 2","responseNeeded":true,"label":"calculation"}
 {"id":"partial-002","sequence":["Cuanto","Cuanto is","Cuanto is my","Cuanto is my days"],"final":"Cuanto is my days","responseNeeded":true,"label":"clarification"}
 {"id":"partial-003","sequence":["como","como eu","como eu disse","como eu disse antes"],"final":"como eu disse antes vamos revisar isso depois","responseNeeded":false,"label":"statement"}
+{"id":"partial-qa-001","sequence":["Ryan can","Ryan can you","Ryan can you explain","Ryan can you explain the OAuth flow"],"final":"Ryan can you explain the OAuth flow?","responseNeeded":true,"label":"answerable_question"}
+{"id":"partial-qa-002","sequence":["can you hear","can you hear me","can you hear me now"],"final":"can you hear me now?","responseNeeded":false,"label":"operational_check"}

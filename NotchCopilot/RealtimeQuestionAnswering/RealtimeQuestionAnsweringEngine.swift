@@ -10,6 +10,11 @@ struct QuestionShadowDecisionRecord: Codable, Hashable, Sendable {
     var confidence: Double
     var responseNeeded: Bool
     var priority: QuestionPriority
+    var textualConfidence: Double?
+    var multimodalConfidence: Double?
+    var decisionScore: Double?
+    var decisionSignals: [String]?
+    var suppressionSignals: [String]?
     var createdAt: Date = Date()
 }
 
@@ -26,7 +31,12 @@ struct QuestionShadowLogger {
             reason: classification.reason,
             confidence: classification.confidence,
             responseNeeded: classification.responseNeeded,
-            priority: classification.priority
+            priority: classification.priority,
+            textualConfidence: classification.textualConfidence,
+            multimodalConfidence: classification.multimodalConfidence,
+            decisionScore: classification.decisionScore,
+            decisionSignals: classification.decisionSignals,
+            suppressionSignals: classification.suppressionSignals
         )
         guard let data = try? JSONEncoder().encode(record),
               let line = String(data: data, encoding: .utf8)
@@ -55,12 +65,75 @@ struct QuestionShadowLogger {
     }
 }
 
+struct QuestionPartialStability: Hashable, Sendable {
+    var score: Double
+    var revisionCount: Int
+    var isStable: Bool
+}
+
+struct QuestionPartialStabilityTracker {
+    private struct State {
+        var normalizedText: String
+        var stableCount: Int
+    }
+
+    private var states: [String: State] = [:]
+
+    mutating func reset() {
+        states = [:]
+    }
+
+    mutating func observe(segment: TranscriptSegment) -> QuestionPartialStability {
+        let normalized = QuestionDetectionService.normalize(segment.text)
+        guard !normalized.isEmpty else {
+            return QuestionPartialStability(score: 0, revisionCount: 0, isStable: false)
+        }
+        guard !segment.isFinal else {
+            states[key(for: segment)] = State(normalizedText: normalized, stableCount: 2)
+            return QuestionPartialStability(score: 1, revisionCount: max(segment.revisionNumber, 1), isStable: true)
+        }
+
+        let key = key(for: segment)
+        let previous = states[key]
+        let similarity = previous.map { textSimilarity($0.normalizedText, normalized) } ?? 0
+        let stableCount = similarity >= 0.72 ? (previous?.stableCount ?? 0) + 1 : 1
+        states[key] = State(normalizedText: normalized, stableCount: stableCount)
+
+        let tokenCount = normalized.split(separator: " ").count
+        let score = min(1, max(similarity, stableCount >= 2 ? 0.84 : 0.32))
+        let isStable = stableCount >= 2 && tokenCount >= 4
+        return QuestionPartialStability(score: score, revisionCount: max(stableCount - 1, segment.revisionNumber), isStable: isStable)
+    }
+
+    private func key(for segment: TranscriptSegment) -> String {
+        [
+            segment.meetingId.uuidString,
+            segment.speakerId?.uuidString ?? segment.speakerLabel,
+            segment.audioSource.rawValue
+        ].joined(separator: "|")
+    }
+
+    private func textSimilarity(_ lhs: String, _ rhs: String) -> Double {
+        if lhs == rhs { return 1 }
+        if lhs.hasPrefix(rhs) || rhs.hasPrefix(lhs) {
+            let shorter = Double(min(lhs.count, rhs.count))
+            let longer = Double(max(lhs.count, rhs.count))
+            return max(0.72, shorter / max(longer, 1))
+        }
+        let leftTokens = Set(lhs.split { !$0.isLetter && !$0.isNumber }.map(String.init))
+        let rightTokens = Set(rhs.split { !$0.isLetter && !$0.isNumber }.map(String.init))
+        guard !leftTokens.isEmpty || !rightTokens.isEmpty else { return 0 }
+        return Double(leftTokens.intersection(rightTokens).count) / Double(max(leftTokens.union(rightTokens).count, 1))
+    }
+}
+
 @MainActor
 class RealtimeQuestionAnsweringEngine {
     let eventBus: RealtimeQuestionEventBus
 
     private var buffer = TranscriptWindowBuffer()
     private var candidateStore = QuestionCandidateStore()
+    private var partialStabilityTracker = QuestionPartialStabilityTracker()
     private var pendingDetectionTasks: [UUID: Task<Void, Never>] = [:]
     private var generationTasks: [UUID: Task<Void, Never>] = [:]
 
@@ -98,6 +171,7 @@ class RealtimeQuestionAnsweringEngine {
         pendingDetectionTasks = [:]
         generationTasks = [:]
         buffer.reset()
+        partialStabilityTracker.reset()
         candidateStore = QuestionCandidateStore()
     }
 
@@ -106,10 +180,24 @@ class RealtimeQuestionAnsweringEngine {
         eventBus.finish()
     }
 
-    func ingest(segment: TranscriptSegment, meeting: MeetingSession, preferences: AppPreferences) async {
+    func ingest(
+        segment: TranscriptSegment,
+        meeting: MeetingSession,
+        preferences: AppPreferences,
+        multimodalSignal incomingSignal: QuestionMultimodalSignal? = nil
+    ) async {
         buffer.append(segment)
         let context = buffer.transcriptContext(currentSegment: segment)
-        let candidates = detectionService.detectCandidates(from: segment, context: context)
+        let stability = partialStabilityTracker.observe(segment: segment)
+        let signal = (incomingSignal ?? QuestionMultimodalSignal(segment: segment))
+            .withPartialStability(stability.score, revisionCount: stability.revisionCount)
+
+        if !segment.isFinal, !stability.isStable {
+            detectAnsweredQuestions(segment: segment)
+            return
+        }
+
+        let candidates = detectionService.detectCandidates(from: segment, context: context, signal: signal)
         guard !candidates.isEmpty else {
             detectAnsweredQuestions(segment: segment)
             return
@@ -135,6 +223,7 @@ class RealtimeQuestionAnsweringEngine {
         generationTasks[questionId]?.cancel()
         generationTasks[questionId] = nil
         candidateStore.mark(questionId, status: .dismissed)
+        eventBus.send(.questionCancelled(questionId, "Question dismissed."))
     }
 
     func candidate(for id: UUID) -> QuestionCandidate? {
@@ -208,6 +297,7 @@ class RealtimeQuestionAnsweringEngine {
             for (questionId, task) in generationTasks where questionId != candidate.id {
                 task.cancel()
                 generationTasks[questionId] = nil
+                eventBus.send(.questionCancelled(questionId, "Superseded by urgent question."))
             }
         }
 
@@ -269,6 +359,8 @@ class RealtimeQuestionAnsweringEngine {
                     eventBus.send(.answerGenerating(candidate.id, .ready))
                 }
             }
+        } catch is CancellationError {
+            eventBus.send(.answerGenerating(candidate.id, .cancelled))
         } catch {
             eventBus.send(.answerFailed(candidate.id, Self.failureMessage(for: error)))
         }
@@ -294,6 +386,7 @@ class RealtimeQuestionAnsweringEngine {
             if candidate.speakerId == segment.speakerId || candidate.speakerLabel == segment.speakerLabel {
                 generationTasks[candidate.id]?.cancel()
                 candidateStore.mark(candidate.id, status: .answered)
+                eventBus.send(.questionCancelled(candidate.id, "Speaker answered their own question."))
             }
         }
     }

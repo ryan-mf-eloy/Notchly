@@ -36,9 +36,13 @@ final class LocalDataCryptor {
 
     private let keychain: AppleKeychainService?
     private var key: SymmetricKey
+    private let deterministicNonceSeed: UInt8?
+    private let deterministicNonceLock = NSLock()
+    private var deterministicNonceCounter: UInt64 = 0
 
     init(keychain: AppleKeychainService) throws {
         self.keychain = keychain
+        self.deterministicNonceSeed = nil
         if let keyData = try keychain.getData(account: Self.keychainAccount) {
             self.key = try Self.symmetricKey(from: keyData)
         } else {
@@ -48,8 +52,9 @@ final class LocalDataCryptor {
         }
     }
 
-    init(keyData: Data) throws {
+    init(keyData: Data, deterministicNonceSeed: UInt8? = nil) throws {
         self.keychain = nil
+        self.deterministicNonceSeed = deterministicNonceSeed
         self.key = try Self.symmetricKey(from: keyData)
     }
 
@@ -62,7 +67,7 @@ final class LocalDataCryptor {
     }
 
     static func ephemeralForTests(byte: UInt8 = 0xA7) throws -> LocalDataCryptor {
-        try LocalDataCryptor(keyData: Data(repeating: byte, count: keySize))
+        try LocalDataCryptor(keyData: Data(repeating: byte, count: keySize), deterministicNonceSeed: byte)
     }
 
     func resetStoredKey() throws {
@@ -150,11 +155,30 @@ final class LocalDataCryptor {
     }
 
     private func seal(_ data: Data, context: String) throws -> Data {
-        let sealed = try AES.GCM.seal(data, using: key, authenticating: Data(context.utf8))
+        let sealed: AES.GCM.SealedBox
+        if deterministicNonceSeed != nil {
+            sealed = try AES.GCM.seal(data, using: key, nonce: nextDeterministicNonce(), authenticating: Data(context.utf8))
+        } else {
+            sealed = try AES.GCM.seal(data, using: key, authenticating: Data(context.utf8))
+        }
         guard let combined = sealed.combined else {
             throw LocalDataCryptorError.missingCombinedBox
         }
         return combined
+    }
+
+    private func nextDeterministicNonce() throws -> AES.GCM.Nonce {
+        deterministicNonceLock.lock()
+        let counter = deterministicNonceCounter
+        deterministicNonceCounter += 1
+        deterministicNonceLock.unlock()
+
+        var bytes = [UInt8](repeating: deterministicNonceSeed ?? 0, count: 12)
+        for index in 0..<8 {
+            let shift = UInt64((7 - index) * 8)
+            bytes[4 + index] = UInt8((counter >> shift) & 0xff)
+        }
+        return try AES.GCM.Nonce(data: bytes)
     }
 
     private func open(_ encrypted: Data.SubSequence, context: String) throws -> Data {

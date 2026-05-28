@@ -149,6 +149,22 @@ enum QAPrecisionMode: String, Codable, CaseIterable, Identifiable {
     }
 }
 
+enum QAMultimodalMode: String, Codable, CaseIterable, Identifiable, Sendable {
+    case off
+    case shadow
+    case enforced
+
+    var id: String { rawValue }
+
+    var displayName: String {
+        switch self {
+        case .off: "Off"
+        case .shadow: "Shadow"
+        case .enforced: "Enforced"
+        }
+    }
+}
+
 enum LocalQuestionModelProfile: String, Codable, CaseIterable, Identifiable {
     case fastMiniLM
     case maxAccuracyMDeBERTa
@@ -332,6 +348,7 @@ struct AppPreferences: Codable, Hashable {
     var doNotSendCodeSnippetsToCloud: Bool = true
     var questionAnsweringProfile: QuestionAnsweringAdaptiveProfile = QuestionAnsweringAdaptiveProfile()
     var qaPrecisionMode: QAPrecisionMode = .highPrecision
+    var qaMultimodalMode: QAMultimodalMode = .shadow
     var localQuestionModelProfile: LocalQuestionModelProfile = .maxAccuracyMDeBERTa
     var allowLocalModelDownloads: Bool = true
     var qaShadowMode: Bool = true
@@ -386,6 +403,7 @@ struct AppPreferences: Codable, Hashable {
         case doNotSendCodeSnippetsToCloud
         case questionAnsweringProfile
         case qaPrecisionMode
+        case qaMultimodalMode
         case localQuestionModelProfile
         case allowLocalModelDownloads
         case qaShadowMode
@@ -441,6 +459,7 @@ struct AppPreferences: Codable, Hashable {
         doNotSendCodeSnippetsToCloud = try container.decodeIfPresent(Bool.self, forKey: .doNotSendCodeSnippetsToCloud) ?? true
         questionAnsweringProfile = try container.decodeIfPresent(QuestionAnsweringAdaptiveProfile.self, forKey: .questionAnsweringProfile) ?? QuestionAnsweringAdaptiveProfile()
         qaPrecisionMode = try container.decodeIfPresent(QAPrecisionMode.self, forKey: .qaPrecisionMode) ?? .highPrecision
+        qaMultimodalMode = try container.decodeIfPresent(QAMultimodalMode.self, forKey: .qaMultimodalMode) ?? .shadow
         localQuestionModelProfile = try container.decodeIfPresent(LocalQuestionModelProfile.self, forKey: .localQuestionModelProfile) ?? .maxAccuracyMDeBERTa
         allowLocalModelDownloads = try container.decodeIfPresent(Bool.self, forKey: .allowLocalModelDownloads) ?? true
         qaShadowMode = try container.decodeIfPresent(Bool.self, forKey: .qaShadowMode) ?? true

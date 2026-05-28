@@ -360,6 +360,10 @@ final class MeetingSessionManager {
                 appState.suggestedAnswer = nil
                 appState.showQuestionAnswerPanel(mode: .answer)
                 appState.statusMessage = "Could not generate a local answer"
+            } else if stage == .cancelled {
+                appState.streamingAnswerText = ""
+                appState.showQuestionAnswerPanel(mode: .answer)
+                appState.statusMessage = "Question cancelled"
             }
 
         case let .answerFailed(questionId, message):
@@ -393,8 +397,14 @@ final class MeetingSessionManager {
                 persistQuestion(candidate, classification: classification, answer: nil, decision: "ignored: \(reason)")
             }
 
-        case .questionMerged:
-            break
+        case let .questionMerged(source, target):
+            appState.mergeQuestionInQueue(source: source, target: target)
+
+        case let .questionCancelled(questionId, reason):
+            appState.updateQueuedQuestionStage(questionId: questionId, stage: .cancelled)
+            guard appState.selectedQuestionId == questionId else { return }
+            appState.streamingAnswerText = ""
+            appState.statusMessage = reason
         }
     }
 
@@ -798,7 +808,12 @@ final class MeetingSessionManager {
         appState.currentMeeting = meeting
 
         if appState.preferences.realtimeSuggestionsEnabled {
-            await realtimeQuestionEngine?.ingest(segment: segment, meeting: meeting, preferences: appState.preferences)
+            await realtimeQuestionEngine?.ingest(
+                segment: segment,
+                meeting: meeting,
+                preferences: appState.preferences,
+                multimodalSignal: questionMultimodalSignal(for: segment)
+            )
         }
 
         if appState.islandMode != .questionDetected && appState.islandMode != .suggestedAnswer && appState.islandMode != .thinking {
@@ -812,6 +827,12 @@ final class MeetingSessionManager {
         if let pendingTail {
             await append(pendingTail)
         }
+    }
+
+    private func questionMultimodalSignal(for segment: TranscriptSegment) -> QuestionMultimodalSignal {
+        let source = segment.audioSource == .unknown ? TranscriptAudioSource.mixed : segment.audioSource
+        let quality = appState.speechAudioQualityBySource[source] ?? appState.speechAudioQualityBySource[segment.audioSource]
+        return QuestionMultimodalSignal(segment: segment, quality: quality)
     }
 
     private func resolvedLanguage(

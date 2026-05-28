@@ -8,6 +8,7 @@ enum RealtimeQuestionEvent: Sendable, Hashable {
     case suggestedAnswerReady(QuestionCandidate, SuggestedAnswer)
     case questionIgnored(QuestionCandidate, String)
     case questionMerged(source: QuestionCandidate, target: QuestionCandidate)
+    case questionCancelled(UUID, String)
 }
 
 final class RealtimeQuestionEventBus {

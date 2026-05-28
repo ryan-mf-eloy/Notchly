@@ -118,7 +118,7 @@ struct QuestionIntentRulePack: Codable, Hashable, Sendable {
             "they asked if", "they asked whether", "someone asked whether", "i was asked if", "i was asked whether",
             "i wondered if", "but i already resolved", "eles perguntaram se", "me perguntaram se", "perguntaram se",
             "eu me perguntei se", "mas ja resolvi", "preguntaron si", "me preguntaron si", "me pregunte si",
-            "como dije", "como decia", "la duda era", "pero ya lo resolvi", "a duvida era",
+            "como dije", "como decia", "la duda era", "pero ya lo resolvi", "a duvida era", "uma duvida era",
             "質問されました", "聞かれました", "もう解決しました"
         ],
         selfAnsweredMarkers: [

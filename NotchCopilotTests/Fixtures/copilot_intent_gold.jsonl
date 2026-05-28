@@ -19998,3 +19998,7 @@
 {"id":"neg-19997","text":"can you hear me now","language":"en-US","responseNeeded":false,"label":"operational_check"}
 {"id":"pos-19998","text":"Me explica por que o céu é azul","language":"pt-BR","responseNeeded":true,"label":"action_request"}
 {"id":"pos-19999","text":"Qual é a diferença entre TCP e UDP?","language":"pt-BR","responseNeeded":true,"label":"answerable_question"}
+{"id":"multiqt-neg-20000","text":"the question was can we ship Friday but we already decided no","language":"en-US","responseNeeded":false,"label":"reported_question"}
+{"id":"multiqt-neg-20001","text":"da pra ver minha tela antes de eu explicar o risco","language":"pt-BR","responseNeeded":false,"label":"operational_check"}
+{"id":"multiqt-pos-20002","text":"quick question who owns the customer follow up","language":"en-US","responseNeeded":true,"label":"answerable_question"}
+{"id":"multiqt-pos-20003","text":"sabe se esse risco bloqueia o release","language":"pt-BR","responseNeeded":true,"label":"answerable_question"}

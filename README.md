@@ -80,7 +80,7 @@ Essa decisao e importante: o app tenta reduzir exposicao acidental de conteudo e
 - macOS 14 ou superior para a base do app.
 - macOS 15 ou superior para preparar pares de Apple Translation com a ferramenta auxiliar.
 - macOS 26 ou superior para caminhos que usam Foundation Models, quando disponiveis.
-- Xcode 26.4.1 ou superior recomendado.
+- Xcode 26.5 ou superior recomendado. A validacao atual foi feita com Xcode 26.5 / build 17F42.
 - Swift 6.
 - XcodeGen opcional, apenas para regenerar o projeto Xcode a partir de `project.yml`.
 - Conta/credenciais de provedores sao opcionais. O app inicia em modo local.
@@ -100,15 +100,17 @@ O app e `LSUIElement`, entao roda como acessorio/menu bar app e nao como uma apl
 Para rodar testes:
 
 ```bash
-xcodebuild -skipPackagePluginValidation -skipMacroValidation -scheme NotchCopilot -destination 'platform=macOS' test
+./Tools/xcodebuild-clean.sh -skipPackagePluginValidation -skipMacroValidation -scheme NotchCopilot -destination 'platform=macOS,arch=arm64' test
 ```
 
 As flags `-skipPackagePluginValidation` e `-skipMacroValidation` ajudam execucoes reprodutiveis pela CLI quando ha package plugins e macros Swift, como os macros do MLX/HuggingFace. No Xcode, o ambiente interativo ainda pode pedir confianca para novos plugins e macros.
 
+O wrapper `Tools/xcodebuild-clean.sh` chama `xcodebuild`, preserva o exit code e filtra apenas ruidos internos conhecidos do Xcode 26.5 (`IDELaunchParametersSnapshot`/`IDETestOperationsObserverDebug`). Se preferir o log bruto, rode o mesmo comando trocando o wrapper por `xcodebuild`; em caso de falha, o wrapper tambem imprime o caminho do log bruto. Se o Xcode avisar que o CoreSimulator esta desatualizado, confirme que `xcode-select -p` aponta para o Xcode atual e rode `xcrun simctl list runtimes` uma vez para forcar o refresh do servico.
+
 Para build simples:
 
 ```bash
-xcodebuild -skipPackagePluginValidation -skipMacroValidation -scheme NotchCopilot -destination 'platform=macOS' build
+./Tools/xcodebuild-clean.sh -skipPackagePluginValidation -skipMacroValidation -scheme NotchCopilot -destination 'platform=macOS,arch=arm64' build
 ```
 
 ## Live Reload De Desenvolvimento
@@ -216,6 +218,17 @@ O pipeline de audio inclui:
 
 O modulo `RealtimeQuestionAnswering` detecta perguntas relevantes no fluxo da transcricao e decide quando gerar uma resposta.
 
+Fluxo atual:
+
+```text
+MeetingSessionManager.append(_:)
+  -> RealtimeQuestionAnsweringEngine.ingest(...)
+  -> QuestionDetectionService / QuestionClassifier / gates locais
+  -> MeetingAnswerProvider
+  -> RealtimeQuestionEventBus
+  -> AppState / MeetingPanelView
+```
+
 Ele combina:
 
 - janela de transcript;
@@ -223,11 +236,48 @@ Ele combina:
 - filtro de perguntas retoricas e auto-respondidas;
 - scoring de prioridade;
 - modos de precisao (`highPrecision`, `balanced`, `highCoverage`);
+- sinais textuais, temporais e acusticos leves;
 - contexto RAG local;
 - web search opcional quando permitido;
 - geracao de resposta com provider roteado.
 
 O objetivo do modo padrao e reduzir interrupcoes: alta precisao e preferida a cobertura agressiva.
+
+### MultiQT-lite local
+
+A versao atual inclui um "MultiQT-lite" local-first, sem clonar paper ou depender de audio bruto persistido. O app cria `QuestionMultimodalSignal` a partir do `TranscriptSegment`, qualidade de audio por fonte e energia disponivel. Os campos sao numericos/redigiveis: idioma, confidence ASR, final/partial, speaker/source, duracao, estabilidade entre parciais, pausa terminal, RMS/peak, clipping, silencio/tooQuiet, gaps, noise floor e `audioEnergy`.
+
+`QuestionMultimodalScorer` combina o entendimento textual com boosts leves para segmento final, ASR confiavel, duracao plausivel, pausa terminal e energia consistente. Ele penaliza partial instavel, ASR baixo, clipping forte, silencio/tooQuiet e gaps. Negativos criticos continuam como hard-blocks locais: small talk, operational checks, retoricas, perguntas reportadas, auto-respondidas, fragmentos, titulos e ruido ASR.
+
+`QAMultimodalMode` fica em `AppPreferences`:
+
+- `off`: usa apenas os sinais textuais.
+- `shadow`: default atual; calcula scores multimodais para auditoria sem bloquear decisoes.
+- `enforced`: aplica o gate multimodal quando os benchmarks locais confirmam ganho ou nao-regressao.
+
+`QuestionClassification` registra `textualConfidence`, `multimodalConfidence`, `decisionScore`, `decisionSignals` e `suppressionSignals`, permitindo diagnostico sem gravar audio bruto. O fluxo respeita a regra dura:
+
+```text
+responseNeeded && complete && !rhetorical && priority != .low
+```
+
+Somente quando essa regra passa o provider e chamado. Perguntas urgentes podem cancelar geracoes anteriores; pergunta auto-respondida cancela/ignora a geracao; final estavel substitui partial via deduplicacao.
+
+### Limpeza Da Pergunta
+
+`QuestionSpanExtractor` limpa `classification.extractedQuestion` antes de exibir na UI. Ele remove fillers, prefixos e enderecamentos comuns em `pt-BR`, `en-US`, `es-ES` e `ja-JP`, como "quick question", "uma duvida", "entao" e chamadas por nome, preservando sentido, casing util e nunca reduzindo a pergunta para string vazia.
+
+Tipos cobertos incluem perguntas diretas e indiretas, status, risco, decisao tecnica, prazo, ownership, follow-up, negocio e action requests. Para prazo, risco, producao e aprovacao, respostas geradas usam tom curto e cauteloso, evitando prometer datas, aprovar rollout ou assumir risco sem verificacao.
+
+### UX De Q&A
+
+O painel usa estados visiveis para evitar loading infinito:
+
+```text
+Listening -> Understanding -> Retrieving Context -> Drafting -> Ready / Failed / Cancelled
+```
+
+A fila de perguntas preserva selecao, deduplica partial/final, permite dispensar, copiar, salvar e alternar entre `Transcript` e `Answer`. A UI usa `classification.extractedQuestion` como texto principal da pergunta, nao o `rawText` do ASR.
 
 ## Traducao Ao Vivo
 
@@ -407,6 +457,7 @@ Tools/
   dev-live-reload.sh           Watcher de build/relaunch.
   install-dev-live-reload.sh   Instalacao do watcher em background.
   uninstall-dev-live-reload.sh Remocao/parada do watcher.
+  xcodebuild-clean.sh          Wrapper de xcodebuild com filtro para ruidos conhecidos do Xcode 26.5.
   TranslationLanguageDownloader.swift Preparacao de idiomas Apple Translation.
 ```
 
@@ -482,6 +533,7 @@ Fixtures de teste em `NotchCopilotTests/Fixtures` cobrem:
 - intent do copilot;
 - ASR parcial/final;
 - Q&A realtime;
+- sinais multimodais sinteticos;
 - benchmarks sinteticos;
 - goldens JSONL.
 
@@ -504,8 +556,19 @@ A suite cobre camadas criticas, incluindo:
 - protecao de janela e politicas de foco;
 - auth via API key, OAuth/PKCE e CLIs oficiais;
 - streaming OpenAI e catalogs de modelos.
+- `NotchCopilotUITests` com `--qa-ui-harness`, cobrindo janela real, alternancia Transcript/Answer, copy, save e dismiss.
 
 Como o app integra APIs recentes e recursos do sistema, alguns testes podem depender de SDK, permissoes ou disponibilidade de hardware/software local.
+
+Benchmarks atuais do Q&A em `main`:
+
+```text
+QA_BENCHMARK fixture=2018 tp=808 fp=0 fn=0 tn=1210 precision=1.0000 recall=1.0000 detection_p95_ms=7.993 classification_p95_ms=15.861 pipeline_p95_ms=19.880
+QA_MULTIMODAL_BENCHMARK fixture=2018 baseline_precision=1.0000 baseline_recall=1.0000 multimodal_precision=1.0000 multimodal_recall=1.0000 multimodal_p95_ms=19.908 critical_fp=0
+QA_REPLAY one_hour_segments=1200 fp=0 tn=1200 visible_false_alerts=0 p95_ms=5.112
+```
+
+A ultima validacao completa executou `339` testes unitarios, `3` skips opt-in de captura real e `1` XCUITest, com `0` falhas. Os skips opt-in sao os harnesses que exigem permissao/execucao manual de captura real (`screencapture` e `ScreenCaptureKit`). O `.xcresult` final ficou sem `issue summaries`/`testWarningSummaries`.
 
 ## Configuracoes Padrao
 
@@ -522,6 +585,7 @@ Alguns defaults relevantes de `AppPreferences`:
 | `saveAudioRecordings` | `false` | nao salvar audio bruto por padrao. |
 | `realtimeSuggestionsEnabled` | `true` | habilitar o fluxo central do copilot. |
 | `qaPrecisionMode` | `highPrecision` | reduzir falsos positivos. |
+| `qaMultimodalMode` | `shadow` | auditar MultiQT-lite sem bloquear decisoes ate os gates ficarem estaveis. |
 | `allowLocalModelDownloads` | `true` | permitir caminhos locais quando configurados. |
 | `copilotHotkeyEnabled` | `true` | acesso rapido ao copilot. |
 | `copilotRetentionDays` | `7` | reduzir memoria local de curto prazo. |
@@ -534,7 +598,7 @@ Alguns defaults relevantes de `AppPreferences`:
 - Web search e parcialmente dependente do provedor escolhido e das flags de cloud.
 - RAG usa keyword search como fallback principal; embeddings locais/cloud ainda sao caminho de evolucao.
 - Transcricao realtime cloud esta focada em ElevenLabs.
-- Realtime Q&A com baixa latencia e mais completo para OpenAI.
+- MultiQT-lite usa score calibrado deterministico e sinais sinteticos nos testes; CoreML/on-device model fica como caminho futuro quando houver dataset suficiente.
 - Gemini e Claude account login dependem dos CLIs oficiais instalados e autenticados.
 - Perplexity account/OAuth esta indisponivel por design nesta versao.
 - Launch at login aparece nas preferencias, mas a integracao final pode exigir ajustes de signing/entitlements.
@@ -551,6 +615,7 @@ Alguns defaults relevantes de `AppPreferences`:
 - Expandir suporte de provedores realtime alem de OpenAI/ElevenLabs.
 - Tornar launch at login totalmente operacional.
 - Evoluir RAG para busca semantica local.
+- Promover `qaMultimodalMode` de `shadow` para `enforced` depois de mais dados reais e shadow logging redigido.
 - Publicar politica de contribuicao e licenca.
 
 ## Licenca
