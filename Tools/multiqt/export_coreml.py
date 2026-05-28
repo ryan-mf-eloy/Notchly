@@ -75,6 +75,10 @@ def main() -> int:
             "vocab": checkpoint["vocab"],
             "threshold": checkpoint.get("threshold", 0.5),
             "config": checkpoint["config"],
+            "calibration": {
+                "dev_metrics": checkpoint.get("dev_metrics"),
+                "dev_gates": checkpoint.get("dev_gates"),
+            },
             "inputs": {
                 "text_tokens": [1, max_tokens],
                 "audio_logmel": [1, 40, max_frames],

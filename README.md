@@ -262,17 +262,18 @@ Checkpoint atual:
 - dataset bootstrap hardened: 6.794 exemplos, 2.163 positivos, 4.631 negativos, pt-BR/en-US/es-ES/ja-JP;
 - treino: manifest sintético + `Tools/multiqt/augment_manifest.py`, com ASR sem pontuação, fillers, parciais truncadas, perguntas reportadas e auto-respondidas;
 - modelo: audio log-mel + texto + scalars, exportado para Core ML, threshold `0.99`, `critical_negative_weight = 2.5`;
-- test split hardened: TP 190, FP 0, FN 0, TN 326, precision 1.0000, recall 1.0000, p95 1.805 ms;
-- hard_test split hardened: TP 123, FP 0, FN 0, TN 321, precision 1.0000, recall 1.0000, p95 1.982 ms;
+- calibracao: o threshold e escolhido por gates de precision/recall globais, por idioma e por label negativa critica, nao apenas pelo score global;
+- test split hardened: TP 190, FP 0, FN 0, TN 326, precision 1.0000, recall 1.0000, p95 2.128 ms;
+- hard_test split hardened: TP 123, FP 0, FN 0, TN 321, precision 1.0000, recall 1.0000, p95 1.580 ms;
 - zero FP em negativos criticos nos splits avaliados.
 
 Comparativo de baselines treinaveis (`Tools/multiqt/compare_baselines.py`, 16 epocas, seed 42, mesmos splits hardened):
 
-| Modo | test precision/recall | hard_test precision/recall | FP criticos | p95 test |
+| Modo | test precision/recall | hard_test precision/recall | FP criticos hard_test | p95 test |
 | --- | ---: | ---: | ---: | ---: |
-| `multimodal` | 1.0000 / 1.0000 | 1.0000 / 1.0000 | 0 | 1.805 ms |
-| `text_only` | 1.0000 / 1.0000 | 0.9919 / 1.0000 | 1 | 3.775 ms |
-| `audio_only` | 0.9796 / 0.7579 | 0.4971 / 0.6992 | 90 | 1.965 ms |
+| `multimodal` | 1.0000 / 1.0000 | 1.0000 / 1.0000 | 0 | 2.128 ms |
+| `text_only` | 1.0000 / 1.0000 | 0.9919 / 1.0000 | 1 | 1.608 ms |
+| `audio_only` | 0.9649 / 0.2895 | 0.5000 / 0.2195 | 27 | 3.911 ms |
 
 O multimodal passa os gates absolutos, supera `audio_only` e vence `text_only` no hard_test adversarial (`promotion.promote_to_enforced = true`). Por isso o default de produto volta a ser `enforced`: o modelo Core ML treinado participa da decisao local, enquanto os hard-blocks textuais continuam protegendo negativos criticos.
 

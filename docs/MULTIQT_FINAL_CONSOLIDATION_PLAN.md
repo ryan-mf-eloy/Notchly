@@ -23,20 +23,22 @@ The repo now includes a first trained Core ML checkpoint:
 
 This checkpoint is a hardened bootstrap model, not the final production-quality endpoint. It was trained from `qa_intent_gold.jsonl` converted into a synthetic MultiQT manifest with macOS `say` audio, then expanded with deterministic adversarial ASR/intent augmentations. It proves the complete path: dataset validation, audio+text training, threshold calibration, baseline comparison, Core ML export, app bundling, runtime load, and Swift inference. It does not replace the required consented real-meeting dataset.
 
+The current bundled threshold is `0.99`. It is calibrated against global precision/recall, per-language precision/recall, and zero-FP gates for critical negative labels, so the final threshold is not selected from global accuracy alone.
+
 Validation on the hardened held-out splits:
 
 | Split | TP | FP | FN | TN | Precision | Recall | p95 |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
-| test | 190 | 0 | 0 | 326 | 1.0000 | 1.0000 | 1.805 ms |
-| hard_test | 123 | 0 | 0 | 321 | 1.0000 | 1.0000 | 1.982 ms |
+| test | 190 | 0 | 0 | 326 | 1.0000 | 1.0000 | 2.128 ms |
+| hard_test | 123 | 0 | 0 | 321 | 1.0000 | 1.0000 | 1.580 ms |
 
 Baseline comparison from `Tools/multiqt/compare_baselines.py` with 16 epochs, seed 42, critical negative weight 2.5, and identical hardened splits:
 
-| Mode | test precision | test recall | hard precision | hard recall | Critical FP | test p95 |
+| Mode | test precision | test recall | hard precision | hard recall | hard_test Critical FP | test p95 |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| multimodal | 1.0000 | 1.0000 | 1.0000 | 1.0000 | 0 | 1.805 ms |
-| text_only | 1.0000 | 1.0000 | 0.9919 | 1.0000 | 1 | 3.775 ms |
-| audio_only | 0.9796 | 0.7579 | 0.4971 | 0.6992 | 90 | 1.965 ms |
+| multimodal | 1.0000 | 1.0000 | 1.0000 | 1.0000 | 0 | 2.128 ms |
+| text_only | 1.0000 | 1.0000 | 0.9919 | 1.0000 | 1 | 1.608 ms |
+| audio_only | 0.9649 | 0.2895 | 0.5000 | 0.2195 | 27 | 3.911 ms |
 
 The multimodal checkpoint passes the absolute gates, beats audio-only, and beats text-only on the adversarial hard split (`promotion.promote_to_enforced = true`). Therefore `qaMultimodalMode` is `enforced` by default for the local hardened checkpoint, while the final production claim still requires a consented real-meeting dataset.
 

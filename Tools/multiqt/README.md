@@ -169,16 +169,17 @@ The current bundled checkpoint was trained from the QA gold fixture converted in
 - languages: pt-BR, en-US, es-ES, ja-JP
 - threshold: 0.99
 - critical negative weight: 2.5
-- test: TP 190, FP 0, FN 0, TN 326, precision 1.0000, recall 1.0000, p95 1.805 ms
-- hard_test: TP 123, FP 0, FN 0, TN 321, precision 1.0000, recall 1.0000, p95 1.982 ms
+- threshold calibration: selected by global, per-language, and critical-negative-label gates on dev
+- test: TP 190, FP 0, FN 0, TN 326, precision 1.0000, recall 1.0000, p95 2.128 ms
+- hard_test: TP 123, FP 0, FN 0, TN 321, precision 1.0000, recall 1.0000, p95 1.580 ms
 
 Baseline comparison, 16 epochs, seed 42:
 
-| Mode | test precision/recall | hard_test precision/recall | Critical FP | test p95 |
+| Mode | test precision/recall | hard_test precision/recall | hard_test Critical FP | test p95 |
 | --- | ---: | ---: | ---: | ---: |
-| `multimodal` | 1.0000 / 1.0000 | 1.0000 / 1.0000 | 0 | 1.805 ms |
-| `text_only` | 1.0000 / 1.0000 | 0.9919 / 1.0000 | 1 | 3.775 ms |
-| `audio_only` | 0.9796 / 0.7579 | 0.4971 / 0.6992 | 90 | 1.965 ms |
+| `multimodal` | 1.0000 / 1.0000 | 1.0000 / 1.0000 | 0 | 2.128 ms |
+| `text_only` | 1.0000 / 1.0000 | 0.9919 / 1.0000 | 1 | 1.608 ms |
+| `audio_only` | 0.9649 / 0.2895 | 0.5000 / 0.2195 | 27 | 3.911 ms |
 
 This checkpoint proves the runtime path and is safe to ship as a local-first hardened bootstrap in `enforced` (`promotion.promote_to_enforced = true`). It is not the final production evidence set; that still requires consented real meeting audio and shadow replay.
 

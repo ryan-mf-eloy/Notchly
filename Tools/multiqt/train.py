@@ -11,7 +11,7 @@ import time
 from pathlib import Path
 from typing import Any
 
-from common import DEFAULT_LABELS_PATH, load_labels, read_jsonl, safe_div, write_json, write_jsonl
+from common import DEFAULT_LABELS_PATH, binary_metrics, load_labels, read_jsonl, safe_div, write_json, write_jsonl
 
 try:
     import torch
@@ -85,7 +85,7 @@ def main() -> int:
     label_loss = nn.CrossEntropyLoss(reduction="none")
     binary_loss = nn.BCEWithLogitsLoss(reduction="none")
 
-    best_dev: tuple[float, float, float, float] = (-1.0, -1.0, -1.0, -1.0)
+    best_dev: tuple[float, ...] = (-1.0,)
     best_state: dict[str, Any] | None = None
     args.out.mkdir(parents=True, exist_ok=True)
 
@@ -113,9 +113,8 @@ def main() -> int:
             total_loss += float(loss.detach().cpu())
 
         dev_predictions = predict(model, dev_data, args.batch_size)
-        threshold, dev_metrics = tune_threshold(dev_predictions)
-        gate_bonus = 1.0 if dev_metrics["precision"] >= 0.995 and dev_metrics["recall"] >= 0.970 else 0.0
-        score = (gate_bonus, dev_metrics["precision"], dev_metrics["recall"], threshold)
+        threshold, dev_metrics, dev_gates = tune_threshold(dev_rows, dev_predictions, labels_config)
+        score = calibration_score(dev_metrics, dev_gates, threshold)
         print(
             json.dumps(
                 {
@@ -123,6 +122,7 @@ def main() -> int:
                     "loss": safe_div(total_loss, max(1, len(loader))),
                     "threshold": threshold,
                     "dev": dev_metrics,
+                    "dev_gates": dev_gates,
                 },
                 sort_keys=True,
             )
@@ -134,6 +134,8 @@ def main() -> int:
                 "vocab": vocab,
                 "labels": label_names,
                 "threshold": threshold,
+                "dev_metrics": dev_metrics,
+                "dev_gates": dev_gates,
                 "config": {
                     "max_tokens": args.max_tokens,
                     "max_frames": args.max_frames,
@@ -149,12 +151,12 @@ def main() -> int:
 
     model.load_state_dict(best_state["model_state"])
     test_predictions = predict(model, test_data, args.batch_size)
-    test_metrics = compute_metrics(test_predictions, best_state["threshold"])
+    test_metrics = compute_metrics(test_rows, test_predictions, best_state["threshold"], labels_config)
     hard_metrics = None
     hard_predictions: list[dict[str, float | bool]] = []
     if hard_data is not None:
         hard_predictions = predict(model, hard_data, args.batch_size)
-        hard_metrics = compute_metrics(hard_predictions, best_state["threshold"])
+        hard_metrics = compute_metrics(hard_rows, hard_predictions, best_state["threshold"], labels_config)
     torch.save(best_state, args.out / "best.pt")
     write_json(
         args.out / "metrics.json",
@@ -165,7 +167,14 @@ def main() -> int:
             "threshold": best_state["threshold"],
         },
     )
-    write_json(args.out / "calibration.json", {"response_threshold": best_state["threshold"]})
+    write_json(
+        args.out / "calibration.json",
+        {
+            "response_threshold": best_state["threshold"],
+            "dev": best_state.get("dev_metrics"),
+            "dev_gates": best_state.get("dev_gates"),
+        },
+    )
     write_json(args.out / "vocab.json", best_state["vocab"])
     write_jsonl(args.out / "test_predictions.jsonl", prediction_rows(test_rows, test_predictions))
     if hard_rows:
@@ -340,43 +349,69 @@ def prediction_rows(
     return rows
 
 
-def tune_threshold(predictions: list[dict[str, float | bool]]) -> tuple[float, dict[str, float]]:
+def tune_threshold(
+    manifest_rows: list[dict[str, Any]],
+    predictions: list[dict[str, float | bool]],
+    labels_config: dict[str, Any],
+) -> tuple[float, dict[str, Any], dict[str, bool]]:
     best_threshold = 0.5
-    best_metrics: dict[str, float] = {"precision": 0.0, "recall": 0.0}
-    best_score: tuple[float, float, float, float] = (-1.0, -1.0, -1.0, -1.0)
+    best_metrics: dict[str, Any] = {"precision": 0.0, "recall": 0.0, "critical_negative_false_positives": 0}
+    best_gates: dict[str, bool] = {}
+    best_score: tuple[float, ...] = (-1.0,)
     for step in range(5, 100):
         threshold = step / 100.0
-        metrics = compute_metrics(predictions, threshold)
-        gate_bonus = 1.0 if metrics["precision"] >= 0.995 and metrics["recall"] >= 0.970 else 0.0
-        score = (gate_bonus, metrics["precision"], metrics["recall"], threshold)
+        metrics = compute_metrics(manifest_rows, predictions, threshold, labels_config)
+        gates = calibration_gates(metrics)
+        score = calibration_score(metrics, gates, threshold)
         if score > best_score:
             best_score = score
             best_threshold = threshold
             best_metrics = metrics
-    return best_threshold, best_metrics
+            best_gates = gates
+    return best_threshold, best_metrics, best_gates
 
 
-def compute_metrics(predictions: list[dict[str, float | bool]], threshold: float) -> dict[str, float]:
-    tp = fp = fn = tn = 0
-    for row in predictions:
-        predicted = float(row["score"]) >= threshold
-        truth = bool(row["truth"])
-        if predicted and truth:
-            tp += 1
-        elif predicted and not truth:
-            fp += 1
-        elif not predicted and truth:
-            fn += 1
-        else:
-            tn += 1
-    return {
-        "tp": float(tp),
-        "fp": float(fp),
-        "fn": float(fn),
-        "tn": float(tn),
-        "precision": safe_div(tp, tp + fp),
-        "recall": safe_div(tp, tp + fn),
+def compute_metrics(
+    manifest_rows: list[dict[str, Any]],
+    predictions: list[dict[str, float | bool]],
+    threshold: float,
+    labels_config: dict[str, Any],
+) -> dict[str, Any]:
+    predicted_by_id = {
+        str(manifest["id"]): float(prediction["score"]) >= threshold
+        for manifest, prediction in zip(manifest_rows, predictions)
     }
+    return binary_metrics(manifest_rows, predicted_by_id, labels_config)
+
+
+def calibration_gates(metrics: dict[str, Any]) -> dict[str, bool]:
+    gates: dict[str, bool] = {
+        "precision_gte_0_995": float(metrics["precision"]) >= 0.995,
+        "recall_gte_0_970": float(metrics["recall"]) >= 0.970,
+        "critical_fp_zero": int(metrics["critical_negative_false_positives"]) == 0,
+    }
+    for language, language_metrics in metrics.get("by_language", {}).items():
+        gates[f"{language}_precision_gte_0_990"] = float(language_metrics["precision"]) >= 0.990
+        gates[f"{language}_recall_gte_0_950"] = float(language_metrics["recall"]) >= 0.950
+        gates[f"{language}_critical_fp_zero"] = int(language_metrics["critical_negative_false_positives"]) == 0
+    for label, label_metrics in metrics.get("by_label", {}).items():
+        gates[f"{label}_critical_fp_zero"] = int(label_metrics["critical_negative_false_positives"]) == 0
+    return gates
+
+
+def calibration_score(metrics: dict[str, Any], gates: dict[str, bool], threshold: float) -> tuple[float, ...]:
+    language_metrics = list(metrics.get("by_language", {}).values())
+    min_language_precision = min((float(item["precision"]) for item in language_metrics), default=0.0)
+    min_language_recall = min((float(item["recall"]) for item in language_metrics), default=0.0)
+    return (
+        1.0 if all(gates.values()) else 0.0,
+        1.0 if int(metrics["critical_negative_false_positives"]) == 0 else 0.0,
+        float(metrics["precision"]),
+        min_language_precision,
+        float(metrics["recall"]),
+        min_language_recall,
+        threshold,
+    )
 
 
 if __name__ == "__main__":

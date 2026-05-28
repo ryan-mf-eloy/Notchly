@@ -91,29 +91,29 @@
           "by_label": {
             "action_request": {
               "critical_negative_false_positives": 0,
-              "fn": 9,
+              "fn": 11,
               "fp": 0,
               "precision": 1.0,
-              "recall": 0.47058823529411764,
+              "recall": 0.35294117647058826,
               "tn": 0,
-              "tp": 8
+              "tp": 6
             },
             "answerable_question": {
               "critical_negative_false_positives": 0,
-              "fn": 28,
+              "fn": 85,
               "fp": 0,
               "precision": 1.0,
-              "recall": 0.7358490566037735,
+              "recall": 0.19811320754716982,
               "tn": 0,
-              "tp": 78
+              "tp": 21
             },
             "fragment": {
-              "critical_negative_false_positives": 29,
+              "critical_negative_false_positives": 9,
               "fn": 0,
-              "fp": 29,
+              "fp": 9,
               "precision": 0.0,
               "recall": 0.0,
-              "tn": 48,
+              "tn": 68,
               "tp": 0
             },
             "operational_check": {
@@ -126,12 +126,12 @@
               "tp": 0
             },
             "reported_question": {
-              "critical_negative_false_positives": 29,
+              "critical_negative_false_positives": 9,
               "fn": 0,
-              "fp": 29,
+              "fp": 9,
               "precision": 0.0,
               "recall": 0.0,
-              "tn": 46,
+              "tn": 66,
               "tp": 0
             },
             "rhetorical": {
@@ -144,12 +144,12 @@
               "tp": 0
             },
             "self_answered": {
-              "critical_negative_false_positives": 29,
+              "critical_negative_false_positives": 9,
               "fn": 0,
-              "fp": 29,
+              "fp": 9,
               "precision": 0.0,
               "recall": 0.0,
-              "tn": 21,
+              "tn": 41,
               "tp": 0
             },
             "small_talk": {
@@ -182,22 +182,22 @@
           },
           "by_language": {
             "en-US": {
-              "critical_negative_false_positives": 21,
-              "fn": 17,
-              "fp": 21,
-              "precision": 0.4878048780487805,
-              "recall": 0.5405405405405406,
-              "tn": 73,
-              "tp": 20
+              "critical_negative_false_positives": 6,
+              "fn": 31,
+              "fp": 6,
+              "precision": 0.5,
+              "recall": 0.16216216216216217,
+              "tn": 88,
+              "tp": 6
             },
             "es-ES": {
-              "critical_negative_false_positives": 39,
-              "fn": 0,
-              "fp": 39,
+              "critical_negative_false_positives": 12,
+              "fn": 27,
+              "fp": 12,
               "precision": 0.5,
-              "recall": 1.0,
-              "tn": 28,
-              "tp": 39
+              "recall": 0.3076923076923077,
+              "tn": 55,
+              "tp": 12
             },
             "ja-JP": {
               "critical_negative_false_positives": 0,
@@ -209,56 +209,56 @@
               "tp": 0
             },
             "pt-BR": {
-              "critical_negative_false_positives": 27,
-              "fn": 4,
-              "fp": 27,
+              "critical_negative_false_positives": 9,
+              "fn": 22,
+              "fp": 9,
               "precision": 0.5,
-              "recall": 0.8709677419354839,
-              "tn": 78,
-              "tp": 27
+              "recall": 0.2903225806451613,
+              "tn": 96,
+              "tp": 9
             }
           },
-          "critical_negative_false_positives": 87,
-          "fn": 37,
-          "fp": 87,
+          "critical_negative_false_positives": 27,
+          "fn": 96,
+          "fp": 27,
           "latency_ms": {
-            "p50": 2.5585833436707617,
-            "p95": 3.8505638126480335,
-            "p99": 3.8505638126480335
+            "p50": 1.6889335934138217,
+            "p95": 1.9822558592750283,
+            "p99": 1.9822558592750283
           },
-          "precision": 0.49710982658959535,
-          "recall": 0.6991869918699187,
-          "tn": 234,
-          "tp": 86
+          "precision": 0.5,
+          "recall": 0.21951219512195122,
+          "tn": 294,
+          "tp": 27
         },
         "input_mode": "audio_only",
         "test": {
           "by_label": {
             "action_request": {
               "critical_negative_false_positives": 0,
-              "fn": 10,
+              "fn": 12,
               "fp": 0,
               "precision": 1.0,
-              "recall": 0.782608695652174,
+              "recall": 0.7391304347826086,
               "tn": 0,
-              "tp": 36
+              "tp": 34
             },
             "answerable_question": {
               "critical_negative_false_positives": 0,
-              "fn": 36,
+              "fn": 123,
               "fp": 0,
               "precision": 1.0,
-              "recall": 0.75,
+              "recall": 0.14583333333333334,
               "tn": 0,
-              "tp": 108
+              "tp": 21
             },
             "fragment": {
-              "critical_negative_false_positives": 3,
+              "critical_negative_false_positives": 2,
               "fn": 0,
-              "fp": 3,
+              "fp": 2,
               "precision": 0.0,
               "recall": 0.0,
-              "tn": 79,
+              "tn": 80,
               "tp": 0
             },
             "operational_check": {
@@ -327,56 +327,56 @@
           },
           "by_language": {
             "en-US": {
-              "critical_negative_false_positives": 3,
-              "fn": 14,
-              "fp": 3,
-              "precision": 0.9166666666666666,
-              "recall": 0.7021276595744681,
-              "tn": 97,
-              "tp": 33
+              "critical_negative_false_positives": 2,
+              "fn": 34,
+              "fp": 2,
+              "precision": 0.8666666666666667,
+              "recall": 0.2765957446808511,
+              "tn": 98,
+              "tp": 13
             },
             "es-ES": {
               "critical_negative_false_positives": 0,
-              "fn": 3,
+              "fn": 27,
               "fp": 0,
               "precision": 1.0,
-              "recall": 0.9333333333333333,
+              "recall": 0.4,
               "tn": 42,
-              "tp": 42
+              "tp": 18
             },
             "ja-JP": {
               "critical_negative_false_positives": 0,
-              "fn": 29,
+              "fn": 32,
               "fp": 0,
-              "precision": 1.0,
-              "recall": 0.09375,
+              "precision": 0.0,
+              "recall": 0.0,
               "tn": 62,
-              "tp": 3
+              "tp": 0
             },
             "pt-BR": {
               "critical_negative_false_positives": 0,
-              "fn": 0,
+              "fn": 42,
               "fp": 0,
               "precision": 1.0,
-              "recall": 1.0,
+              "recall": 0.36363636363636365,
               "tn": 122,
-              "tp": 66
+              "tp": 24
             }
           },
-          "critical_negative_false_positives": 3,
-          "fn": 46,
-          "fp": 3,
+          "critical_negative_false_positives": 2,
+          "fn": 135,
+          "fp": 2,
           "latency_ms": {
-            "p50": 1.6595924530520278,
-            "p95": 1.9645104061964958,
-            "p99": 1.9645104061964958
+            "p50": 1.496392577791994,
+            "p95": 3.9113951875151542,
+            "p99": 3.9113951875151542
           },
-          "precision": 0.9795918367346939,
-          "recall": 0.7578947368421053,
-          "tn": 323,
-          "tp": 144
+          "precision": 0.9649122807017544,
+          "recall": 0.2894736842105263,
+          "tn": 324,
+          "tp": 55
         },
-        "threshold": 0.33
+        "threshold": 0.39
       },
       "multimodal": {
         "hard_test": {
@@ -514,9 +514,9 @@
           "fn": 0,
           "fp": 0,
           "latency_ms": {
-            "p50": 1.7146341097031836,
-            "p95": 1.981506250255431,
-            "p99": 1.9815062502554306
+            "p50": 1.3920221404077893,
+            "p95": 1.5801725153323787,
+            "p99": 1.5801725153323787
           },
           "precision": 1.0,
           "recall": 1.0,
@@ -659,9 +659,9 @@
           "fn": 0,
           "fp": 0,
           "latency_ms": {
-            "p50": 1.5589485624332156,
-            "p95": 1.8048112028736796,
-            "p99": 1.8048112028736796
+            "p50": 1.573924468630139,
+            "p95": 2.1281608123899787,
+            "p99": 2.1281608123899787
           },
           "precision": 1.0,
           "recall": 1.0,
@@ -806,9 +806,9 @@
           "fn": 0,
           "fp": 1,
           "latency_ms": {
-            "p50": 1.8140650940949854,
-            "p95": 2.295333984420722,
-            "p99": 2.295333984420722
+            "p50": 1.4755527345187147,
+            "p95": 1.8286840330498915,
+            "p99": 1.8286840330498915
           },
           "precision": 0.9919354838709677,
           "recall": 1.0,
@@ -951,9 +951,9 @@
           "fn": 0,
           "fp": 0,
           "latency_ms": {
-            "p50": 2.0109075626351114,
-            "p95": 3.775017578391271,
-            "p99": 3.775017578391271
+            "p50": 1.4315944063127972,
+            "p95": 1.607751953542902,
+            "p99": 1.607751953542902
           },
           "precision": 1.0,
           "recall": 1.0,
@@ -962,6 +962,176 @@
         },
         "threshold": 0.99
       }
+    }
+  },
+  "calibration": {
+    "dev_gates": {
+      "action_request_critical_fp_zero": true,
+      "answerable_question_critical_fp_zero": true,
+      "critical_fp_zero": true,
+      "en-US_critical_fp_zero": true,
+      "en-US_precision_gte_0_990": true,
+      "en-US_recall_gte_0_950": true,
+      "es-ES_critical_fp_zero": true,
+      "es-ES_precision_gte_0_990": true,
+      "es-ES_recall_gte_0_950": true,
+      "fragment_critical_fp_zero": true,
+      "ja-JP_critical_fp_zero": true,
+      "ja-JP_precision_gte_0_990": true,
+      "ja-JP_recall_gte_0_950": true,
+      "operational_check_critical_fp_zero": true,
+      "precision_gte_0_995": true,
+      "pt-BR_critical_fp_zero": true,
+      "pt-BR_precision_gte_0_990": true,
+      "pt-BR_recall_gte_0_950": true,
+      "recall_gte_0_970": true,
+      "reported_question_critical_fp_zero": true,
+      "rhetorical_critical_fp_zero": true,
+      "self_answered_critical_fp_zero": true,
+      "small_talk_critical_fp_zero": true,
+      "statement_critical_fp_zero": true,
+      "title_noise_critical_fp_zero": true
+    },
+    "dev_metrics": {
+      "by_label": {
+        "action_request": {
+          "critical_negative_false_positives": 0,
+          "fn": 0,
+          "fp": 0,
+          "precision": 1.0,
+          "recall": 1.0,
+          "tn": 0,
+          "tp": 63
+        },
+        "answerable_question": {
+          "critical_negative_false_positives": 0,
+          "fn": 0,
+          "fp": 0,
+          "precision": 1.0,
+          "recall": 1.0,
+          "tn": 0,
+          "tp": 215
+        },
+        "fragment": {
+          "critical_negative_false_positives": 0,
+          "fn": 0,
+          "fp": 0,
+          "precision": 0.0,
+          "recall": 0.0,
+          "tn": 121,
+          "tp": 0
+        },
+        "operational_check": {
+          "critical_negative_false_positives": 0,
+          "fn": 0,
+          "fp": 0,
+          "precision": 0.0,
+          "recall": 0.0,
+          "tn": 69,
+          "tp": 0
+        },
+        "reported_question": {
+          "critical_negative_false_positives": 0,
+          "fn": 0,
+          "fp": 0,
+          "precision": 0.0,
+          "recall": 0.0,
+          "tn": 49,
+          "tp": 0
+        },
+        "rhetorical": {
+          "critical_negative_false_positives": 0,
+          "fn": 0,
+          "fp": 0,
+          "precision": 0.0,
+          "recall": 0.0,
+          "tn": 61,
+          "tp": 0
+        },
+        "self_answered": {
+          "critical_negative_false_positives": 0,
+          "fn": 0,
+          "fp": 0,
+          "precision": 0.0,
+          "recall": 0.0,
+          "tn": 12,
+          "tp": 0
+        },
+        "small_talk": {
+          "critical_negative_false_positives": 0,
+          "fn": 0,
+          "fp": 0,
+          "precision": 0.0,
+          "recall": 0.0,
+          "tn": 59,
+          "tp": 0
+        },
+        "statement": {
+          "critical_negative_false_positives": 0,
+          "fn": 0,
+          "fp": 0,
+          "precision": 0.0,
+          "recall": 0.0,
+          "tn": 60,
+          "tp": 0
+        },
+        "title_noise": {
+          "critical_negative_false_positives": 0,
+          "fn": 0,
+          "fp": 0,
+          "precision": 0.0,
+          "recall": 0.0,
+          "tn": 22,
+          "tp": 0
+        }
+      },
+      "by_language": {
+        "en-US": {
+          "critical_negative_false_positives": 0,
+          "fn": 0,
+          "fp": 0,
+          "precision": 1.0,
+          "recall": 1.0,
+          "tn": 107,
+          "tp": 56
+        },
+        "es-ES": {
+          "critical_negative_false_positives": 0,
+          "fn": 0,
+          "fp": 0,
+          "precision": 1.0,
+          "recall": 1.0,
+          "tn": 73,
+          "tp": 68
+        },
+        "ja-JP": {
+          "critical_negative_false_positives": 0,
+          "fn": 0,
+          "fp": 0,
+          "precision": 1.0,
+          "recall": 1.0,
+          "tn": 81,
+          "tp": 49
+        },
+        "pt-BR": {
+          "critical_negative_false_positives": 0,
+          "fn": 0,
+          "fp": 0,
+          "precision": 1.0,
+          "recall": 1.0,
+          "tn": 192,
+          "tp": 105
+        }
+      },
+      "critical_negative_false_positives": 0,
+      "error_examples": [],
+      "fn": 0,
+      "fp": 0,
+      "missing_predictions": 0,
+      "precision": 1.0,
+      "recall": 1.0,
+      "tn": 453,
+      "tp": 278
     }
   },
   "config": {
