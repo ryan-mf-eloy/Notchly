@@ -157,7 +157,7 @@ struct QuestionClassificationRulePack: Codable, Hashable, Sendable {
         directedToUserMarkers: ["can you", "could you", "do you know if", "voce pode", "consegue", "você consegue", "me diz", "me fala", "puedes", "podrias", "sabes si", "確認して", "レビューして", "見てもらえ"],
         directedToGroupMarkers: ["anyone", "alguem", "do we", "can we", "should we", "we ", "temos", "podemos", "alguien", "nosotros", "any blockers", "hay algun", "hay alguna", "チーム", "みんな", "誰か"],
         actionableMarkers: ["next", "proximo", "validate", "review", "confirm", "decide", "validar", "revisar", "confirmar", "me diz", "me fala", "確認", "レビュー", "決め"],
-        informationalMarkers: ["what", "what is", "what's", "how", "why", "which", "do you know if", "any blockers", "qual", "o que", "como", "por que", "sabe se", "sera que", "que es", "cual", "sabes si", "hay algun", "何", "どう", "なぜ", "capital", "hash", "python", "arvore", "tree", "system", "sistema", "scale", "escalar"],
+        informationalMarkers: ["what", "what is", "what's", "how", "why", "which", "do you know if", "any blockers", "qual", "quanto", "quanto e", "quantos", "quantas", "o que", "como", "por que", "sabe se", "sera que", "que es", "cual", "cuanto", "cuanto es", "cuantos", "cuantas", "sabes si", "hay algun", "何", "どう", "なぜ", "capital", "hash", "python", "arvore", "tree", "system", "sistema", "scale", "escalar"],
         technicalObjectMarkers: ["api", "backend", "frontend", "auth", "authentication", "autenticacao", "login", "oauth", "jwt", "database", "cache", "queue", "python", "swift", "kotlin", "javascript", "typescript", "react", "node", "hash", "hashid", "tree", "binary tree", "binary three", "binary dream", "algorithm", "algoritmo", "data structure", "service", "endpoint", "system", "sistema", "architecture", "arquitetura", "認証", "サービス"]
     )
 }
@@ -262,14 +262,17 @@ struct QuestionDecisionGate {
         isPartial: Bool
     ) -> Bool {
         guard understanding.responseNeeded else { return false }
-        let threshold = isPartial ? precisionMode.partialConfidenceThreshold : precisionMode.confidenceThreshold
-        guard understanding.confidence >= threshold else { return false }
         let decisionSignals = understanding.strongSignals.subtracting(Set([.finalUtterance]))
         guard decisionSignals.count >= precisionMode.requiredStrongSignalCount else { return false }
         if isPartial {
-            return decisionSignals.contains(.directedToUser)
-                || decisionSignals.contains(.actionRequestFrame) && understanding.confidence >= precisionMode.partialConfidenceThreshold
+            let meetsPartialThreshold = understanding.confidence >= precisionMode.partialConfidenceThreshold
+            let completeQuestionShape = decisionSignals.contains(.interrogativeStarter)
+                && decisionSignals.contains(.concreteObject)
+                && understanding.confidence >= max(precisionMode.confidenceThreshold - 0.12, 0.70)
+            return (meetsPartialThreshold && (decisionSignals.contains(.directedToUser) || decisionSignals.contains(.actionRequestFrame)))
+                || completeQuestionShape
         }
+        guard understanding.confidence >= precisionMode.confidenceThreshold else { return false }
         return true
     }
 }

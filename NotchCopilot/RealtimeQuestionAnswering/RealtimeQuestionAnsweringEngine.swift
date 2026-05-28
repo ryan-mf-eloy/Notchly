@@ -134,7 +134,7 @@ class RealtimeQuestionAnsweringEngine {
     private var buffer = TranscriptWindowBuffer()
     private var candidateStore = QuestionCandidateStore()
     private var partialStabilityTracker = QuestionPartialStabilityTracker()
-    private var pendingDetectionTasks: [UUID: Task<Void, Never>] = [:]
+    private var pendingDetectionTasks: [String: Task<Void, Never>] = [:]
     private var generationTasks: [UUID: Task<Void, Never>] = [:]
 
     private let detectionService: QuestionDetectionService
@@ -191,8 +191,22 @@ class RealtimeQuestionAnsweringEngine {
         let stability = partialStabilityTracker.observe(segment: segment)
         let signal = (incomingSignal ?? QuestionMultimodalSignal(segment: segment))
             .withPartialStability(stability.score, revisionCount: stability.revisionCount)
+        let detectionKey = pendingDetectionKey(for: segment)
+
+        if segment.isFinal {
+            pendingDetectionTasks[detectionKey]?.cancel()
+            pendingDetectionTasks[detectionKey] = nil
+        }
 
         if !segment.isFinal, !stability.isStable {
+            scheduleDeferredPartialDetection(
+                segment: segment,
+                meeting: meeting,
+                preferences: preferences,
+                signal: signal,
+                context: context,
+                detectionKey: detectionKey
+            )
             detectAnsweredQuestions(segment: segment)
             return
         }
@@ -205,18 +219,140 @@ class RealtimeQuestionAnsweringEngine {
 
         for candidate in candidates {
             if segment.isFinal {
-                pendingDetectionTasks[segment.id]?.cancel()
-                pendingDetectionTasks[segment.id] = nil
                 await process(candidate: candidate, meeting: meeting, preferences: preferences)
             } else {
-                pendingDetectionTasks[segment.id]?.cancel()
-                pendingDetectionTasks[segment.id] = Task { [weak self] in
+                pendingDetectionTasks[detectionKey]?.cancel()
+                pendingDetectionTasks[detectionKey] = Task { [weak self] in
                     try? await Task.sleep(for: .milliseconds(750))
                     guard !Task.isCancelled else { return }
                     await self?.process(candidate: candidate, meeting: meeting, preferences: preferences)
                 }
             }
         }
+    }
+
+    private func scheduleDeferredPartialDetection(
+        segment: TranscriptSegment,
+        meeting: MeetingSession,
+        preferences: AppPreferences,
+        signal: QuestionMultimodalSignal,
+        context: TranscriptContext,
+        detectionKey: String
+    ) {
+        pendingDetectionTasks[detectionKey]?.cancel()
+        guard shouldScheduleDeferredPartialDetection(for: segment) else { return }
+
+        let delayedSignal = signal.withPartialStability(
+            max(signal.partialStability, 0.84),
+            revisionCount: max(signal.partialRevisionCount, 1)
+        )
+        pendingDetectionTasks[detectionKey] = Task { [weak self] in
+            try? await Task.sleep(for: .milliseconds(950))
+            guard !Task.isCancelled, let self else { return }
+
+            let candidates = self.detectionService.detectCandidates(
+                from: segment,
+                context: context,
+                signal: delayedSignal
+            )
+            guard !candidates.isEmpty else {
+                self.pendingDetectionTasks[detectionKey] = nil
+                self.detectAnsweredQuestions(segment: segment)
+                return
+            }
+
+            for candidate in candidates {
+                guard !Task.isCancelled else { return }
+                await self.process(candidate: candidate, meeting: meeting, preferences: preferences)
+            }
+            if !Task.isCancelled {
+                self.pendingDetectionTasks[detectionKey] = nil
+            }
+        }
+    }
+
+    private func shouldScheduleDeferredPartialDetection(for segment: TranscriptSegment) -> Bool {
+        let normalized = QuestionDetectionService.normalize(segment.text)
+        guard !normalized.isEmpty else { return false }
+        let tokenCount = normalized.split { !$0.isLetter && !$0.isNumber }.count
+        let cjkCount = normalized.unicodeScalars.filter { scalar in
+            (0x3040...0x30FF).contains(Int(scalar.value)) || (0x4E00...0x9FFF).contains(Int(scalar.value))
+        }.count
+        guard tokenCount >= 4 || cjkCount >= 4 else { return false }
+        let confidence = segment.engineConfidence ?? segment.confidence
+        if confidence < 0.45 {
+            return false
+        }
+        guard detectionService.isLikelyQuestion(normalized) else { return false }
+        return looksCompleteEnoughForDeferredPartial(normalized)
+    }
+
+    private func pendingDetectionKey(for segment: TranscriptSegment) -> String {
+        [
+            segment.meetingId.uuidString,
+            segment.speakerId?.uuidString ?? segment.speakerLabel,
+            segment.audioSource.rawValue
+        ].joined(separator: "|")
+    }
+
+    private func looksCompleteEnoughForDeferredPartial(_ normalized: String) -> Bool {
+        if normalized.contains("?") || normalized.contains("？") || normalized.contains("¿") {
+            return true
+        }
+        if QuestionDetectionService.hasNumericQuestionPayload(normalized) {
+            return true
+        }
+
+        let plain = QuestionIntentGate.plainQuestionText(normalized)
+        let variants = partialAddressVariants(for: plain)
+        if variants.contains(where: isIncompleteActionPartial) {
+            return false
+        }
+
+        return variants.contains { variant in
+            let tokens = variant.split { !$0.isLetter && !$0.isNumber }.map(String.init)
+            guard tokens.count >= 5 || QuestionDetectionService.containsCJK(variant) && variant.count >= 8 else {
+                return false
+            }
+            if let last = tokens.last, isDanglingPartialToken(last) {
+                return false
+            }
+            return true
+        }
+    }
+
+    private func partialAddressVariants(for plain: String) -> [String] {
+        let trimmed = plain.trimmingCharacters(in: .whitespacesAndNewlines)
+        let tokens = trimmed.split(separator: " ").map(String.init)
+        guard tokens.count >= 3 else { return [trimmed] }
+        let withoutFirst = tokens.dropFirst().joined(separator: " ")
+        return [trimmed, withoutFirst]
+    }
+
+    private func isIncompleteActionPartial(_ text: String) -> Bool {
+        let incompleteFrames = [
+            "can you explain", "could you explain", "please explain",
+            "can you review", "could you review", "please review",
+            "can you validate", "could you validate", "please validate",
+            "can you confirm", "could you confirm", "please confirm",
+            "can you tell me", "could you tell me",
+            "consegue explicar", "voce pode explicar", "você pode explicar",
+            "consegue revisar", "voce pode revisar", "você pode revisar",
+            "consegue validar", "voce pode validar", "você pode validar",
+            "me diz", "me fala",
+            "puedes explicar", "podrias explicar", "podrías explicar",
+            "puedes revisar", "podrias revisar", "podrías revisar",
+            "puedes validar", "podrias validar", "podrías validar"
+        ].map(QuestionDetectionService.normalize)
+        return incompleteFrames.contains(text)
+    }
+
+    private func isDanglingPartialToken(_ token: String) -> Bool {
+        [
+            "a", "an", "the", "to", "for", "of", "about", "on",
+            "o", "a", "os", "as", "um", "uma", "de", "do", "da", "dos", "das", "sobre", "para",
+            "el", "la", "los", "las", "un", "una", "de", "del", "sobre", "para"
+        ].contains(token)
     }
 
     func dismiss(questionId: UUID) {

@@ -7069,7 +7069,7 @@ final class NotchCopilotTests: XCTestCase {
         }
 
         await engine.ingest(segment: partial, meeting: meeting, preferences: preferences)
-        try await Task.sleep(for: .milliseconds(850))
+        try await Task.sleep(for: .milliseconds(1_250))
         engine.stop()
 
         let events = await eventTask.value
@@ -7118,6 +7118,64 @@ final class NotchCopilotTests: XCTestCase {
         let events = await eventTask.value
         XCTAssertTrue(events.contains { if case .questionDetected = $0 { return true }; return false })
         XCTAssertTrue(events.contains { if case .suggestedAnswerReady = $0 { return true }; return false })
+    }
+
+    func testRealtimeQAEngineSurfacesSingleCompleteQuestionPartialAfterFallback() async throws {
+        let engine = TestRealtimeQuestionAnsweringEngine()
+        var preferences = AppPreferences()
+        preferences.qaMultimodalMode = .enforced
+        let meetingId = UUID()
+        let meeting = MeetingSession(id: meetingId, title: "Live Apple Speech", status: .listening)
+        let partial = TranscriptSegment(
+            meetingId: meetingId,
+            speakerLabel: "Speaker",
+            text: "Quanto é 2 + 2",
+            originalLanguage: "pt-BR",
+            startTime: 0,
+            endTime: 1.3,
+            confidence: 0.96,
+            isFinal: false
+        )
+        let signal = QuestionMultimodalSignal(segment: partial).withPartialStability(0.84, revisionCount: 1)
+        let context = TranscriptContext(
+            recentTranscript: partial.text,
+            mediumTranscript: partial.text,
+            completeTranscript: partial.text,
+            dominantLanguage: "pt-BR",
+            currentSegment: partial
+        )
+        let directCandidates = QuestionDetectionService().detectCandidates(from: partial, context: context, signal: signal)
+        let directCandidate = try XCTUnwrap(directCandidates.first)
+        XCTAssertTrue(QuestionIntentGate().evaluate(candidate: directCandidate, context: context).isAnswerableQuestion)
+        let directClassification = try await QuestionClassifier(multimodalMode: .enforced)
+            .classifyQuestion(candidate: directCandidate, context: context, userProfile: makeProfile())
+        XCTAssertTrue(directClassification.responseNeeded)
+
+        let eventTask = Task { () -> [RealtimeQuestionEvent] in
+            var events: [RealtimeQuestionEvent] = []
+            for await event in engine.eventBus.events {
+                events.append(event)
+                if case .questionDetected = event { break }
+            }
+            return events
+        }
+
+        await engine.ingest(segment: partial, meeting: meeting, preferences: preferences)
+        try await Task.sleep(for: .milliseconds(1_250))
+        engine.stop()
+
+        let events = await eventTask.value
+        let detected = events.compactMap { event -> (QuestionCandidate, QuestionClassification)? in
+            if case let .questionDetected(candidate, classification) = event {
+                return (candidate, classification)
+            }
+            return nil
+        }
+        let event = try XCTUnwrap(detected.first)
+        XCTAssertEqual(event.0.rawText, "Quanto é 2 + 2")
+        XCTAssertTrue(event.1.responseNeeded)
+        XCTAssertTrue(event.1.complete)
+        XCTAssertEqual(event.1.extractedQuestion, "Quanto é 2 + 2")
     }
 
     func testRealtimeQAGoldFixtureBenchmarkMeetsLatencyTargets() async throws {

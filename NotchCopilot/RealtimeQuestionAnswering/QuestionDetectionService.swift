@@ -184,7 +184,7 @@ struct QuestionSurfaceAnalyzer {
         if isDirectedToGroup(addressed) {
             analysis.strongSignals.insert(.directedToGroup)
         }
-        if !analysis.meaningfulTokens.isEmpty || containsCJK(addressed) && addressed.count >= 5 {
+        if !analysis.meaningfulTokens.isEmpty || hasNumericQuestionPayload(addressed) || containsCJK(addressed) && addressed.count >= 5 {
             analysis.strongSignals.insert(.concreteObject)
         }
         if containsAny(addressed, rulePack.domainHintMarkers) {
@@ -332,7 +332,10 @@ struct QuestionSurfaceAnalyzer {
             return false
         }
         guard requireObject else { return true }
-        return meaningfulTokens(in: text).count >= 1 || containsAny(text, rulePack.domainHintMarkers) || containsCJK(text) && text.count >= 5
+        return meaningfulTokens(in: text).count >= 1
+            || hasNumericQuestionPayload(text)
+            || containsAny(text, rulePack.domainHintMarkers)
+            || containsCJK(text) && text.count >= 5
     }
 
     private func startsWithModalQuestionFrame(_ text: String) -> Bool {
@@ -430,7 +433,9 @@ struct QuestionSurfaceAnalyzer {
         }
         for prefix in rulePack.fragmentPhrases where text.hasPrefix("\(prefix) ") {
             let remainder = text.removingPrefix(prefix).trimmingCharacters(in: .whitespacesAndNewlines)
-            if meaningfulTokens(in: remainder).isEmpty && !containsAny(remainder, rulePack.domainHintMarkers) {
+            if meaningfulTokens(in: remainder).isEmpty
+                && !hasNumericQuestionPayload(remainder)
+                && !containsAny(remainder, rulePack.domainHintMarkers) {
                 return true
             }
         }
@@ -481,6 +486,10 @@ struct QuestionSurfaceAnalyzer {
                     && !rulePack.stopWords.contains(token)
                     && !rulePack.lowInformationWords.contains(token)
             }
+    }
+
+    private func hasNumericQuestionPayload(_ text: String) -> Bool {
+        QuestionDetectionService.hasNumericQuestionPayload(text)
     }
 
     private func containsAny(_ text: String, _ patterns: [String]) -> Bool {
@@ -699,6 +708,43 @@ struct QuestionDetectionService {
     static func containsCJK(_ text: String) -> Bool {
         text.unicodeScalars.contains { scalar in
             (0x3040...0x30FF).contains(Int(scalar.value)) || (0x4E00...0x9FFF).contains(Int(scalar.value))
+        }
+    }
+
+    static func hasNumericQuestionPayload(_ text: String) -> Bool {
+        let normalized = normalize(text)
+        guard !normalized.isEmpty else { return false }
+
+        let digitCount = normalized.split { !$0.isNumber }.count
+        let numberWords: Set<String> = [
+            "zero", "one", "two", "three", "four", "five", "six", "seven", "eight", "nine", "ten",
+            "um", "uma", "dois", "duas", "tres", "três", "quatro", "cinco", "seis", "sete", "oito", "nove", "dez",
+            "uno", "una", "dos", "tres", "cuatro", "cinco", "seis", "siete", "ocho", "nueve", "diez"
+        ]
+        let wordNumberCount = normalized
+            .split { !$0.isLetter && !$0.isNumber }
+            .map(String.init)
+            .filter { numberWords.contains($0) }
+            .count
+        let numericCount = digitCount + wordNumberCount
+        guard numericCount >= 2 else { return false }
+
+        let operatorMarkers = [
+            "+", "-", "*", "/", "×", "÷",
+            "plus", "minus", "times", "divided", "over",
+            "mais", "menos", "vezes", "dividido", "por",
+            "mas", "más"
+        ]
+        return operatorMarkers.contains { marker in
+            let normalizedMarker = normalize(marker)
+            guard !normalizedMarker.isEmpty else { return false }
+            if normalizedMarker.count == 1, !normalizedMarker.first!.isLetter, !normalizedMarker.first!.isNumber {
+                return normalized.contains(normalizedMarker)
+            }
+            return normalized.range(
+                of: "(?<![A-Za-z0-9])\(NSRegularExpression.escapedPattern(for: normalizedMarker))(?![A-Za-z0-9])",
+                options: .regularExpression
+            ) != nil
         }
     }
 }

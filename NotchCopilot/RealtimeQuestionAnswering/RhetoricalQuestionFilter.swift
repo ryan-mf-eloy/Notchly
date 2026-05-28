@@ -27,12 +27,12 @@ struct QuestionIntentRulePack: Codable, Hashable, Sendable {
             "do we", "do you", "do we have", "can we", "can you", "could we", "could you", "should we",
             "would it", "does this", "will this", "is there", "are there", "any blockers", "main risk",
             "quick question", "one question", "do you know if", "do you know whether", "you know if",
-            "qual", "qual e", "qual a", "quando", "quem", "onde", "por que", "porque", "como", "o que e",
+            "qual", "qual e", "qual a", "quando", "quem", "onde", "por que", "porque", "como", "quanto", "quanto e", "quantos", "quantas", "o que e",
             "voce acha", "voces acham", "alguem sabe se", "conseguimos", "consegue", "podemos", "pode",
             "sera que", "faz sentido", "existe", "temos", "tem como", "da pra", "da para", "sabe se",
             "voce sabe se", "voces sabem se", "me diz qual", "me diz se", "me fala qual", "me fala se",
             "isso quebra", "isso impacta", "isso afeta", "algum problema", "algum bloqueio", "algum risco", "alguma dependencia",
-            "que ", "cual", "cuando", "quien", "donde", "podrias", "puedes", "tiene sentido", "hay algun",
+            "que ", "cual", "cuando", "quien", "donde", "cuanto", "cuanto es", "cuantos", "cuantas", "podrias", "puedes", "tiene sentido", "hay algun",
             "hay alguna", "sabemos si", "sabes si", "saben si", "alguien sabe si", "esto rompe", "esto impacta",
             "どう", "何", "いつ", "誰", "誰が", "どこ", "なぜ", "できますか", "でしょうか", "ですか", "ますか", "ましたか", "ありますか",
             "終わりましたか", "知っていますか", "わかりますか", "必要ですか", "問題ありますか", "影響しますか", "リスク"
@@ -353,7 +353,9 @@ struct QuestionIntentGate {
         if rulePack.fragmentPhrases.contains(plain) { return true }
         for prefix in rulePack.fragmentPhrases where plain.hasPrefix("\(prefix) ") {
             let remainder = plain.removingPrefix(prefix).trimmingCharacters(in: .whitespacesAndNewlines)
-            if meaningfulTokens(in: remainder).isEmpty && !containsAny(remainder, rulePack.domainHintMarkers) {
+            if meaningfulTokens(in: remainder).isEmpty
+                && !hasNumericQuestionPayload(remainder)
+                && !containsAny(remainder, rulePack.domainHintMarkers) {
                 return true
             }
         }
@@ -430,6 +432,9 @@ struct QuestionIntentGate {
         if containsAny(plain, rulePack.domainHintMarkers) {
             score += 0.55
         }
+        if hasNumericQuestionPayload(plain) {
+            score += 0.95
+        }
         score += min(Double(meaningfulTokens(in: plain).count) * 0.38, 1.35)
         if hasCodeOrIdentifierSignal(rawText) {
             score += 0.45
@@ -453,6 +458,7 @@ struct QuestionIntentGate {
 
     private func hasConcreteObject(_ plain: String, context: TranscriptContext?) -> Bool {
         !meaningfulTokens(in: plain).isEmpty
+            || hasNumericQuestionPayload(plain)
             || containsAny(plain, rulePack.domainHintMarkers)
             || containsCJK(plain) && plain.count >= 4
             || hasContextualCarryover(plain: plain, context: context)
@@ -494,6 +500,10 @@ struct QuestionIntentGate {
     private func hasCodeOrIdentifierSignal(_ text: String) -> Bool {
         text.contains("_") || text.contains("`") || text.contains("/") || text.contains("#")
             || text.range(of: #"[A-Za-z]+[A-Z0-9][A-Za-z0-9]*"#, options: .regularExpression) != nil
+    }
+
+    private func hasNumericQuestionPayload(_ text: String) -> Bool {
+        QuestionDetectionService.hasNumericQuestionPayload(text)
     }
 
     private func containsCJK(_ text: String) -> Bool {
