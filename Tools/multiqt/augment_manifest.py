@@ -166,6 +166,8 @@ def fragment_row(row: dict[str, Any], fragment: str) -> dict[str, Any]:
     mutated["is_partial"] = True
     mutated["complete"] = False
     mutated["response_needed"] = False
+    mutated["candidate_detection"] = False
+    mutated["surface_miss"] = False
     mutated["critical_negative"] = True
     mutated["label"] = "fragment"
     duration_ms = max(400, int((int(row["end_ms"]) - int(row["start_ms"])) * 0.45))
@@ -186,6 +188,8 @@ def negative_wrapper(row: dict[str, Any], templates: dict[str, str], label: str)
     mutated["transcript"] = wrapped
     mutated["asr_transcript"] = wrapped
     mutated["response_needed"] = False
+    mutated["candidate_detection"] = False
+    mutated["surface_miss"] = False
     mutated["critical_negative"] = True
     mutated["complete"] = True
     mutated["is_partial"] = False

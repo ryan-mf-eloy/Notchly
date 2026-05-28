@@ -115,6 +115,35 @@ struct QuestionSurfaceAnalysis: Hashable, Sendable {
     var strongSignalCount: Int { strongSignals.count }
 }
 
+struct QuestionRejectedFrame: Hashable, Sendable {
+    var frame: UtteranceFrame
+    var surfaceSignals: [String]
+    var suppressionSignals: [String]
+    var reason: String
+
+    var hasHardSuppression: Bool {
+        suppressionSignals.contains { signal in
+            [
+                "empty",
+                "small_talk",
+                "operational_check",
+                "reported_question",
+                "rhetorical",
+                "self_answered",
+                "fragment",
+                "noun_phrase_or_title"
+            ].contains(signal)
+        }
+    }
+}
+
+struct QuestionDetectionResult: Hashable, Sendable {
+    var surfaceCandidates: [QuestionCandidate]
+    var rejectedFrames: [QuestionRejectedFrame]
+
+    static let empty = QuestionDetectionResult(surfaceCandidates: [], rejectedFrames: [])
+}
+
 struct QuestionSurfaceAnalyzer {
     var rulePack: QuestionIntentRulePack = .default
 
@@ -522,7 +551,14 @@ struct QuestionCandidateExtractor {
     var analyzer: QuestionSurfaceAnalyzer { QuestionSurfaceAnalyzer(rulePack: rulePack) }
 
     func candidates(from frames: [UtteranceFrame], context: TranscriptContext, profile: UserMeetingProfile? = nil) -> [QuestionCandidate] {
-        frames.compactMap { frame in
+        detectionResult(from: frames, context: context, profile: profile).surfaceCandidates
+    }
+
+    func detectionResult(from frames: [UtteranceFrame], context: TranscriptContext, profile: UserMeetingProfile? = nil) -> QuestionDetectionResult {
+        var surfaceCandidates: [QuestionCandidate] = []
+        var rejectedFrames: [QuestionRejectedFrame] = []
+
+        for frame in frames {
             let analysis = analyzer.analyze(
                 text: frame.rawText,
                 normalized: frame.normalizedText,
@@ -531,21 +567,47 @@ struct QuestionCandidateExtractor {
                 isPartial: frame.isPartial,
                 isFinal: frame.isFinal
             )
-            guard analyzer.isCandidateSurface(analysis, precisionMode: precisionMode) else { return nil }
-            return QuestionCandidate(
-                meetingId: frame.meetingId,
-                rawText: frame.rawText,
-                normalizedText: frame.normalizedText,
-                language: frame.language,
-                speakerId: frame.speakerId,
-                speakerLabel: frame.speakerLabel,
-                startTime: frame.startTime,
-                endTime: frame.endTime,
-                sourceSegmentIds: [frame.sourceSegmentId],
-                isPartial: frame.isPartial,
-                multimodalSignal: frame.multimodalSignal
+            let surfaceSignals = analysis.strongSignals.map(\.rawValue).sorted()
+            let suppressionSignals = analysis.negativeSignals
+            guard analyzer.isCandidateSurface(analysis, precisionMode: precisionMode) else {
+                rejectedFrames.append(
+                    QuestionRejectedFrame(
+                        frame: frame,
+                        surfaceSignals: surfaceSignals,
+                        suppressionSignals: suppressionSignals,
+                        reason: suppressionSignals.isEmpty
+                            ? "surface_below_candidate_threshold"
+                            : suppressionSignals.joined(separator: ",")
+                    )
+                )
+                continue
+            }
+            surfaceCandidates.append(
+                QuestionCandidate(
+                    meetingId: frame.meetingId,
+                    rawText: frame.rawText,
+                    normalizedText: frame.normalizedText,
+                    language: frame.language,
+                    speakerId: frame.speakerId,
+                    speakerLabel: frame.speakerLabel,
+                    startTime: frame.startTime,
+                    endTime: frame.endTime,
+                    sourceSegmentIds: [frame.sourceSegmentId],
+                    isPartial: frame.isPartial,
+                    multimodalSignal: frame.multimodalSignal,
+                    discovery: QuestionCandidateDiscovery(
+                        source: .surface,
+                        surfaceSignals: surfaceSignals,
+                        surfaceSuppressionSignals: suppressionSignals
+                    )
+                )
             )
         }
+
+        return QuestionDetectionResult(
+            surfaceCandidates: surfaceCandidates,
+            rejectedFrames: rejectedFrames
+        )
     }
 }
 
@@ -660,28 +722,41 @@ struct QuestionDetectionService {
     }
 
     func detectCandidates(from segment: TranscriptSegment, context: TranscriptContext, signal: QuestionMultimodalSignal?) -> [QuestionCandidate] {
+        detect(from: segment, context: context, signal: signal).surfaceCandidates
+    }
+
+    func detect(from segment: TranscriptSegment, context: TranscriptContext) -> QuestionDetectionResult {
+        detect(from: segment, context: context, signal: nil)
+    }
+
+    func detect(from segment: TranscriptSegment, context: TranscriptContext, signal: QuestionMultimodalSignal?) -> QuestionDetectionResult {
         let frames = frameBuilder.frames(from: segment, context: context, signal: signal)
-        guard !frames.isEmpty else { return [] }
-        return extractor.candidates(from: frames, context: context).map { candidate in
-            if candidate.language != nil { return candidate }
-            return QuestionCandidate(
-                id: candidate.id,
-                meetingId: candidate.meetingId,
-                rawText: candidate.rawText,
-                normalizedText: candidate.normalizedText,
-                language: languageDetector.dominantLanguage(for: candidate.rawText),
-                speakerId: candidate.speakerId,
-                speakerLabel: candidate.speakerLabel,
-                startTime: candidate.startTime,
-                endTime: candidate.endTime,
-                sourceSegmentIds: candidate.sourceSegmentIds,
-                isPartial: candidate.isPartial,
-                detectedAt: candidate.detectedAt,
-                multimodalSignal: candidate.multimodalSignal,
-                classification: candidate.classification,
-                status: candidate.status
-            )
-        }
+        guard !frames.isEmpty else { return .empty }
+        let result = extractor.detectionResult(from: frames, context: context)
+        return QuestionDetectionResult(
+            surfaceCandidates: result.surfaceCandidates.map { candidate in
+                if candidate.language != nil { return candidate }
+                return QuestionCandidate(
+                    id: candidate.id,
+                    meetingId: candidate.meetingId,
+                    rawText: candidate.rawText,
+                    normalizedText: candidate.normalizedText,
+                    language: languageDetector.dominantLanguage(for: candidate.rawText),
+                    speakerId: candidate.speakerId,
+                    speakerLabel: candidate.speakerLabel,
+                    startTime: candidate.startTime,
+                    endTime: candidate.endTime,
+                    sourceSegmentIds: candidate.sourceSegmentIds,
+                    isPartial: candidate.isPartial,
+                    detectedAt: candidate.detectedAt,
+                    multimodalSignal: candidate.multimodalSignal,
+                    discovery: candidate.discovery,
+                    classification: candidate.classification,
+                    status: candidate.status
+                )
+            },
+            rejectedFrames: result.rejectedFrames
+        )
     }
 
     func isLikelyQuestion(_ normalized: String) -> Bool {

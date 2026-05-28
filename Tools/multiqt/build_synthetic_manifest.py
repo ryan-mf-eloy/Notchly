@@ -137,6 +137,11 @@ def main() -> int:
             "speaker_role": "synthetic",
             "label": label,
             "response_needed": bool(source.get("responseNeeded", label in POSITIVE_LABELS)),
+            "candidate_detection": bool(source.get(
+                "candidateDetection",
+                source.get("candidate_detection", source.get("responseNeeded", label in POSITIVE_LABELS)),
+            )),
+            "surface_miss": bool(source.get("surfaceMiss", source.get("surface_miss", False))),
             "critical_negative": label in CRITICAL_NEGATIVE_LABELS,
             "complete": label != "fragment",
             "question_span": [0, len(text)],

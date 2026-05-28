@@ -110,7 +110,7 @@ def main() -> int:
         for batch in loader:
             batch = batch_to_device(batch, device)
             optimizer.zero_grad(set_to_none=True)
-            response_logit, label_logits, complete_logit, rhetorical_logit = model(
+            response_logit, candidate_logit, label_logits, complete_logit, rhetorical_logit = model(
                 batch["text_tokens"],
                 batch["audio_logmel"],
                 batch["scalars"],
@@ -118,6 +118,7 @@ def main() -> int:
             weights = sample_weights(batch, args.positive_weight, args.critical_negative_weight)
             loss = (
                 weighted_mean(response_loss(response_logit, batch["response_needed"]), weights)
+                + 0.35 * weighted_mean(binary_loss(candidate_logit, batch["candidate_detection"]), weights)
                 + 0.45 * weighted_mean(label_loss(label_logits, batch["label_id"]), weights)
                 + 0.20 * weighted_mean(binary_loss(complete_logit, batch["complete"]), weights)
                 + 0.20 * weighted_mean(binary_loss(rhetorical_logit, batch["rhetorical"]), weights)
@@ -261,6 +262,7 @@ class MultiQTDataset(Dataset):
             "audio_logmel": audio_logmel,
             "scalars": torch.tensor(scalars_for_row(row), dtype=torch.float32),
             "response_needed": torch.tensor(float(row["response_needed"]), dtype=torch.float32),
+            "candidate_detection": torch.tensor(float(row.get("candidate_detection", row["response_needed"])), dtype=torch.float32),
             "complete": torch.tensor(float(row["complete"]), dtype=torch.float32),
             "rhetorical": torch.tensor(float(row["label"] == "rhetorical"), dtype=torch.float32),
             "critical_negative": torch.tensor(float(row.get("critical_negative", False)), dtype=torch.float32),
@@ -495,18 +497,20 @@ def predict(
         for batch in loader:
             batch = batch_to_device(batch, device)
             started = time.perf_counter()
-            response_logit, label_logits, complete_logit, rhetorical_logit = model(batch["text_tokens"], batch["audio_logmel"], batch["scalars"])
+            response_logit, candidate_logit, label_logits, complete_logit, rhetorical_logit = model(batch["text_tokens"], batch["audio_logmel"], batch["scalars"])
             elapsed_ms = (time.perf_counter() - started) * 1000.0
             scores = torch.sigmoid(response_logit).cpu().tolist()
+            candidate_scores = torch.sigmoid(candidate_logit).cpu().tolist()
             label_ids = torch.argmax(label_logits, dim=1).cpu().tolist()
             complete_scores = torch.sigmoid(complete_logit).cpu().tolist()
             rhetorical_scores = torch.sigmoid(rhetorical_logit).cpu().tolist()
             truths = batch["response_needed"].cpu().tolist()
             per_item_ms = safe_div(elapsed_ms, max(1, len(scores)))
-            for score, label_id, complete_score, rhetorical_score, truth in zip(scores, label_ids, complete_scores, rhetorical_scores, truths):
+            for score, candidate_score, label_id, complete_score, rhetorical_score, truth in zip(scores, candidate_scores, label_ids, complete_scores, rhetorical_scores, truths):
                 output.append(
                     {
                         "score": float(score),
+                        "candidate_score": float(candidate_score),
                         "label_id": float(label_id),
                         "complete_score": float(complete_score),
                         "rhetorical_score": float(rhetorical_score),
@@ -527,6 +531,7 @@ def prediction_rows(
             {
                 "id": manifest["id"],
                 "score": prediction["score"],
+                "candidate_score": prediction.get("candidate_score"),
                 "label_id": prediction["label_id"],
                 "complete_score": prediction["complete_score"],
                 "rhetorical_score": prediction["rhetorical_score"],

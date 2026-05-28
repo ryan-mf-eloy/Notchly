@@ -10,28 +10,14 @@
          <BuildActionEntry
             buildForTesting = "YES"
             buildForRunning = "YES"
-            buildForProfiling = "YES"
-            buildForArchiving = "YES"
-            buildForAnalyzing = "YES">
-            <BuildableReference
-               BuildableIdentifier = "primary"
-               BlueprintIdentifier = "20959455DA45AFBA57CC4E26"
-               BuildableName = "Notchly.app"
-               BlueprintName = "NotchCopilot"
-               ReferencedContainer = "container:NotchCopilot.xcodeproj">
-            </BuildableReference>
-         </BuildActionEntry>
-         <BuildActionEntry
-            buildForTesting = "YES"
-            buildForRunning = "NO"
             buildForProfiling = "NO"
             buildForArchiving = "NO"
             buildForAnalyzing = "NO">
             <BuildableReference
                BuildableIdentifier = "primary"
-               BlueprintIdentifier = "B5DFAB96DA8308BAC0E2EBF5"
-               BuildableName = "NotchCopilotTests.xctest"
-               BlueprintName = "NotchCopilotTests"
+               BlueprintIdentifier = "20959455DA45AFBA57CC4E26"
+               BuildableName = "Notchly.app"
+               BlueprintName = "NotchCopilot"
                ReferencedContainer = "container:NotchCopilot.xcodeproj">
             </BuildableReference>
          </BuildActionEntry>
@@ -73,17 +59,6 @@
             parallelizable = "NO">
             <BuildableReference
                BuildableIdentifier = "primary"
-               BlueprintIdentifier = "B5DFAB96DA8308BAC0E2EBF5"
-               BuildableName = "NotchCopilotTests.xctest"
-               BlueprintName = "NotchCopilotTests"
-               ReferencedContainer = "container:NotchCopilot.xcodeproj">
-            </BuildableReference>
-         </TestableReference>
-         <TestableReference
-            skipped = "YES"
-            parallelizable = "NO">
-            <BuildableReference
-               BuildableIdentifier = "primary"
                BlueprintIdentifier = "4B0C1C475258373F49A0C5C2"
                BuildableName = "NotchCopilotUITests.xctest"
                BlueprintName = "NotchCopilotUITests"
@@ -91,8 +66,6 @@
             </BuildableReference>
          </TestableReference>
       </Testables>
-      <CommandLineArguments>
-      </CommandLineArguments>
    </TestAction>
    <LaunchAction
       buildConfiguration = "Debug"
@@ -116,8 +89,6 @@
             ReferencedContainer = "container:NotchCopilot.xcodeproj">
          </BuildableReference>
       </BuildableProductRunnable>
-      <CommandLineArguments>
-      </CommandLineArguments>
    </LaunchAction>
    <ProfileAction
       buildConfiguration = "Release"

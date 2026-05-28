@@ -3,6 +3,58 @@ import AVFoundation
 import CoreML
 import Foundation
 
+enum QuestionCandidateDiscoverySource: String, Codable, CaseIterable, Identifiable, Sendable {
+    case surface
+    case multiqtRescue
+    case shadowRescue
+
+    var id: String { rawValue }
+}
+
+struct QuestionCandidateDiscovery: Codable, Hashable, Sendable {
+    var source: QuestionCandidateDiscoverySource
+    var surfaceSignals: [String]
+    var surfaceSuppressionSignals: [String]
+    var modelScore: Double?
+    var modelThreshold: Double?
+    var modelLabel: String?
+    var modelDecisionSignals: [String]?
+    var modelSuppressionSignals: [String]?
+
+    static let surface = QuestionCandidateDiscovery(source: .surface)
+
+    init(
+        source: QuestionCandidateDiscoverySource,
+        surfaceSignals: [String] = [],
+        surfaceSuppressionSignals: [String] = [],
+        modelScore: Double? = nil,
+        modelThreshold: Double? = nil,
+        modelLabel: String? = nil,
+        modelDecisionSignals: [String]? = nil,
+        modelSuppressionSignals: [String]? = nil
+    ) {
+        self.source = source
+        self.surfaceSignals = surfaceSignals
+        self.surfaceSuppressionSignals = surfaceSuppressionSignals
+        self.modelScore = modelScore
+        self.modelThreshold = modelThreshold
+        self.modelLabel = modelLabel
+        self.modelDecisionSignals = modelDecisionSignals
+        self.modelSuppressionSignals = modelSuppressionSignals
+    }
+
+    func withTrainedPrediction(_ prediction: QuestionTrainedMultimodalPrediction?) -> QuestionCandidateDiscovery {
+        guard let prediction else { return self }
+        var copy = self
+        copy.modelScore = prediction.responseScore
+        copy.modelThreshold = prediction.threshold
+        copy.modelLabel = prediction.label
+        copy.modelDecisionSignals = prediction.decisionSignals
+        copy.modelSuppressionSignals = prediction.suppressionSignals
+        return copy
+    }
+}
+
 struct QuestionCandidate: Identifiable, Codable, Hashable, Sendable {
     let id: UUID
     let meetingId: UUID
@@ -17,6 +69,7 @@ struct QuestionCandidate: Identifiable, Codable, Hashable, Sendable {
     let isPartial: Bool
     let detectedAt: Date
     let multimodalSignal: QuestionMultimodalSignal?
+    var discovery: QuestionCandidateDiscovery
     var classification: QuestionClassification?
     var status: QuestionStatus
 
@@ -34,6 +87,7 @@ struct QuestionCandidate: Identifiable, Codable, Hashable, Sendable {
         isPartial: Bool,
         detectedAt: Date = Date(),
         multimodalSignal: QuestionMultimodalSignal? = nil,
+        discovery: QuestionCandidateDiscovery = .surface,
         classification: QuestionClassification? = nil,
         status: QuestionStatus = .candidate
     ) {
@@ -50,8 +104,68 @@ struct QuestionCandidate: Identifiable, Codable, Hashable, Sendable {
         self.isPartial = isPartial
         self.detectedAt = detectedAt
         self.multimodalSignal = multimodalSignal
+        self.discovery = discovery
         self.classification = classification
         self.status = status
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case id
+        case meetingId
+        case rawText
+        case normalizedText
+        case language
+        case speakerId
+        case speakerLabel
+        case startTime
+        case endTime
+        case sourceSegmentIds
+        case isPartial
+        case detectedAt
+        case multimodalSignal
+        case discovery
+        case classification
+        case status
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(UUID.self, forKey: .id)
+        meetingId = try container.decode(UUID.self, forKey: .meetingId)
+        rawText = try container.decode(String.self, forKey: .rawText)
+        normalizedText = try container.decode(String.self, forKey: .normalizedText)
+        language = try container.decodeIfPresent(String.self, forKey: .language)
+        speakerId = try container.decodeIfPresent(UUID.self, forKey: .speakerId)
+        speakerLabel = try container.decodeIfPresent(String.self, forKey: .speakerLabel)
+        startTime = try container.decode(TimeInterval.self, forKey: .startTime)
+        endTime = try container.decodeIfPresent(TimeInterval.self, forKey: .endTime)
+        sourceSegmentIds = try container.decode([UUID].self, forKey: .sourceSegmentIds)
+        isPartial = try container.decode(Bool.self, forKey: .isPartial)
+        detectedAt = try container.decode(Date.self, forKey: .detectedAt)
+        multimodalSignal = try container.decodeIfPresent(QuestionMultimodalSignal.self, forKey: .multimodalSignal)
+        discovery = try container.decodeIfPresent(QuestionCandidateDiscovery.self, forKey: .discovery) ?? .surface
+        classification = try container.decodeIfPresent(QuestionClassification.self, forKey: .classification)
+        status = try container.decode(QuestionStatus.self, forKey: .status)
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(id, forKey: .id)
+        try container.encode(meetingId, forKey: .meetingId)
+        try container.encode(rawText, forKey: .rawText)
+        try container.encode(normalizedText, forKey: .normalizedText)
+        try container.encodeIfPresent(language, forKey: .language)
+        try container.encodeIfPresent(speakerId, forKey: .speakerId)
+        try container.encodeIfPresent(speakerLabel, forKey: .speakerLabel)
+        try container.encode(startTime, forKey: .startTime)
+        try container.encodeIfPresent(endTime, forKey: .endTime)
+        try container.encode(sourceSegmentIds, forKey: .sourceSegmentIds)
+        try container.encode(isPartial, forKey: .isPartial)
+        try container.encode(detectedAt, forKey: .detectedAt)
+        try container.encodeIfPresent(multimodalSignal, forKey: .multimodalSignal)
+        try container.encode(discovery, forKey: .discovery)
+        try container.encodeIfPresent(classification, forKey: .classification)
+        try container.encode(status, forKey: .status)
     }
 }
 
@@ -550,6 +664,7 @@ protocol QuestionTrainedMultimodalModelRunning: Sendable {
 
 struct QuestionTrainedMultimodalPrediction: Codable, Hashable, Sendable {
     var responseScore: Double
+    var candidateScore: Double?
     var label: String?
     var completeScore: Double?
     var rhetoricalScore: Double?
@@ -558,11 +673,49 @@ struct QuestionTrainedMultimodalPrediction: Codable, Hashable, Sendable {
     var decisionSignals: [String]
     var suppressionSignals: [String]
 
+    init(
+        responseScore: Double,
+        candidateScore: Double? = nil,
+        label: String?,
+        completeScore: Double?,
+        rhetoricalScore: Double?,
+        threshold: Double,
+        decisionLatencyMs: Double?,
+        decisionSignals: [String],
+        suppressionSignals: [String]
+    ) {
+        self.responseScore = responseScore
+        self.candidateScore = candidateScore
+        self.label = label
+        self.completeScore = completeScore
+        self.rhetoricalScore = rhetoricalScore
+        self.threshold = threshold
+        self.decisionLatencyMs = decisionLatencyMs
+        self.decisionSignals = decisionSignals
+        self.suppressionSignals = suppressionSignals
+    }
+
     var shouldAllow: Bool {
         responseScore >= threshold
             && (completeScore ?? 1) >= 0.5
             && (rhetoricalScore ?? 0) < 0.5
             && suppressionSignals.isEmpty
+    }
+
+    var isPositiveLabel: Bool {
+        guard let label else { return false }
+        return [
+            "answerable_question",
+            "action_request",
+            "status",
+            "risk",
+            "technical_decision",
+            "technical_explanation",
+            "deadline",
+            "ownership",
+            "follow_up",
+            "business"
+        ].contains(label)
     }
 }
 
@@ -652,6 +805,7 @@ final class CoreMLQuestionMultiQTModelRunner: QuestionTrainedMultimodalModelRunn
             let label = labelOutput(named: "label_logits", from: output, labels: metadata.labels)
             let complete = scalarOutput(named: "complete_logit", from: output).map(sigmoid)
             let rhetorical = scalarOutput(named: "rhetorical_logit", from: output).map(sigmoid)
+            let candidateScore = scalarOutput(named: "candidate_logit", from: output).map(sigmoid)
             let score = sigmoid(responseLogit)
             let resolvedThreshold = threshold(for: candidate, signal: signal, metadata: metadata)
             var suppression: [String] = []
@@ -669,6 +823,7 @@ final class CoreMLQuestionMultiQTModelRunner: QuestionTrainedMultimodalModelRunn
             }
             return QuestionTrainedMultimodalPrediction(
                 responseScore: min(max(score, 0), 1),
+                candidateScore: candidateScore.map { min(max($0, 0), 1) },
                 label: label,
                 completeScore: complete,
                 rhetoricalScore: rhetorical,

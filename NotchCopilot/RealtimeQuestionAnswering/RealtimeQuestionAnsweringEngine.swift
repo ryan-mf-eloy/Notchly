@@ -15,6 +15,11 @@ struct QuestionShadowDecisionRecord: Codable, Hashable, Sendable {
     var decisionScore: Double?
     var decisionSignals: [String]?
     var suppressionSignals: [String]?
+    var discoverySource: QuestionCandidateDiscoverySource?
+    var surfaceSignals: [String]?
+    var surfaceSuppressionSignals: [String]?
+    var modelLabel: String?
+    var modelThreshold: Double?
     var createdAt: Date = Date()
 }
 
@@ -36,8 +41,42 @@ struct QuestionShadowLogger {
             multimodalConfidence: classification.multimodalConfidence,
             decisionScore: classification.decisionScore,
             decisionSignals: classification.decisionSignals,
-            suppressionSignals: classification.suppressionSignals
+            suppressionSignals: classification.suppressionSignals,
+            discoverySource: candidate.discovery.source,
+            surfaceSignals: candidate.discovery.surfaceSignals,
+            surfaceSuppressionSignals: candidate.discovery.surfaceSuppressionSignals,
+            modelLabel: candidate.discovery.modelLabel,
+            modelThreshold: candidate.discovery.modelThreshold
         )
+        append(record)
+    }
+
+    func record(rejectedFrame: QuestionRejectedFrame, prediction: QuestionTrainedMultimodalPrediction?, decision: String) {
+        let record = QuestionShadowDecisionRecord(
+            candidateId: rejectedFrame.frame.id,
+            meetingId: rejectedFrame.frame.meetingId,
+            rawText: PrivacyGuard().redact(rejectedFrame.frame.rawText),
+            language: rejectedFrame.frame.language ?? rejectedFrame.frame.multimodalSignal?.language,
+            decision: decision,
+            reason: rejectedFrame.reason,
+            confidence: prediction?.responseScore ?? 0,
+            responseNeeded: prediction?.shouldAllow ?? false,
+            priority: .low,
+            textualConfidence: nil,
+            multimodalConfidence: prediction?.responseScore,
+            decisionScore: prediction?.candidateScore ?? prediction?.responseScore,
+            decisionSignals: prediction?.decisionSignals,
+            suppressionSignals: prediction?.suppressionSignals,
+            discoverySource: .shadowRescue,
+            surfaceSignals: rejectedFrame.surfaceSignals,
+            surfaceSuppressionSignals: rejectedFrame.suppressionSignals,
+            modelLabel: prediction?.label,
+            modelThreshold: prediction?.threshold
+        )
+        append(record)
+    }
+
+    private func append(_ record: QuestionShadowDecisionRecord) {
         guard let data = try? JSONEncoder().encode(record),
               let line = String(data: data, encoding: .utf8)
         else { return }
@@ -143,6 +182,7 @@ class RealtimeQuestionAnsweringEngine {
     private let answerProvider: any MeetingAnswerProvider
     private let deduplicator: QuestionDeduplicator
     private let intentGate: QuestionIntentGate
+    private let multiqtRescuer: QuestionMultiQTCandidateRescuer?
     private let shadowLogger: QuestionShadowLogger?
 
     init(
@@ -153,6 +193,7 @@ class RealtimeQuestionAnsweringEngine {
         answerProvider: any MeetingAnswerProvider,
         deduplicator: QuestionDeduplicator = QuestionDeduplicator(),
         intentGate: QuestionIntentGate = QuestionIntentGate(),
+        multiqtRescuer: QuestionMultiQTCandidateRescuer? = nil,
         shadowLogger: QuestionShadowLogger? = nil
     ) {
         self.eventBus = eventBus
@@ -162,6 +203,7 @@ class RealtimeQuestionAnsweringEngine {
         self.answerProvider = answerProvider
         self.deduplicator = deduplicator
         self.intentGate = intentGate
+        self.multiqtRescuer = multiqtRescuer
         self.shadowLogger = shadowLogger
     }
 
@@ -211,7 +253,12 @@ class RealtimeQuestionAnsweringEngine {
             return
         }
 
-        let candidates = detectionService.detectCandidates(from: segment, context: context, signal: signal)
+        let detection = detectionService.detect(from: segment, context: context, signal: signal)
+        let candidates = await candidatesWithMultiQTRescue(
+            detection: detection,
+            context: context,
+            preferences: preferences
+        )
         guard !candidates.isEmpty else {
             detectAnsweredQuestions(segment: segment)
             return
@@ -250,10 +297,15 @@ class RealtimeQuestionAnsweringEngine {
             try? await Task.sleep(for: .milliseconds(950))
             guard !Task.isCancelled, let self else { return }
 
-            let candidates = self.detectionService.detectCandidates(
+            let detection = self.detectionService.detect(
                 from: segment,
                 context: context,
                 signal: delayedSignal
+            )
+            let candidates = await self.candidatesWithMultiQTRescue(
+                detection: detection,
+                context: context,
+                preferences: preferences
             )
             guard !candidates.isEmpty else {
                 self.pendingDetectionTasks[detectionKey] = nil
@@ -293,6 +345,23 @@ class RealtimeQuestionAnsweringEngine {
             segment.speakerId?.uuidString ?? segment.speakerLabel,
             segment.audioSource.rawValue
         ].joined(separator: "|")
+    }
+
+    private func candidatesWithMultiQTRescue(
+        detection: QuestionDetectionResult,
+        context: TranscriptContext,
+        preferences: AppPreferences
+    ) async -> [QuestionCandidate] {
+        guard let multiqtRescuer, preferences.qaMultimodalMode != .off else {
+            return detection.surfaceCandidates
+        }
+        let rescued = await multiqtRescuer.rescueCandidates(
+            from: detection.rejectedFrames,
+            context: context,
+            mode: preferences.qaMultimodalMode,
+            shadowLogger: shadowLogger
+        )
+        return detection.surfaceCandidates + rescued
     }
 
     private func looksCompleteEnoughForDeferredPartial(_ normalized: String) -> Bool {
@@ -376,15 +445,27 @@ class RealtimeQuestionAnsweringEngine {
             eventBus.send(.questionMerged(source: incoming, target: candidate))
         }
 
-        let intent = intentGate.evaluate(candidate: candidate, context: transcriptContext)
-        guard intent.isAnswerableQuestion else {
-            let classification = QuestionClassification(ignoredBy: intent, candidate: candidate)
-            candidate.classification = classification
-            candidate.status = .ignored
-            candidateStore.upsert(candidate)
-            shadowLogger?.record(candidate: candidate, classification: classification, decision: "ignored_intent_gate")
-            eventBus.send(.questionIgnored(candidate, classification.reason))
-            return
+        if candidate.discovery.source == .multiqtRescue {
+            if let hardSuppression = intentGate.hardSuppression(candidate: candidate, context: transcriptContext) {
+                let classification = QuestionClassification(ignoredBy: hardSuppression.evaluation, candidate: candidate)
+                candidate.classification = classification
+                candidate.status = .ignored
+                candidateStore.upsert(candidate)
+                shadowLogger?.record(candidate: candidate, classification: classification, decision: "ignored_hard_suppression")
+                eventBus.send(.questionIgnored(candidate, classification.reason))
+                return
+            }
+        } else {
+            let intent = intentGate.evaluate(candidate: candidate, context: transcriptContext)
+            guard intent.isAnswerableQuestion else {
+                let classification = QuestionClassification(ignoredBy: intent, candidate: candidate)
+                candidate.classification = classification
+                candidate.status = .ignored
+                candidateStore.upsert(candidate)
+                shadowLogger?.record(candidate: candidate, classification: classification, decision: "ignored_intent_gate")
+                eventBus.send(.questionIgnored(candidate, classification.reason))
+                return
+            }
         }
 
         do {
@@ -546,6 +627,10 @@ extension RealtimeQuestionAnsweringEngine {
             contextRetriever: contextRetriever,
             answerProvider: answerProvider,
             intentGate: QuestionIntentGate(adaptiveProfile: preferences.questionAnsweringProfile),
+            multiqtRescuer: QuestionMultiQTCandidateRescuer(
+                trainedModelRunner: CoreMLQuestionMultiQTModelRunner(),
+                intentGate: QuestionIntentGate(adaptiveProfile: preferences.questionAnsweringProfile)
+            ),
             shadowLogger: preferences.qaShadowMode ? QuestionShadowLogger() : nil
         )
     }

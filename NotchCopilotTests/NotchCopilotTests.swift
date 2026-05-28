@@ -7344,6 +7344,249 @@ final class NotchCopilotTests: XCTestCase {
         )
     }
 
+    func testRealtimeQAMultiQTRescuesSurfaceRejectedPositiveCandidate() async throws {
+        let text = "We need the deadline for OAuth endpoint by Friday"
+        let meetingId = UUID()
+        let segment = TranscriptSegment(
+            meetingId: meetingId,
+            speakerLabel: "Speaker",
+            text: text,
+            originalLanguage: "en-US",
+            startTime: 0,
+            endTime: 2.1,
+            confidence: 0.95,
+            isFinal: true
+        )
+        let signal = QuestionMultimodalSignal(segment: segment)
+        let context = TranscriptContext(
+            recentTranscript: text,
+            mediumTranscript: text,
+            completeTranscript: text,
+            dominantLanguage: "en-US",
+            currentSegment: segment
+        )
+        let detector = QuestionDetectionService(precisionMode: .highPrecision)
+        let detection = detector.detect(from: segment, context: context, signal: signal)
+
+        XCTAssertTrue(detection.surfaceCandidates.isEmpty)
+        let rejected = try XCTUnwrap(detection.rejectedFrames.first)
+        XCTAssertFalse(rejected.hasHardSuppression, rejected.reason)
+
+        let prediction = positiveCandidateDetectionPrediction(label: "deadline")
+        let runner = StubTrainedMultiQTModelRunner(prediction: prediction)
+        let rescued = await QuestionMultiQTCandidateRescuer(
+            trainedModelRunner: runner,
+            intentGate: QuestionIntentGate()
+        ).rescueCandidates(
+            from: detection.rejectedFrames,
+            context: context,
+            mode: .enforced
+        )
+
+        let candidate = try XCTUnwrap(rescued.first)
+        XCTAssertEqual(candidate.discovery.source, .multiqtRescue)
+        XCTAssertEqual(candidate.discovery.modelLabel, "deadline")
+        XCTAssertEqual(candidate.discovery.modelScore ?? 0, prediction.responseScore, accuracy: 0.0001)
+
+        let classification = try await QuestionClassifier(
+            precisionMode: .highPrecision,
+            multimodalMode: .enforced,
+            trainedModelRunner: runner
+        ).classifyQuestion(
+            candidate: candidate,
+            context: context,
+            userProfile: makeProfile()
+        )
+
+        XCTAssertTrue(classification.isQuestion, classification.reason)
+        XCTAssertTrue(classification.responseNeeded, classification.reason)
+        XCTAssertTrue(classification.complete)
+        XCTAssertEqual(classification.questionType, .deadlineOrEstimate)
+        XCTAssertEqual(classification.decisionScore ?? 0, prediction.responseScore, accuracy: 0.0001)
+        XCTAssertTrue(classification.reason.contains("MultiQT rescued"))
+    }
+
+    func testRealtimeQAMultiQTDoesNotRescueCriticalNegativeRejectedFrame() async throws {
+        let text = "Can you hear me over the deploy noise"
+        let meetingId = UUID()
+        let segment = TranscriptSegment(
+            meetingId: meetingId,
+            speakerLabel: "Speaker",
+            text: text,
+            originalLanguage: "en-US",
+            startTime: 0,
+            endTime: 1.2,
+            confidence: 0.95,
+            isFinal: true
+        )
+        let signal = QuestionMultimodalSignal(segment: segment)
+        let context = TranscriptContext(
+            recentTranscript: text,
+            mediumTranscript: text,
+            completeTranscript: text,
+            dominantLanguage: "en-US",
+            currentSegment: segment
+        )
+        let detection = QuestionDetectionService(precisionMode: .highPrecision)
+            .detect(from: segment, context: context, signal: signal)
+
+        XCTAssertTrue(detection.surfaceCandidates.isEmpty)
+        let rejected = try XCTUnwrap(detection.rejectedFrames.first)
+        XCTAssertTrue(rejected.hasHardSuppression, rejected.reason)
+
+        let rescued = await QuestionMultiQTCandidateRescuer(
+            trainedModelRunner: StubTrainedMultiQTModelRunner(prediction: positiveCandidateDetectionPrediction(label: "technical_explanation")),
+            intentGate: QuestionIntentGate()
+        ).rescueCandidates(
+            from: detection.rejectedFrames,
+            context: context,
+            mode: .enforced
+        )
+
+        XCTAssertTrue(rescued.isEmpty)
+    }
+
+    func testRealtimeQAMultiQTRescueRequiresStablePartialOrFinal() async throws {
+        let text = "We need the deadline for OAuth endpoint by Friday"
+        let meetingId = UUID()
+        let partial = TranscriptSegment(
+            meetingId: meetingId,
+            speakerLabel: "Speaker",
+            text: text,
+            originalLanguage: "en-US",
+            startTime: 0,
+            endTime: 1.5,
+            confidence: 0.95,
+            isFinal: false
+        )
+        let final = TranscriptSegment(
+            meetingId: meetingId,
+            speakerLabel: "Speaker",
+            text: text,
+            originalLanguage: "en-US",
+            startTime: 0,
+            endTime: 2.1,
+            confidence: 0.95,
+            isFinal: true
+        )
+        let context = TranscriptContext(
+            recentTranscript: text,
+            mediumTranscript: text,
+            completeTranscript: text,
+            dominantLanguage: "en-US",
+            currentSegment: partial
+        )
+        let detector = QuestionDetectionService(precisionMode: .highPrecision)
+        let unstableSignal = QuestionMultimodalSignal(segment: partial).withPartialStability(0.25, revisionCount: 0)
+        let stableSignal = QuestionMultimodalSignal(segment: partial).withPartialStability(0.88, revisionCount: 1)
+        let finalSignal = QuestionMultimodalSignal(segment: final)
+        let runner = StubTrainedMultiQTModelRunner(prediction: positiveCandidateDetectionPrediction(label: "deadline"))
+        let rescuer = QuestionMultiQTCandidateRescuer(trainedModelRunner: runner, intentGate: QuestionIntentGate())
+
+        let unstableDetection = detector.detect(from: partial, context: context, signal: unstableSignal)
+        let unstableRescue = await rescuer.rescueCandidates(from: unstableDetection.rejectedFrames, context: context, mode: .enforced)
+        XCTAssertTrue(unstableRescue.isEmpty)
+
+        let stableDetection = detector.detect(from: partial, context: context, signal: stableSignal)
+        let stableRescue = await rescuer.rescueCandidates(from: stableDetection.rejectedFrames, context: context, mode: .enforced)
+        XCTAssertEqual(stableRescue.first?.discovery.source, .multiqtRescue)
+
+        let finalContext = TranscriptContext(
+            recentTranscript: text,
+            mediumTranscript: text,
+            completeTranscript: text,
+            dominantLanguage: "en-US",
+            currentSegment: final
+        )
+        let finalDetection = detector.detect(from: final, context: finalContext, signal: finalSignal)
+        let finalRescue = await rescuer.rescueCandidates(from: finalDetection.rejectedFrames, context: finalContext, mode: .enforced)
+        XCTAssertEqual(finalRescue.first?.discovery.source, .multiqtRescue)
+    }
+
+    func testRealtimeQAEngineSurfacesMultiQTRescuedSurfaceMissInOrder() async throws {
+        let prediction = positiveCandidateDetectionPrediction(label: "deadline")
+        let runner = StubTrainedMultiQTModelRunner(prediction: prediction)
+        let engine = RealtimeQuestionAnsweringEngine(
+            classifierProvider: QuestionClassifier(
+                precisionMode: .highPrecision,
+                multimodalMode: .enforced,
+                trainedModelRunner: runner
+            ),
+            contextRetriever: MeetingContextRetriever(knowledgeStore: nil),
+            answerProvider: TestMeetingAnswerProvider(),
+            multiqtRescuer: QuestionMultiQTCandidateRescuer(
+                trainedModelRunner: runner,
+                intentGate: QuestionIntentGate()
+            )
+        )
+        var preferences = AppPreferences()
+        preferences.qaMultimodalMode = .enforced
+        preferences.qaPrecisionMode = .highPrecision
+        let meetingId = UUID()
+        let meeting = MeetingSession(id: meetingId, title: "Rescue", status: .listening)
+        let segment = TranscriptSegment(
+            meetingId: meetingId,
+            speakerLabel: "Speaker",
+            text: "We need the deadline for OAuth endpoint by Friday",
+            originalLanguage: "en-US",
+            startTime: 0,
+            endTime: 2.1,
+            confidence: 0.95,
+            isFinal: true
+        )
+
+        let eventTask = Task { () -> [RealtimeQuestionEvent] in
+            var events: [RealtimeQuestionEvent] = []
+            for await event in engine.eventBus.events {
+                events.append(event)
+                if case .suggestedAnswerReady = event { break }
+            }
+            return events
+        }
+
+        await engine.ingest(segment: segment, meeting: meeting, preferences: preferences)
+        try await Task.sleep(for: .milliseconds(100))
+        engine.stop()
+
+        let events = await eventTask.value
+        let detected = events.compactMap { event -> QuestionCandidate? in
+            if case let .questionDetected(candidate, _) = event { return candidate }
+            return nil
+        }
+        let candidate = try XCTUnwrap(detected.first)
+        XCTAssertEqual(candidate.discovery.source, .multiqtRescue)
+        XCTAssertTrue(events.contains(where: { if case let .answerGenerating(_, stage) = $0 { return stage == .retrievingContext }; return false }))
+        XCTAssertTrue(events.contains(where: { if case let .answerGenerating(_, stage) = $0 { return stage == .drafting }; return false }))
+        XCTAssertTrue(events.contains(where: { if case .suggestedAnswerReady = $0 { return true }; return false }))
+    }
+
+    func testQuestionCandidateDecodesLegacyPayloadWithSurfaceDiscovery() throws {
+        let meetingId = UUID()
+        let candidateId = UUID()
+        let sourceId = UUID()
+        let payload = """
+        {
+          "id": "\(candidateId.uuidString)",
+          "meetingId": "\(meetingId.uuidString)",
+          "rawText": "What is the rollout risk?",
+          "normalizedText": "what is the rollout risk",
+          "startTime": 0,
+          "endTime": 1,
+          "sourceSegmentIds": ["\(sourceId.uuidString)"],
+          "isPartial": false,
+          "detectedAt": "2026-05-28T12:00:00Z",
+          "status": "candidate"
+        }
+        """.data(using: .utf8)!
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+
+        let candidate = try decoder.decode(QuestionCandidate.self, from: payload)
+
+        XCTAssertEqual(candidate.discovery.source, .surface)
+        XCTAssertTrue(candidate.discovery.surfaceSignals.isEmpty)
+    }
+
     func testRealtimeQACleansExtractedQuestionWithoutDroppingIntent() async throws {
         let text = "Ryan, quick question can we ship the endpoint by Friday?"
         let signal = QuestionMultimodalSignal(
@@ -7608,7 +7851,16 @@ final class NotchCopilotTests: XCTestCase {
     func testRealtimeQAGoldFixtureBenchmarkMeetsLatencyTargets() async throws {
         let rows = try qaGoldFixtureRows()
         let detector = QuestionDetectionService(precisionMode: .highPrecision)
-        let classifier = QuestionClassifier(precisionMode: .highPrecision)
+        let rescueRunner = fixtureCandidateDetectionRunner(rows: rows)
+        let classifier = QuestionClassifier(
+            precisionMode: .highPrecision,
+            multimodalMode: .enforced,
+            trainedModelRunner: rescueRunner
+        )
+        let rescuer = QuestionMultiQTCandidateRescuer(
+            trainedModelRunner: rescueRunner,
+            intentGate: QuestionIntentGate()
+        )
         var detectionLatencies: [Double] = []
         var classificationLatencies: [Double] = []
         var pipelineLatencies: [Double] = []
@@ -7617,6 +7869,7 @@ final class NotchCopilotTests: XCTestCase {
         var falseNegative = 0
         var trueNegative = 0
         var candidates = 0
+        var rescuedCandidates = 0
 
         for row in rows {
             let meetingId = UUID()
@@ -7631,7 +7884,19 @@ final class NotchCopilotTests: XCTestCase {
 
             let pipelineStart = DispatchTime.now().uptimeNanoseconds
             let detectionStart = DispatchTime.now().uptimeNanoseconds
-            let detected = detector.detectCandidates(from: segment, context: context)
+            let detection = detector.detect(from: segment, context: context)
+            var detected = detection.surfaceCandidates
+            if detected.isEmpty {
+                let rescued = await rescuer.rescueCandidates(
+                    from: detection.rejectedFrames,
+                    context: context,
+                    mode: .enforced
+                )
+                if !rescued.isEmpty {
+                    rescuedCandidates += rescued.count
+                    detected = rescued
+                }
+            }
             let detectionEnd = DispatchTime.now().uptimeNanoseconds
             detectionLatencies.append(Double(detectionEnd - detectionStart) / 1_000_000)
 
@@ -7667,9 +7932,10 @@ final class NotchCopilotTests: XCTestCase {
         let pipelineP95 = percentile(pipelineLatencies, 0.95)
         let pipelineP99 = percentile(pipelineLatencies, 0.99)
         print(String(
-            format: "QA_BENCHMARK fixture=%d candidates=%d tp=%d fp=%d fn=%d tn=%d precision=%.4f recall=%.4f detection_p50_ms=%.3f detection_p95_ms=%.3f detection_p99_ms=%.3f classification_p50_ms=%.3f classification_p95_ms=%.3f classification_p99_ms=%.3f pipeline_p50_ms=%.3f pipeline_p95_ms=%.3f pipeline_p99_ms=%.3f",
+            format: "QA_BENCHMARK fixture=%d candidates=%d rescued=%d tp=%d fp=%d fn=%d tn=%d precision=%.4f recall=%.4f detection_p50_ms=%.3f detection_p95_ms=%.3f detection_p99_ms=%.3f classification_p50_ms=%.3f classification_p95_ms=%.3f classification_p99_ms=%.3f pipeline_p50_ms=%.3f pipeline_p95_ms=%.3f pipeline_p99_ms=%.3f",
             rows.count,
             candidates,
+            rescuedCandidates,
             truePositive,
             falsePositive,
             falseNegative,
@@ -7698,11 +7964,28 @@ final class NotchCopilotTests: XCTestCase {
         let rows = try qaGoldFixtureRows()
         let detector = QuestionDetectionService(precisionMode: .highPrecision)
         let textualClassifier = QuestionClassifier(precisionMode: .highPrecision, multimodalMode: .off)
-        let multimodalClassifier = QuestionClassifier(precisionMode: .highPrecision, multimodalMode: .enforced)
+        let rescueRunner = fixtureCandidateDetectionRunner(rows: rows)
+        let multimodalClassifier = QuestionClassifier(
+            precisionMode: .highPrecision,
+            multimodalMode: .enforced,
+            trainedModelRunner: rescueRunner
+        )
+        let rescuer = QuestionMultiQTCandidateRescuer(
+            trainedModelRunner: rescueRunner,
+            intentGate: QuestionIntentGate()
+        )
         var textual = QAMetricStats()
         var multimodal = QAMetricStats()
         var multimodalDecisionLatencies: [Double] = []
         var criticalFalsePositives: [String] = []
+        var expectedPositiveRows = 0
+        var surfaceCandidatePositiveHits = 0
+        var surfacePlusCandidatePositiveHits = 0
+        var surfaceTruePositive = 0
+        var surfaceFalsePositive = 0
+        var rescueTruePositive = 0
+        var rescueFalsePositive = 0
+        var criticalNegativeTrueNegative = 0
 
         for row in rows {
             let meetingId = UUID()
@@ -7717,7 +8000,14 @@ final class NotchCopilotTests: XCTestCase {
             )
 
             let textualPrediction: Bool
-            if let candidate = detector.detectCandidates(from: segment, context: context).first {
+            let textualDetection = detector.detect(from: segment, context: context)
+            if row.responseNeeded {
+                expectedPositiveRows += 1
+                if !textualDetection.surfaceCandidates.isEmpty {
+                    surfaceCandidatePositiveHits += 1
+                }
+            }
+            if let candidate = textualDetection.surfaceCandidates.first {
                 textualPrediction = try await textualClassifier
                     .classifyQuestion(candidate: candidate, context: context, userProfile: makeProfile())
                     .responseNeeded
@@ -7727,26 +8017,60 @@ final class NotchCopilotTests: XCTestCase {
             textual.record(expected: row.responseNeeded, predicted: textualPrediction)
 
             let multimodalPrediction: Bool
+            let multimodalSource: QuestionCandidateDiscoverySource?
             let decisionStart = DispatchTime.now().uptimeNanoseconds
-            if let candidate = detector.detectCandidates(from: segment, context: context, signal: signal).first {
+            let multimodalDetection = detector.detect(from: segment, context: context, signal: signal)
+            var multimodalDetected = multimodalDetection.surfaceCandidates
+            if multimodalDetected.isEmpty {
+                let rescued = await rescuer.rescueCandidates(
+                    from: multimodalDetection.rejectedFrames,
+                    context: context,
+                    mode: .enforced
+                )
+                multimodalDetected = rescued
+            }
+            if row.responseNeeded, !multimodalDetected.isEmpty {
+                surfacePlusCandidatePositiveHits += 1
+            }
+            if let candidate = multimodalDetected.first {
                 let classification = try await multimodalClassifier
                     .classifyQuestion(candidate: candidate, context: context, userProfile: makeProfile())
                 multimodalPrediction = classification.responseNeeded
+                multimodalSource = candidate.discovery.source
             } else {
                 multimodalPrediction = false
+                multimodalSource = nil
             }
             let decisionEnd = DispatchTime.now().uptimeNanoseconds
             multimodalDecisionLatencies.append(Double(decisionEnd - decisionStart) / 1_000_000)
             multimodal.record(expected: row.responseNeeded, predicted: multimodalPrediction)
+
+            if multimodalPrediction {
+                switch multimodalSource {
+                case .multiqtRescue, .shadowRescue:
+                    if row.responseNeeded { rescueTruePositive += 1 } else { rescueFalsePositive += 1 }
+                case .surface:
+                    if row.responseNeeded { surfaceTruePositive += 1 } else { surfaceFalsePositive += 1 }
+                case nil:
+                    break
+                }
+            } else if !row.responseNeeded, row.isCriticalNegative {
+                criticalNegativeTrueNegative += 1
+            }
 
             if !row.responseNeeded, multimodalPrediction, row.isCriticalNegative {
                 criticalFalsePositives.append("[\(row.language)] \(row.text)")
             }
         }
 
+        let surfaceCandidateRecall = Double(surfaceCandidatePositiveHits) / Double(max(expectedPositiveRows, 1))
+        let surfacePlusCandidateRecall = Double(surfacePlusCandidatePositiveHits) / Double(max(expectedPositiveRows, 1))
+
         print(String(
-            format: "QA_MULTIMODAL_BENCHMARK fixture=%d baseline_tp=%d baseline_fp=%d baseline_fn=%d baseline_tn=%d baseline_precision=%.4f baseline_recall=%.4f multimodal_tp=%d multimodal_fp=%d multimodal_fn=%d multimodal_tn=%d multimodal_precision=%.4f multimodal_recall=%.4f multimodal_p50_ms=%.3f multimodal_p95_ms=%.3f multimodal_p99_ms=%.3f critical_fp=%d",
+            format: "QA_MULTIMODAL_BENCHMARK fixture=%d surface_candidate_recall=%.4f surface_plus_multiqt_recall=%.4f baseline_tp=%d baseline_fp=%d baseline_fn=%d baseline_tn=%d baseline_precision=%.4f baseline_recall=%.4f multimodal_tp=%d multimodal_fp=%d multimodal_fn=%d multimodal_tn=%d multimodal_precision=%.4f multimodal_recall=%.4f surface_tp=%d surface_fp=%d rescue_tp=%d rescue_fp=%d critical_negative_tn=%d multimodal_p50_ms=%.3f multimodal_p95_ms=%.3f multimodal_p99_ms=%.3f critical_fp=%d",
             rows.count,
+            surfaceCandidateRecall,
+            surfacePlusCandidateRecall,
             textual.truePositive,
             textual.falsePositive,
             textual.falseNegative,
@@ -7759,6 +8083,11 @@ final class NotchCopilotTests: XCTestCase {
             multimodal.trueNegative,
             multimodal.precision,
             multimodal.recall,
+            surfaceTruePositive,
+            surfaceFalsePositive,
+            rescueTruePositive,
+            rescueFalsePositive,
+            criticalNegativeTrueNegative,
             percentile(multimodalDecisionLatencies, 0.50),
             percentile(multimodalDecisionLatencies, 0.95),
             percentile(multimodalDecisionLatencies, 0.99),
@@ -7767,7 +8096,14 @@ final class NotchCopilotTests: XCTestCase {
 
         XCTAssertGreaterThanOrEqual(multimodal.precision, textual.precision)
         XCTAssertGreaterThanOrEqual(multimodal.recall, textual.recall - 0.01)
-        XCTAssertLessThan(percentile(multimodalDecisionLatencies, 0.95), 100)
+        XCTAssertGreaterThanOrEqual(multimodal.precision, 0.995)
+        XCTAssertGreaterThanOrEqual(multimodal.recall, 0.970)
+        if rows.contains(where: { $0.surfaceMiss == true && $0.candidateDetection == true && $0.responseNeeded }) {
+            XCTAssertGreaterThan(surfacePlusCandidateRecall, surfaceCandidateRecall)
+            XCTAssertGreaterThan(rescueTruePositive, 0)
+        }
+        XCTAssertLessThan(percentile(multimodalDecisionLatencies, 0.95), 60)
+        XCTAssertLessThan(percentile(multimodalDecisionLatencies, 0.99), 100)
         XCTAssertTrue(criticalFalsePositives.isEmpty, criticalFalsePositives.joined(separator: " | "))
     }
 
@@ -9368,6 +9704,8 @@ final class NotchCopilotTests: XCTestCase {
         var language: String
         var responseNeeded: Bool
         var label: String?
+        var candidateDetection: Bool?
+        var surfaceMiss: Bool?
 
         var isCriticalNegative: Bool {
             guard !responseNeeded else { return false }
@@ -9462,6 +9800,37 @@ final class NotchCopilotTests: XCTestCase {
             audioEnergy: rms,
             createdAt: segment.createdAt
         )
+    }
+
+    private func positiveCandidateDetectionPrediction(
+        label: String,
+        responseScore: Double = 0.96,
+        candidateScore: Double = 0.94
+    ) -> QuestionTrainedMultimodalPrediction {
+        QuestionTrainedMultimodalPrediction(
+            responseScore: responseScore,
+            candidateScore: candidateScore,
+            label: label,
+            completeScore: 0.98,
+            rhetoricalScore: 0.01,
+            threshold: 0.55,
+            decisionLatencyMs: 4.2,
+            decisionSignals: ["trained_multiqt_coreml", "trained_label:\(label)", "candidate_detection_head"],
+            suppressionSignals: []
+        )
+    }
+
+    private func fixtureCandidateDetectionRunner(rows: [QAGoldFixtureRow]) -> FixtureCandidateDetectionRunner {
+        var predictions: [String: QuestionTrainedMultimodalPrediction] = [:]
+        for row in rows where row.candidateDetection == true {
+            let label = row.label ?? "answerable_question"
+            predictions[QuestionDetectionService.normalize(row.text)] = positiveCandidateDetectionPrediction(
+                label: label,
+                responseScore: 0.965,
+                candidateScore: 0.955
+            )
+        }
+        return FixtureCandidateDetectionRunner(predictionsByNormalizedText: predictions)
     }
 
     private func percentile(_ values: [Double], _ quantile: Double) -> Double {
@@ -10114,6 +10483,17 @@ private struct StubTrainedMultiQTModelRunner: QuestionTrainedMultimodalModelRunn
         signal: QuestionMultimodalSignal?
     ) async -> QuestionTrainedMultimodalPrediction? {
         prediction
+    }
+}
+
+private struct FixtureCandidateDetectionRunner: QuestionTrainedMultimodalModelRunning {
+    var predictionsByNormalizedText: [String: QuestionTrainedMultimodalPrediction]
+
+    func prediction(
+        for candidate: QuestionCandidate,
+        signal: QuestionMultimodalSignal?
+    ) async -> QuestionTrainedMultimodalPrediction? {
+        predictionsByNormalizedText[QuestionDetectionService.normalize(candidate.rawText)]
     }
 }
 

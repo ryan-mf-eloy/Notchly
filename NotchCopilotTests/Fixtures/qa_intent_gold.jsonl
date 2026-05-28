@@ -2019,3 +2019,11 @@
 {"id":"multiqt-neg-0011","text":"Quais","language":"pt-BR","responseNeeded":false,"label":"fragment"}
 {"id":"multiqt-neg-0012","text":"Quais são","language":"pt-BR","responseNeeded":false,"label":"fragment"}
 {"id":"multiqt-pos-0009","text":"Quais são os princípios SOLID de programação","language":"pt-BR","responseNeeded":true,"label":"technical_explanation"}
+{"id":"multiqt-rescue-pos-pt-0001","text":"A gente precisa do prazo do endpoint OAuth para sexta","language":"pt-BR","responseNeeded":true,"label":"deadline","candidateDetection":true,"surfaceMiss":true}
+{"id":"multiqt-rescue-pos-en-0001","text":"We need the deadline for OAuth endpoint by Friday","language":"en-US","responseNeeded":true,"label":"deadline","candidateDetection":true,"surfaceMiss":true}
+{"id":"multiqt-rescue-pos-es-0001","text":"Necesitamos el plazo del endpoint OAuth para viernes","language":"es-ES","responseNeeded":true,"label":"deadline","candidateDetection":true,"surfaceMiss":true}
+{"id":"multiqt-rescue-pos-ja-0001","text":"OAuthエンドポイントの期限を金曜日までに確認したい","language":"ja-JP","responseNeeded":true,"label":"deadline","candidateDetection":true,"surfaceMiss":true}
+{"id":"multiqt-rescue-trap-pt-0001","text":"Alguem consegue me ouvir antes do release","language":"pt-BR","responseNeeded":false,"label":"operational_check","candidateDetection":false,"surfaceMiss":false}
+{"id":"multiqt-rescue-trap-en-0001","text":"They asked whether the OAuth endpoint ships Friday and I already said no","language":"en-US","responseNeeded":false,"label":"reported_question","candidateDetection":false,"surfaceMiss":false}
+{"id":"multiqt-rescue-trap-es-0001","text":"quien no rompio produccion alguna vez verdad","language":"es-ES","responseNeeded":false,"label":"rhetorical","candidateDetection":false,"surfaceMiss":false}
+{"id":"multiqt-rescue-trap-ja-0001","text":"もし認証リリースが","language":"ja-JP","responseNeeded":false,"label":"fragment","candidateDetection":false,"surfaceMiss":false}

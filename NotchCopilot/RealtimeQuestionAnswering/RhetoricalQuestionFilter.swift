@@ -214,6 +214,28 @@ struct QuestionIntentEvaluation: Hashable, Sendable {
     let confidence: Double
 }
 
+struct QuestionHardSuppression: Hashable, Sendable {
+    var isFragment: Bool
+    var isSmallTalk: Bool
+    var isQuotedOrExplaining: Bool
+    var isRhetorical: Bool
+    var reason: String
+    var confidence: Double
+    var signals: [String]
+
+    var evaluation: QuestionIntentEvaluation {
+        QuestionIntentEvaluation(
+            isAnswerableQuestion: false,
+            isFragment: isFragment,
+            isSmallTalk: isSmallTalk,
+            isQuotedOrExplaining: isQuotedOrExplaining,
+            isRhetorical: isRhetorical,
+            reason: reason,
+            confidence: confidence
+        )
+    }
+}
+
 struct QuestionIntentGate {
     var rulePack: QuestionIntentRulePack = .default
     var adaptiveProfile: QuestionAnsweringAdaptiveProfile = QuestionAnsweringAdaptiveProfile()
@@ -222,76 +244,8 @@ struct QuestionIntentGate {
         let normalized = QuestionDetectionService.normalize(candidate.rawText)
         let plain = Self.plainQuestionText(normalized)
 
-        if plain.isEmpty || isFragment(plain, context: context) {
-            return QuestionIntentEvaluation(
-                isAnswerableQuestion: false,
-                isFragment: true,
-                isSmallTalk: false,
-                isQuotedOrExplaining: false,
-                isRhetorical: false,
-                reason: "Question-like fragment has no answerable object.",
-                confidence: 0.12
-            )
-        }
-
-        if isSmallTalk(plain) {
-            return QuestionIntentEvaluation(
-                isAnswerableQuestion: false,
-                isFragment: false,
-                isSmallTalk: true,
-                isQuotedOrExplaining: false,
-                isRhetorical: false,
-                reason: "Small talk greeting does not need a meeting answer.",
-                confidence: 0.18
-            )
-        }
-
-        if isQuotedOrExplaining(plain) && !hasRecoverableEmbeddedQuestion(plain, rawText: candidate.rawText, context: context) {
-            return QuestionIntentEvaluation(
-                isAnswerableQuestion: false,
-                isFragment: false,
-                isSmallTalk: false,
-                isQuotedOrExplaining: true,
-                isRhetorical: false,
-                reason: "Question-like text is quoted, reported, or part of an explanation.",
-                confidence: 0.22
-            )
-        }
-
-        if RhetoricalQuestionFilter(rulePack: rulePack).isSelfAnswered(candidate.rawText) {
-            return QuestionIntentEvaluation(
-                isAnswerableQuestion: false,
-                isFragment: false,
-                isSmallTalk: false,
-                isQuotedOrExplaining: false,
-                isRhetorical: false,
-                reason: "Speaker answered their own question.",
-                confidence: 0.22
-            )
-        }
-
-        if RhetoricalQuestionFilter(rulePack: rulePack).isRhetorical(normalized) {
-            return QuestionIntentEvaluation(
-                isAnswerableQuestion: false,
-                isFragment: false,
-                isSmallTalk: false,
-                isQuotedOrExplaining: false,
-                isRhetorical: true,
-                reason: "Question is likely rhetorical.",
-                confidence: 0.26
-            )
-        }
-
-        if adaptiveProfile.isSuppressed(plain) {
-            return QuestionIntentEvaluation(
-                isAnswerableQuestion: false,
-                isFragment: false,
-                isSmallTalk: false,
-                isQuotedOrExplaining: false,
-                isRhetorical: false,
-                reason: "Similar questions were repeatedly dismissed by the user.",
-                confidence: 0.3
-            )
+        if let suppression = hardSuppression(candidate: candidate, context: context) {
+            return suppression.evaluation
         }
 
         if adaptiveProfile.isPromoted(plain) {
@@ -329,6 +283,85 @@ struct QuestionIntentGate {
             reason: "Question has clear intent and an answerable object.",
             confidence: min(max(0.58 + ((score - threshold) * 0.16), 0.56), 0.94)
         )
+    }
+
+    func hardSuppression(candidate: QuestionCandidate, context: TranscriptContext) -> QuestionHardSuppression? {
+        let normalized = QuestionDetectionService.normalize(candidate.rawText)
+        let plain = Self.plainQuestionText(normalized)
+
+        if plain.isEmpty || isFragment(plain, context: context) {
+            return QuestionHardSuppression(
+                isFragment: true,
+                isSmallTalk: false,
+                isQuotedOrExplaining: false,
+                isRhetorical: false,
+                reason: "Question-like fragment has no answerable object.",
+                confidence: 0.12,
+                signals: ["fragment"]
+            )
+        }
+
+        if isSmallTalk(plain) {
+            return QuestionHardSuppression(
+                isFragment: false,
+                isSmallTalk: true,
+                isQuotedOrExplaining: false,
+                isRhetorical: false,
+                reason: "Small talk greeting does not need a meeting answer.",
+                confidence: 0.18,
+                signals: ["small_talk"]
+            )
+        }
+
+        if isQuotedOrExplaining(plain) && !hasRecoverableEmbeddedQuestion(plain, rawText: candidate.rawText, context: context) {
+            return QuestionHardSuppression(
+                isFragment: false,
+                isSmallTalk: false,
+                isQuotedOrExplaining: true,
+                isRhetorical: false,
+                reason: "Question-like text is quoted, reported, or part of an explanation.",
+                confidence: 0.22,
+                signals: ["reported_question"]
+            )
+        }
+
+        if RhetoricalQuestionFilter(rulePack: rulePack).isSelfAnswered(candidate.rawText) {
+            return QuestionHardSuppression(
+                isFragment: false,
+                isSmallTalk: false,
+                isQuotedOrExplaining: false,
+                isRhetorical: false,
+                reason: "Speaker answered their own question.",
+                confidence: 0.22,
+                signals: ["self_answered"]
+            )
+        }
+
+        if RhetoricalQuestionFilter(rulePack: rulePack).isRhetorical(normalized) {
+            return QuestionHardSuppression(
+                isFragment: false,
+                isSmallTalk: false,
+                isQuotedOrExplaining: false,
+                isRhetorical: true,
+                reason: "Question is likely rhetorical.",
+                confidence: 0.26,
+                signals: ["rhetorical"]
+            )
+        }
+
+        if adaptiveProfile.isSuppressed(plain) {
+            return QuestionHardSuppression(
+                isFragment: false,
+                isSmallTalk: false,
+                isQuotedOrExplaining: false,
+                isRhetorical: false,
+                reason: "Similar questions were repeatedly dismissed by the user.",
+                confidence: 0.3,
+                signals: ["adaptive_suppressed"]
+            )
+        }
+
+        return nil
     }
 
     static func plainQuestionText(_ text: String) -> String {

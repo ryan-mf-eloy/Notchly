@@ -16,7 +16,7 @@ except ImportError as error:  # pragma: no cover - executed only on export machi
         "python3 -m pip install -r Tools/multiqt/requirements.txt"
     ) from error
 
-from model import MultiQTConcatModel
+from model import MultiQTConcatModel, load_state_dict_compatible
 from common import DEFAULT_LABELS_PATH, load_labels, write_json
 
 
@@ -45,7 +45,7 @@ def main() -> int:
         input_mode=str(config.get("input_mode", "multimodal")),
         audio_encoder=str(config.get("audio_encoder", "summary_stats")),
     )
-    model.load_state_dict(checkpoint["model_state"])
+    load_state_dict_compatible(model, checkpoint["model_state"])
     model.eval()
 
     max_tokens = int(config["max_tokens"])
@@ -68,6 +68,7 @@ def main() -> int:
         ],
         outputs=[
             ct.TensorType(name="response_logit"),
+            ct.TensorType(name="candidate_logit"),
             ct.TensorType(name="label_logits"),
             ct.TensorType(name="complete_logit"),
             ct.TensorType(name="rhetorical_logit"),
@@ -116,7 +117,7 @@ def main() -> int:
                 "runtime_fallback": "signal_proxy",
                 "description": audio_description,
             },
-            "outputs": ["response_logit", "label_logits", "complete_logit", "rhetorical_logit"],
+            "outputs": ["response_logit", "candidate_logit", "label_logits", "complete_logit", "rhetorical_logit"],
             "training_report": load_optional_json(args.training_report),
             "baseline_comparison": compact_baseline_comparison(load_optional_json(args.baseline_comparison)),
         },

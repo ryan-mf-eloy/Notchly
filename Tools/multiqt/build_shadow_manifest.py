@@ -122,6 +122,11 @@ def convert_row(row: dict[str, Any], labels: dict[str, Any], default_split: str)
         "speaker_role": str(row.get("speaker_role") or "shadow_redacted"),
         "label": label,
         "response_needed": positive,
+        "candidate_detection": bool(row.get("candidate_detection", row.get("candidateDetection", positive))),
+        "surface_miss": bool(row.get(
+            "surface_miss",
+            row.get("surfaceMiss", str(row.get("discoverySource", "")) in {"multiqtRescue", "shadowRescue"}),
+        )),
         "critical_negative": critical_negative,
         "complete": bool(row.get("complete", label != "fragment" and not bool(row.get("is_partial", False)))),
         "question_span": question_span(row, text),

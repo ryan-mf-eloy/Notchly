@@ -68,6 +68,8 @@
       ]
     },
     "response_needed": { "type": "boolean" },
+    "candidate_detection": { "type": "boolean" },
+    "surface_miss": { "type": "boolean" },
     "critical_negative": { "type": "boolean" },
     "complete": { "type": "boolean" },
     "question_span": {

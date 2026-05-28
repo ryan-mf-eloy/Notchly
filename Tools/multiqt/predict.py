@@ -15,7 +15,7 @@ except ImportError as error:  # pragma: no cover - executed only on training mac
     ) from error
 
 from common import read_jsonl, write_jsonl
-from model import MultiQTConcatModel
+from model import MultiQTConcatModel, load_state_dict_compatible
 from train import MultiQTDataset, prediction_rows, predict
 
 
@@ -49,7 +49,7 @@ def main() -> int:
         input_mode=input_mode,
         audio_encoder=str(config.get("audio_encoder", "summary_stats")),
     )
-    model.load_state_dict(checkpoint["model_state"])
+    load_state_dict_compatible(model, checkpoint["model_state"])
     model.eval()
     predictions = predict(model, dataset, args.batch_size)
     write_jsonl(args.out, prediction_rows(rows, predictions))

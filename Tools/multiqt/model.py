@@ -68,6 +68,7 @@ class MultiQTConcatModel(nn.Module):
             nn.GELU(),
         )
         self.response_head = nn.Linear(hidden_dim, 1)
+        self.candidate_head = nn.Linear(hidden_dim, 1)
         self.label_head = nn.Linear(hidden_dim, label_count)
         self.complete_head = nn.Linear(hidden_dim, 1)
         self.rhetorical_head = nn.Linear(hidden_dim, 1)
@@ -77,7 +78,7 @@ class MultiQTConcatModel(nn.Module):
         text_tokens: torch.Tensor,
         audio_logmel: torch.Tensor,
         scalars: torch.Tensor,
-    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
         batch_size = text_tokens.shape[0]
         scalar_features = scalars.float()
         if self.input_mode in {"audio_only", "scalar_only"}:
@@ -108,7 +109,19 @@ class MultiQTConcatModel(nn.Module):
         fused = self.fusion(torch.cat([text_features, audio_features, scalar_features], dim=1))
         return (
             self.response_head(fused).squeeze(-1),
+            self.candidate_head(fused).squeeze(-1),
             self.label_head(fused),
             self.complete_head(fused).squeeze(-1),
             self.rhetorical_head(fused).squeeze(-1),
         )
+
+
+def load_state_dict_compatible(model: MultiQTConcatModel, state: dict[str, torch.Tensor]) -> None:
+    missing, unexpected = model.load_state_dict(state, strict=False)
+    unexpected = [key for key in unexpected if not key.startswith("_")]
+    if unexpected:
+        raise RuntimeError(f"Unexpected checkpoint keys: {unexpected}")
+    if "candidate_head.weight" in missing and "response_head.weight" in state:
+        model.candidate_head.weight.data.copy_(model.response_head.weight.data)
+    if "candidate_head.bias" in missing and "response_head.bias" in state:
+        model.candidate_head.bias.data.copy_(model.response_head.bias.data)

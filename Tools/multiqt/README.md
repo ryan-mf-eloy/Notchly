@@ -54,7 +54,7 @@ python3 Tools/multiqt/build_synthetic_manifest.py \
   --audio-feature-source signal_proxy
 ```
 
-The expanded path maps Copilot-only intents (`calculation`, `conversion`, `news`, `web`, `reminder`, `memory`) into the MultiQT answerability schema while preserving response-needed truth labels. `signal_proxy` rows are trainable from numeric acoustic/temporal fields and remain a bootstrap/CI path, not a substitute for consented real meeting audio.
+The expanded path maps Copilot-only intents (`calculation`, `conversion`, `news`, `web`, `reminder`, `memory`) into the MultiQT answerability schema while preserving response-needed truth labels. It also preserves `candidateDetection`/`candidate_detection` and `surfaceMiss`/`surface_miss` rows, which train the candidate-rescue head for answerable frames the textual surface detector missed. `signal_proxy` rows are trainable from numeric acoustic/temporal fields and remain a bootstrap/CI path, not a substitute for consented real meeting audio.
 
 For quick audio smoke datasets, use `--max-rows-per-label N` instead of `--max-rows N` so positives and critical negatives stay represented across the small sample.
 
@@ -221,6 +221,7 @@ The current bundled checkpoint was trained from `qa_intent_gold.jsonl` plus `cop
 - critical negative weight: 2.5
 - threshold calibration: selected by global, per-language, and critical-negative-label gates on dev
 - exported runtime policy: `label_policy` plus `language_thresholds`, so Core ML label predictions for critical negatives can hard-suppress candidates
+- exported rescue policy: new checkpoints may include `candidate_logit` for candidate detection before textual acceptance; older four-output bundles stay loadable and use `response_logit` as the rescue fallback
 - exported audio contract: `preferred_runtime_feature=signal_proxy`, matching the proxy acoustic/temporal features used during training
 - test: TP 3425, FP 0, FN 1, TN 4596, precision 1.0000, recall 0.9997, p95 0.002 ms
 - hard_test: TP 2076, FP 0, FN 0, TN 4309, precision 1.0000, recall 1.0000, p95 0.002 ms
@@ -238,6 +239,8 @@ Baseline comparison, 16 epochs, seed 42:
 This checkpoint proves the runtime path and is safe to ship as a local-first hardened bootstrap in `enforced` (`promotion.promote_to_enforced = true`). It is not the final production evidence set; that still requires consented real meeting audio and shadow replay.
 
 The baseline report also stores detailed gates. Current bundled metadata has 67/67 gates passing: overall precision/recall, per-language precision/recall, p95/p99 latency, zero critical FP globally, and zero critical FP by negative label. Metadata also stores the critical-negative label list, per-language thresholds, and preferred runtime audio feature used by the Swift runtime.
+
+Runtime rescue replay on 2026-05-28 with the expanded gold fixture reports `surface_candidate_recall=0.9963`, `surface_plus_multiqt_recall=1.0000`, `rescue_tp=3`, `rescue_fp=0`, `critical_fp=0`, and `multimodal_p95=23.325 ms`. This validates the Swift rescue path with deterministic candidate-detection labels; promotion of a newly trained `candidate_logit` bundle still requires aggregate gates plus qualitative pt-BR/en-US/es-ES/ja-JP smokes.
 
 ## Privacy
 

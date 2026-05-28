@@ -25,6 +25,16 @@ This checkpoint is a hardened bootstrap model, not the final production-quality 
 
 The current bundled threshold is `0.55`, with language thresholds `pt-BR=0.55`, `en-US=0.99`, `es-ES=0.99`, and `ja-JP=0.99`. It is calibrated against global precision/recall, per-language precision/recall, and zero-FP gates for critical negative labels, so the final threshold is not selected from global accuracy alone. The sidecar metadata also exports `label_policy`, `language_thresholds`, and `audio_feature_contract`; the Swift Core ML runner uses them to suppress candidates when the trained label head predicts a critical negative class and to feed the same feature type the checkpoint was trained on.
 
+The pipeline now includes the required MultiQT-first rescue path without replacing the existing flow:
+
+- `QuestionDetectionService.detect(...)` returns `QuestionDetectionResult(surfaceCandidates, rejectedFrames)` while legacy `detectCandidates(...)` remains source-compatible.
+- `QuestionCandidate.discovery` records whether a candidate came from `.surface`, `.multiqtRescue`, or `.shadowRescue`, along with surface signals, suppressions, model score, threshold, and label.
+- `QuestionMultiQTCandidateRescuer` scores rejected frames in `shadow`/`enforced`, promotes only stable partials or finals, and never rescues hard negatives: small talk, operational checks, rhetorical, reported/self-answered, fragments, titles, or noise.
+- `QuestionIntentGate` is split conceptually into critical hard suppression and textual answerability scoring, so rescue candidates can bypass low textual answerability while still honoring critical blockers.
+- `QuestionClassifier` runs the trained runner before the textual early return for `.multiqtRescue` candidates. The provider is still called only after `responseNeeded && complete && !rhetorical && priority != .low`.
+
+The training/export tools now support an optional `candidate_detection` label and `candidate_logit` output. The bundled four-output model remains compatible; until a retrained five-output bundle passes the promotion gates and qualitative smokes, Swift uses `responseScore` as the rescue fallback.
+
 Validation on the hardened held-out splits:
 
 | Split | TP | FP | FN | TN | Precision | Recall | p95 |
@@ -43,6 +53,13 @@ Baseline comparison from `Tools/multiqt/compare_baselines.py` with 16 epochs, se
 The multimodal checkpoint passes the absolute gates, beats audio-only on recall, and beats text-only on recall in the adversarial test/hard_test splits without increasing critical false positives (`promotion.promote_to_enforced = true`). Therefore `qaMultimodalMode` is `enforced` by default for the local hardened checkpoint, while the final production claim still requires a consented real-meeting dataset.
 
 The bundled metadata stores the detailed promotion audit. Current status: 67/67 gates pass, including per-language precision >= 0.990, per-language recall >= 0.950, p95 <= 60 ms, p99 <= 100 ms, and zero critical false positives by critical negative label.
+
+Runtime rescue replay on 2026-05-28 against the expanded `qa_intent_gold.jsonl`:
+
+| Benchmark | Key result |
+| --- | --- |
+| `QA_BENCHMARK` | fixture 2029, rescued 3, TP 813, FP 0, FN 0, TN 1216, precision 1.0000, recall 1.0000, pipeline p95 21.940 ms |
+| `QA_MULTIMODAL_BENCHMARK` | surface candidate recall 0.9963, surface+MultiQT recall 1.0000, rescue TP 3, rescue FP 0, critical FP 0, multimodal p95 22.542 ms |
 
 The bundled model uses text tokens, scalar ASR/temporal/language features, and a signal-proxy acoustic/temporal feature map. The exported metadata declares `preferred_runtime_feature=signal_proxy`, so the app feeds a deterministic numeric proxy rather than captured log-mel for this checkpoint. Future checkpoints trained on real log-mel can switch the contract back to `logmel` without changing the model interface.
 
@@ -308,6 +325,7 @@ Outputs:
 | Name | Shape/type |
 | --- | --- |
 | `response_logit` | Float32 `[1]` |
+| `candidate_logit` | Float32 `[1]` optional; older bundles omit it and runtime falls back to `response_logit` |
 | `label_logits` | Float32 `[label_count]` |
 | `complete_logit` | Float32 `[1]` |
 | `rhetorical_logit` | Float32 `[1]` |

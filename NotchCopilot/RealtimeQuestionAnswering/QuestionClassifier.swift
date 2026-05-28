@@ -343,13 +343,34 @@ struct QuestionClassifier: QuestionClassifierProvider {
         userProfile: UserMeetingProfile
     ) async throws -> QuestionClassification {
         let understanding = understandingProvider.understand(candidate: candidate, context: context, userProfile: userProfile)
-        guard understanding.intent.isQuestionLike else {
+        let isMultiQTRescue = candidate.discovery.source == .multiqtRescue
+        let trainedPrediction = multimodalMode == .off
+            ? nil
+            : await trainedModelRunner?.prediction(for: candidate, signal: candidate.multimodalSignal)
+        let fallbackMultimodalDecision = multimodalScorer.score(
+            understanding: understanding,
+            signal: candidate.multimodalSignal,
+            precisionMode: precisionMode,
+            isPartial: candidate.isPartial
+        )
+        let multimodalDecision = trainedPrediction.map {
+            QuestionMultimodalDecision(trainedPrediction: $0, textualConfidence: understanding.confidence)
+        } ?? fallbackMultimodalDecision
+        let trainedPositive = trainedPrediction?.isPositiveLabel == true
+
+        guard understanding.intent.isQuestionLike || (isMultiQTRescue && trainedPositive) else {
             return QuestionClassification(understanding: understanding, candidate: candidate)
         }
 
-        let intent = intentGate.evaluate(candidate: candidate, context: context)
-        guard intent.isAnswerableQuestion else {
-            return QuestionClassification(ignoredBy: intent, candidate: candidate)
+        if isMultiQTRescue {
+            if let hardSuppression = intentGate.hardSuppression(candidate: candidate, context: context) {
+                return QuestionClassification(ignoredBy: hardSuppression.evaluation, candidate: candidate)
+            }
+        } else {
+            let intent = intentGate.evaluate(candidate: candidate, context: context)
+            guard intent.isAnswerableQuestion else {
+                return QuestionClassification(ignoredBy: intent, candidate: candidate)
+            }
         }
 
         let filter = rhetoricalFilter.evaluation(for: candidate, context: context)
@@ -359,30 +380,28 @@ struct QuestionClassifier: QuestionClassifierProvider {
         let actionable = isActionable(candidate.normalizedText, type: type)
         let informational = isInformational(candidate.normalizedText)
         let indirectQuestion = understanding.strongSignals.contains(.indirectQuestionFrame)
-        let acceptedByDecisionGate = decisionGate.shouldAccept(
-            understanding: understanding,
-            precisionMode: precisionMode,
-            isPartial: candidate.isPartial
-        )
-        let fallbackMultimodalDecision = multimodalScorer.score(
-            understanding: understanding,
-            signal: candidate.multimodalSignal,
-            precisionMode: precisionMode,
-            isPartial: candidate.isPartial
-        )
-        let trainedPrediction = multimodalMode == .off
-            ? nil
-            : await trainedModelRunner?.prediction(for: candidate, signal: candidate.multimodalSignal)
-        let multimodalDecision = trainedPrediction.map {
-            QuestionMultimodalDecision(trainedPrediction: $0, textualConfidence: understanding.confidence)
-        } ?? fallbackMultimodalDecision
+        let acceptedByDecisionGate = isMultiQTRescue
+            ? trainedPositive
+            : decisionGate.shouldAccept(
+                understanding: understanding,
+                precisionMode: precisionMode,
+                isPartial: candidate.isPartial
+            )
         let acceptedByMultimodalGate = multimodalMode == .enforced ? multimodalDecision.shouldAllow : true
+        let semanticallyResponseNeeded = understanding.responseNeeded || (isMultiQTRescue && trainedPositive)
+        let contentJustification = actionable
+            || directedToUser
+            || directedToGroup
+            || informational
+            || indirectQuestion
+            || type != .generalQuestion
+            || (isMultiQTRescue && trainedPositive)
         let responseNeeded = acceptedByDecisionGate
             && acceptedByMultimodalGate
-            && understanding.responseNeeded
+            && semanticallyResponseNeeded
             && !filter.rhetorical
             && filter.complete
-            && (actionable || directedToUser || directedToGroup || informational || indirectQuestion || type != .generalQuestion)
+            && contentJustification
         let priority = priorityScorer.priority(
             for: candidate,
             type: type,
@@ -439,7 +458,9 @@ struct QuestionClassifier: QuestionClassifierProvider {
             questionType: type,
             priority: priority,
             confidence: confidence,
-            reason: understanding.reason,
+            reason: isMultiQTRescue
+                ? "MultiQT rescued a model-positive question that the surface detector rejected."
+                : understanding.reason,
             extractedQuestion: extractedQuestion,
             expectedAnswerStyle: answerStyle(for: type, filter: filter),
             textualConfidence: multimodalDecision.textualConfidence,

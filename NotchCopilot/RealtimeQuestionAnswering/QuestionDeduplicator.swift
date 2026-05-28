@@ -28,6 +28,7 @@ struct QuestionDeduplicator {
             isPartial: existing.isPartial && candidate.isPartial,
             detectedAt: existing.detectedAt,
             multimodalSignal: candidate.multimodalSignal ?? existing.multimodalSignal,
+            discovery: mergedDiscovery(existing.discovery, candidate.discovery),
             classification: candidate.classification ?? existing.classification,
             status: candidate.isPartial ? existing.status : .confirmed
         )
@@ -42,5 +43,18 @@ struct QuestionDeduplicator {
         let tokenScore = Double(intersection) / Double(max(union, 1))
         let prefixScore = lhs.hasPrefix(rhs) || rhs.hasPrefix(lhs) ? 0.35 : 0
         return min(1, tokenScore + prefixScore)
+    }
+
+    private func mergedDiscovery(
+        _ existing: QuestionCandidateDiscovery,
+        _ incoming: QuestionCandidateDiscovery
+    ) -> QuestionCandidateDiscovery {
+        if incoming.source == .multiqtRescue || incoming.modelScore != nil {
+            return incoming
+        }
+        if existing.source == .multiqtRescue || existing.modelScore != nil {
+            return existing
+        }
+        return incoming
     }
 }

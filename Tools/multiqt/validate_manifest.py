@@ -162,6 +162,8 @@ def validate_row(
     validate_optional_bool(row, location, "is_clipping", errors, max_errors)
     validate_optional_bool(row, location, "is_silence", errors, max_errors)
     validate_optional_bool(row, location, "is_too_quiet", errors, max_errors)
+    validate_optional_bool(row, location, "candidate_detection", errors, max_errors)
+    validate_optional_bool(row, location, "surface_miss", errors, max_errors)
 
     start_ms = row.get("start_ms", 0)
     end_ms = row.get("end_ms", 0)

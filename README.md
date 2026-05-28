@@ -260,6 +260,10 @@ O plano final esta em `docs/MULTIQT_FINAL_CONSOLIDATION_PLAN.md`. O workspace ex
 
 No runtime, `CoreMLQuestionMultiQTModelRunner` procura `notchly-multiqt-v1.mlmodelc` e o metadata no bundle, incluindo `Resources/Models`. Quando esses artefatos existem, `QuestionClassifier` usa a predicao treinada em `shadow`/`enforced`; quando nao existem, degrada para o fallback atual sem crash. A entrada acustica e escolhida pelo contrato exportado em `audio_feature_contract`: modelos treinados com log-mel podem consumir o ring buffer in-memory (`QuestionAudioLogMelRingBuffer`), enquanto o checkpoint empacotado atual prefere o proxy numerico redigivel (`signal_proxy`) de RMS/peak/energia/noise/duracao/pausa/confidence/estabilidade. Nenhum audio bruto e persistido.
 
+O pipeline agora tambem tem resgate MultiQT-first para perdas de superficie: `QuestionDetectionService.detect(...)` retorna `QuestionDetectionResult` com `surfaceCandidates` e `rejectedFrames`; `QuestionMultiQTCandidateRescuer` pontua frames rejeitados e, em `enforced`, promove apenas candidatos com margem segura do modelo, partial estavel/final e sem hard-block critico. Os candidatos carregam `QuestionCandidate.discovery` (`surface`, `multiqtRescue`, `shadowRescue`) com sinais de superficie, supressoes e score/label/threshold do modelo para auditoria. O classifier roda o runner treinado antes do early return textual para candidatos `multiqtRescue`, mas small talk, checks operacionais, retoricas, reported/self-answered, fragmentos, titulos e ruido continuam sendo hard-blocks locais.
+
+O treino/export MultiQT aceita uma cabeca adicional `candidate_detection`/`candidate_logit`. Checkpoints antigos continuam compativeis: quando `candidate_logit` nao existe no `.mlmodelc`, o runtime usa `responseScore` como fallback para o resgate. Shadow logs de resgate persistem somente texto redigido, idioma, origem do candidato, scores, label, threshold e razoes; audio bruto e snippets sensiveis nao sao gravados.
+
 Checkpoint atual:
 
 - dataset bootstrap hardened expandido: 94.222 exemplos, 34.087 positivos, 60.135 negativos, pt-BR/en-US/es-ES/ja-JP;
@@ -267,6 +271,7 @@ Checkpoint atual:
 - modelo: texto + scalars + proxy acustico/temporal com encoder acustico `summary_stats`, exportado para Core ML, threshold global `0.55`, thresholds por idioma `pt-BR=0.55`, `en-US=0.99`, `es-ES=0.99`, `ja-JP=0.99`, `critical_negative_weight = 2.5`;
 - calibracao: o threshold e escolhido por gates de precision/recall globais, por idioma e por label negativa critica, nao apenas pelo score global;
 - contrato de runtime: a metadata inclui `label_policy` e `language_thresholds`; se a cabeca treinada `label_logits` prever uma label negativa critica, o runner Core ML suprime o candidato mesmo antes do provider;
+- contrato de resgate: bundles novos podem exportar `candidate_logit`; o bundle atual de quatro saidas segue aceito com fallback para `response_logit` ate um checkpoint `candidate_detection` passar os gates agregados e smokes qualitativos;
 - contrato acustico: `preferred_runtime_feature=signal_proxy`, ou seja, este checkpoint deve receber o mesmo proxy numerico usado no treino em vez de log-mel capturado;
 - test split hardened: TP 3425, FP 0, FN 1, TN 4596, precision 1.0000, recall 0.9997, p95 0.002 ms;
 - hard_test split hardened: TP 2076, FP 0, FN 0, TN 4309, precision 1.0000, recall 1.0000, p95 0.002 ms;
@@ -285,6 +290,8 @@ O multimodal passa os gates absolutos, supera `audio_only` em recall e vence `te
 Um candidato `temporal_cnn` foi treinado com os mesmos 94.222 exemplos e tambem passou 67/67 gates agregados (`test` 1.0000 precision / 0.9997 recall, `hard_test` 1.0000 / 1.0000), mas nao foi promovido porque falhou no smoke qualitativo pt-BR que reproduz a pergunta real "Quais sao os principios SOLID de programacao" no runtime Core ML (`responseScore` abaixo do threshold). O bundle atual foi restaurado e tem teste dedicado garantindo que essa pergunta seja aceita pelo modelo empacotado.
 
 O metadata empacotado registra gates detalhados: 67/67 gates passam, incluindo precision >= 0.990 e recall >= 0.950 por idioma (`pt-BR`, `en-US`, `es-ES`, `ja-JP`), p95 <= 60 ms, p99 <= 100 ms e zero FP critico por label negativo (`fragment`, `operational_check`, `reported_question`, `rhetorical`, `self_answered`, `small_talk`, `title_noise`, `statement`). A mesma metadata carrega os thresholds por idioma e o contrato `preferred_runtime_feature`, permitindo ajustar calibracao/entrada acustica sem alterar o binario do app.
+
+Replay local de 2026-05-28 no `qa_intent_gold.jsonl` expandido com surface-miss/rescue traps: `QA_BENCHMARK fixture=2029 candidates=877 rescued=3 tp=813 fp=0 fn=0 tn=1216 precision=1.0000 recall=1.0000 pipeline_p95=26.766 ms`; `QA_MULTIMODAL_BENCHMARK surface_candidate_recall=0.9963 surface_plus_multiqt_recall=1.0000 rescue_tp=3 rescue_fp=0 critical_fp=0 multimodal_p95=23.325 ms`.
 
 O app cria `QuestionMultimodalSignal` a partir do `TranscriptSegment`, qualidade de audio por fonte, energia disponivel e, quando o audio recente esta no ring buffer, `captured_logmel`. O runner decide entre `captured_logmel` e `signal_proxy` pelo metadata do modelo. Os campos de decisao sao numericos/redigiveis: idioma, confidence ASR, final/partial, speaker/source, duracao, estabilidade entre parciais, pausa terminal, RMS/peak, clipping, silencio/tooQuiet, gaps, noise floor e `audioEnergy`.
 
@@ -612,12 +619,20 @@ Como o app integra APIs recentes e recursos do sistema, alguns testes podem depe
 Benchmarks atuais do Q&A em `main`:
 
 ```text
-QA_BENCHMARK fixture=2018 tp=808 fp=0 fn=0 tn=1210 precision=1.0000 recall=1.0000 detection_p95_ms=7.993 classification_p95_ms=15.861 pipeline_p95_ms=19.880
-QA_MULTIMODAL_BENCHMARK fixture=2018 baseline_precision=1.0000 baseline_recall=1.0000 multimodal_precision=1.0000 multimodal_recall=1.0000 multimodal_p95_ms=19.908 critical_fp=0
-QA_REPLAY one_hour_segments=1200 fp=0 tn=1200 visible_false_alerts=0 p95_ms=5.112
+QA_BENCHMARK fixture=2029 candidates=877 rescued=3 tp=813 fp=0 fn=0 tn=1216 precision=1.0000 recall=1.0000 detection_p95_ms=7.882 classification_p95_ms=17.994 pipeline_p95_ms=21.940
+QA_MULTIMODAL_BENCHMARK fixture=2029 surface_candidate_recall=0.9963 surface_plus_multiqt_recall=1.0000 rescue_tp=3 rescue_fp=0 critical_fp=0 multimodal_precision=1.0000 multimodal_recall=1.0000 multimodal_p95_ms=22.542
+QA_REPLAY one_hour_segments=1200 tp=0 fp=0 fn=0 tn=1200 precision=1.0000 recall=1.0000 visible_false_alerts=0 p95_ms=5.171
 ```
 
-A ultima validacao completa executou `339` testes unitarios, `3` skips opt-in de captura real e `1` XCUITest, com `0` falhas. Os skips opt-in sao os harnesses que exigem permissao/execucao manual de captura real (`screencapture` e `ScreenCaptureKit`). O `.xcresult` final ficou sem `issue summaries`/`testWarningSummaries`.
+A ultima validacao deterministica executou `359` testes unitarios, `3` skips opt-in de captura real e `0` falhas. Os skips opt-in sao os harnesses que exigem permissao/execucao manual de captura real (`screencapture` e `ScreenCaptureKit`). O scheme padrao `NotchCopilot` deixa `NotchCopilotUITests` fora da execucao automatica para evitar falsos vermelhos em sessoes sem permissao de automacao do macOS; o alvo dedicado `NotchCopilotUITests` continua compartilhado para execucao manual/CI com UI automation habilitada.
+
+Execucao UI E2E:
+
+```bash
+xcodebuild -skipPackagePluginValidation -skipMacroValidation -scheme NotchCopilotUITests -destination 'platform=macOS' test
+```
+
+Em 2026-05-28, a execucao local focada do XCUITest foi bloqueada antes de entrar no codigo do teste por `Timed out while enabling automation mode` do runner do Xcode. O harness `--qa-ui-harness` e os accessibility identifiers permanecem versionados; rode o scheme dedicado em uma sessao com permissao de UI automation para validar copy/save/dismiss/Transcript/Answer.
 
 ## Configuracoes Padrao
 
