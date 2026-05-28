@@ -230,6 +230,7 @@ Implemented entrypoints in the repo:
 
 ```text
 Tools/multiqt/build_synthetic_manifest.py
+Tools/multiqt/build_shadow_manifest.py
 Tools/multiqt/train.py
 Tools/multiqt/predict.py
 Tools/multiqt/evaluate.py
@@ -237,6 +238,8 @@ Tools/multiqt/export_coreml.py
 ```
 
 `build_synthetic_manifest.py` converts the existing multilingual QA gold fixture into train/dev/test/hard_test manifests and can synthesize local macOS speech audio. This is a bootstrap/regression set only; final enforcement still requires consented real meeting audio, public/license-compatible audio, or manually reviewed local datasets.
+
+`build_shadow_manifest.py` is the privacy-preserving bridge from redacted in-app shadow logs to a MultiQT manifest. It rejects raw transcripts, raw snippets, audio paths/blobs, and obvious identifiers/secrets, then emits `source=shadow_redacted` plus `audio_feature_source=signal_proxy`. The training loader consumes that signal proxy as deterministic log-mel-shaped features, so active learning can use acoustic/temporal hints without retaining raw meeting audio.
 
 ### Baselines
 

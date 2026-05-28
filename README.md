@@ -253,6 +253,7 @@ O plano final esta em `docs/MULTIQT_FINAL_CONSOLIDATION_PLAN.md`. O workspace ex
 - validador de manifesto;
 - modelo PyTorch audio+texto com fusao concat;
 - avaliacao por precision/recall, negativos criticos e latencia;
+- importacao de shadow logs redigidos via `Tools/multiqt/build_shadow_manifest.py`, com rejeicao de texto/audio bruto e treino por `signal_proxy`;
 - export para Core ML (`notchly-multiqt-v1.mlpackage`/`.mlmodelc`) com sidecar `notchly-multiqt-v1.metadata.json`.
 
 No runtime, `CoreMLQuestionMultiQTModelRunner` procura `notchly-multiqt-v1.mlmodelc` e o metadata no bundle, incluindo `Resources/Models`. Quando esses artefatos existem, `QuestionClassifier` usa a predicao treinada em `shadow`/`enforced`; quando nao existem, degrada para o fallback atual sem crash. A entrada acustica agora vem de um ring buffer in-memory por fonte (`QuestionAudioLogMelRingBuffer`) que converte o PCM condicionado em `QuestionAudioLogMelFeature` com 40 bandas e 240 frames via FFT/vDSP, alinhado por `sourceFrameRange` ou timestamps do segmento. Se nao houver audio suficiente, usa um proxy numerico de RMS/peak/energia/noise/duracao, sem persistir audio bruto.

@@ -277,6 +277,9 @@ def load_logmel(
     mel: torchaudio.transforms.MelSpectrogram,
     max_frames: int,
 ) -> torch.Tensor:
+    if row.get("audio_feature_source") == "signal_proxy":
+        return proxy_logmel(row, max_frames)
+
     audio_path = Path(str(row["audio_path"]))
     if not audio_path.is_absolute():
         audio_path = audio_root / audio_path
@@ -293,6 +296,57 @@ def load_logmel(
     mean = features.mean()
     std = features.std().clamp_min(1e-4)
     return (features - mean) / std
+
+
+def proxy_logmel(row: dict[str, Any], max_frames: int) -> torch.Tensor:
+    frames = max(1, max_frames)
+    duration_ms = max(0, int(row.get("end_ms", 0)) - int(row.get("start_ms", 0)))
+    active_frames = min(frames, max(1, int((duration_ms / 1000.0) * 100)))
+    rms = clamp_float(row.get("rms"), 0.0, 1.0, 0.018)
+    peak = clamp_float(row.get("peak"), 0.0, 1.0, max(rms * 2, 0.03))
+    energy = clamp_float(row.get("audio_energy"), 0.0, 1.0, rms)
+    noise_floor = clamp_float(row.get("noise_floor"), 0.0, 1.0, 0.002)
+    stability = clamp_float(row.get("partial_stability"), 0.0, 1.0, 1.0)
+    gap_count = max(0, int(row.get("gap_count") or 0))
+    terminal_pause_ms = max(0, int(row.get("terminal_pause_ms") or 0))
+    is_silence = bool(row.get("is_silence", False))
+    is_too_quiet = bool(row.get("is_too_quiet", False))
+    is_clipping = bool(row.get("is_clipping", False))
+
+    base_energy = 0.0 if is_silence else max(energy, rms * 0.85, peak * 0.25)
+    if is_too_quiet:
+        base_energy *= 0.35
+    gap_penalty = max(0.2, 1.0 - min(gap_count, 8) * 0.08)
+    pause_shape = min(1.0, terminal_pause_ms / 900.0)
+    time_axis = torch.linspace(0, 1, frames)
+    band_axis = torch.linspace(0, 1, 40).unsqueeze(1)
+    envelope = torch.zeros(frames)
+    envelope[:active_frames] = torch.linspace(0.85, 1.0, active_frames)
+    if active_frames < frames:
+        envelope[active_frames:] = max(0.0, 0.45 - pause_shape * 0.3)
+    modulation = 1.0 + 0.08 * torch.sin(time_axis * 17.0) + 0.04 * torch.cos(time_axis * 7.0)
+    spectral_tilt = torch.exp(-band_axis * (1.5 + noise_floor * 5.0))
+    features = spectral_tilt * envelope.unsqueeze(0) * modulation.unsqueeze(0) * max(base_energy * 30.0, 0.001)
+    features += noise_floor * 2.0
+    features *= gap_penalty * (0.65 + 0.35 * stability)
+    if is_clipping:
+        features[30:, :active_frames] += peak * 8.0
+    features = torch.log1p(features)
+    mean = features.mean()
+    std = features.std().clamp_min(1e-4)
+    return (features - mean) / std
+
+
+def clamp_float(value: Any, minimum: float, maximum: float, default: float) -> float:
+    if value is None:
+        return default
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return default
+    if number != number:
+        return default
+    return min(max(number, minimum), maximum)
 
 
 def scalars_for_row(row: dict[str, Any]) -> list[float]:

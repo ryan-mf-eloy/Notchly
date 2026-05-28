@@ -78,6 +78,19 @@ python3 Tools/multiqt/augment_manifest.py \
   --eval-asr-variants 2
 ```
 
+Import redacted shadow logs into a privacy-preserving active-learning manifest:
+
+```sh
+python3 Tools/multiqt/build_shadow_manifest.py \
+  --input Data/multiqt_shadow/redacted_shadow_logs.jsonl \
+  --out Data/multiqt_shadow/shadow_redacted.jsonl
+python3 Tools/multiqt/validate_manifest.py \
+  Data/multiqt_shadow/shadow_redacted.jsonl \
+  --check-audio
+```
+
+Shadow rows must declare `redacted=true` or `privacy.redacted=true` and use `redacted_text`/`asr_text_redacted`. The importer rejects raw transcript fields, raw snippets, audio paths, audio blobs, email/phone/API-key-like identifiers, and emits `audio_feature_source=signal_proxy` so training can consume numeric acoustic/temporal signals without raw meeting audio.
+
 Smoke-test the toolchain without audio files:
 
 ```sh

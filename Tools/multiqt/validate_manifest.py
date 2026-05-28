@@ -149,6 +149,19 @@ def validate_row(
     audio_feature_path = row.get("audio_feature_path")
     if audio_feature_path is not None and not isinstance(audio_feature_path, str):
         add_error(errors, max_errors, f"{location}: audio_feature_path has invalid type")
+    if audio_feature_source == "signal_proxy" and audio_feature_path:
+        add_error(errors, max_errors, f"{location}: signal_proxy rows must not point to persisted audio features")
+
+    validate_optional_number(row, location, "rms", errors, max_errors, minimum=0)
+    validate_optional_number(row, location, "peak", errors, max_errors, minimum=0)
+    validate_optional_number(row, location, "audio_energy", errors, max_errors, minimum=0)
+    validate_optional_number(row, location, "noise_floor", errors, max_errors, minimum=0)
+    validate_optional_number(row, location, "partial_stability", errors, max_errors, minimum=0, maximum=1)
+    validate_optional_int(row, location, "gap_count", errors, max_errors, minimum=0)
+    validate_optional_int(row, location, "terminal_pause_ms", errors, max_errors, minimum=0)
+    validate_optional_bool(row, location, "is_clipping", errors, max_errors)
+    validate_optional_bool(row, location, "is_silence", errors, max_errors)
+    validate_optional_bool(row, location, "is_too_quiet", errors, max_errors)
 
     start_ms = row.get("start_ms", 0)
     end_ms = row.get("end_ms", 0)
@@ -177,6 +190,8 @@ def validate_row(
             add_error(errors, max_errors, f"{location}: question_span exceeds transcript length")
 
     if check_audio:
+        if audio_feature_source == "signal_proxy":
+            return
         audio_path = row.get("audio_path")
         if isinstance(audio_path, str):
             resolved = Path(audio_path)
@@ -190,6 +205,59 @@ def validate_row(
                 resolved = audio_root / resolved
             if not resolved.exists():
                 add_error(errors, max_errors, f"{location}: audio feature file not found")
+
+
+def validate_optional_number(
+    row: dict[str, Any],
+    location: str,
+    field: str,
+    errors: list[str],
+    max_errors: int,
+    minimum: float | None = None,
+    maximum: float | None = None,
+) -> None:
+    value = row.get(field)
+    if value is None:
+        return
+    if not isinstance(value, (int, float)) or isinstance(value, bool):
+        add_error(errors, max_errors, f"{location}: {field} has invalid type")
+        return
+    if minimum is not None and value < minimum:
+        add_error(errors, max_errors, f"{location}: {field} below {minimum}")
+    if maximum is not None and value > maximum:
+        add_error(errors, max_errors, f"{location}: {field} above {maximum}")
+
+
+def validate_optional_int(
+    row: dict[str, Any],
+    location: str,
+    field: str,
+    errors: list[str],
+    max_errors: int,
+    minimum: int | None = None,
+) -> None:
+    value = row.get(field)
+    if value is None:
+        return
+    if not isinstance(value, int) or isinstance(value, bool):
+        add_error(errors, max_errors, f"{location}: {field} has invalid type")
+        return
+    if minimum is not None and value < minimum:
+        add_error(errors, max_errors, f"{location}: {field} below {minimum}")
+
+
+def validate_optional_bool(
+    row: dict[str, Any],
+    location: str,
+    field: str,
+    errors: list[str],
+    max_errors: int,
+) -> None:
+    value = row.get(field)
+    if value is None:
+        return
+    if not isinstance(value, bool):
+        add_error(errors, max_errors, f"{location}: {field} has invalid type")
 
 
 def add_error(errors: list[str], max_errors: int, message: str) -> None:
