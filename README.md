@@ -255,7 +255,7 @@ O plano final esta em `docs/MULTIQT_FINAL_CONSOLIDATION_PLAN.md`. O workspace ex
 - avaliacao por precision/recall, negativos criticos e latencia;
 - export para Core ML (`notchly-multiqt-v1.mlpackage`/`.mlmodelc`) com sidecar `notchly-multiqt-v1.metadata.json`.
 
-No runtime, `CoreMLQuestionMultiQTModelRunner` procura `notchly-multiqt-v1.mlmodelc` e o metadata no bundle, incluindo `Resources/Models`. Quando esses artefatos existem, `QuestionClassifier` usa a predicao treinada em `shadow`/`enforced`; quando nao existem, degrada para o fallback atual sem crash. A entrada acustica usa `QuestionAudioLogMelFeature` quando o app anexar log-mel capturado; enquanto isso, usa um proxy numerico de RMS/peak/energia/noise/duracao, sem persistir audio bruto.
+No runtime, `CoreMLQuestionMultiQTModelRunner` procura `notchly-multiqt-v1.mlmodelc` e o metadata no bundle, incluindo `Resources/Models`. Quando esses artefatos existem, `QuestionClassifier` usa a predicao treinada em `shadow`/`enforced`; quando nao existem, degrada para o fallback atual sem crash. A entrada acustica agora vem de um ring buffer in-memory por fonte (`QuestionAudioLogMelRingBuffer`) que converte o PCM condicionado em `QuestionAudioLogMelFeature` com 40 bandas e 240 frames via FFT/vDSP, alinhado por `sourceFrameRange` ou timestamps do segmento. Se nao houver audio suficiente, usa um proxy numerico de RMS/peak/energia/noise/duracao, sem persistir audio bruto.
 
 Checkpoint atual:
 
@@ -265,7 +265,7 @@ Checkpoint atual:
 - hard_test split: TP 47, FP 0, FN 0, TN 72, precision 1.0000, recall 1.0000, p95 1.202 ms;
 - zero FP em negativos criticos nos splits avaliados.
 
-Enquanto o artefato treinado nao passa os gates, o app cria `QuestionMultimodalSignal` a partir do `TranscriptSegment`, qualidade de audio por fonte e energia disponivel. Os campos sao numericos/redigiveis: idioma, confidence ASR, final/partial, speaker/source, duracao, estabilidade entre parciais, pausa terminal, RMS/peak, clipping, silencio/tooQuiet, gaps, noise floor e `audioEnergy`.
+O app cria `QuestionMultimodalSignal` a partir do `TranscriptSegment`, qualidade de audio por fonte, energia disponivel e, quando o audio recente esta no ring buffer, `captured_logmel`. Os campos sao numericos/redigiveis: idioma, confidence ASR, final/partial, speaker/source, duracao, estabilidade entre parciais, pausa terminal, RMS/peak, clipping, silencio/tooQuiet, gaps, noise floor e `audioEnergy`.
 
 `QuestionMultimodalScorer` combina o entendimento textual com boosts leves para segmento final, ASR confiavel, duracao plausivel, pausa terminal e energia consistente. Ele penaliza partial instavel, ASR baixo, clipping forte, silencio/tooQuiet e gaps. Negativos criticos continuam como hard-blocks locais: small talk, operational checks, retoricas, perguntas reportadas, auto-respondidas, fragmentos, titulos e ruido ASR.
 

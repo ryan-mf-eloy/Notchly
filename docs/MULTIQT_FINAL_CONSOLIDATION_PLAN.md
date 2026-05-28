@@ -30,7 +30,7 @@ Validation on the synthetic held-out splits:
 | test | 71 | 0 | 0 | 121 | 1.0000 | 1.0000 | 1.279 ms |
 | hard_test | 47 | 0 | 0 | 72 | 1.0000 | 1.0000 | 1.202 ms |
 
-The bundled model uses text tokens, log-mel audio features, and scalar ASR/temporal/language features. The runtime still falls back safely to MultiQT-lite if the model or metadata cannot be loaded.
+The bundled model uses text tokens, log-mel audio features, and scalar ASR/temporal/language features. The runtime now attaches captured in-memory log-mel from the live PCM ring buffer when enough recent audio is available, and still falls back safely to MultiQT-lite/proxy features if audio, model, or metadata cannot be loaded.
 
 Primary reference:
 - MultiQT paper: https://aclanthology.org/2020.acl-main.215.pdf
@@ -124,7 +124,7 @@ The model must predict more than a binary question flag:
    - Uses `MLModelConfiguration.computeUnits = .all` in normal mode, CPU-only benchmark mode for reproducibility.
    - Falls back to MultiQT-lite only when model is missing or explicitly disabled.
    - Current repo integration point: `CoreMLQuestionMultiQTModelRunner` feeds trained predictions into `QuestionClassifier` in shadow/enforced modes.
-   - Runtime audio contract: `QuestionAudioLogMelFeature` carries captured log-mel features when available; otherwise the runner uses a redacted numeric signal proxy derived from RMS, peak, energy, noise, duration, finality, partial stability, and gaps. The proxy is not sufficient for the final gate dataset, but it prevents a bundled model from becoming text-only when raw audio is unavailable.
+   - Runtime audio contract: `QuestionAudioLogMelRingBuffer` keeps short-lived PCM only in memory, derives `QuestionAudioLogMelFeature` with 40 bands and 240 frames via FFT/vDSP, and aligns it by `sourceFrameRange` or segment timestamps. Otherwise the runner uses a redacted numeric signal proxy derived from RMS, peak, energy, noise, duration, finality, partial stability, and gaps. The proxy is not sufficient for the final gate dataset, but it prevents a bundled model from becoming text-only when raw audio is unavailable.
 
 5. `MultiQTDecisionSmoother`
    - Requires confidence hysteresis.

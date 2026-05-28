@@ -65,7 +65,7 @@ python3 Tools/multiqt/validate_manifest.py \
   --check-audio
 ```
 
-Manifests may include `audio_feature_path` and `audio_feature_source` (`logmel`, `signal_proxy`, or `synthetic_logmel`). The production app never stores raw audio for this path: runtime inference consumes an in-memory `QuestionAudioLogMelFeature` when available, otherwise it falls back to a redacted numeric proxy from RMS, peak, energy, noise, duration, pause, confidence, and stability signals.
+Manifests may include `audio_feature_path` and `audio_feature_source` (`logmel`, `signal_proxy`, or `synthetic_logmel`). The production app never stores raw audio for this path: runtime inference consumes an in-memory `QuestionAudioLogMelFeature` derived from the short-lived live PCM ring buffer when available, otherwise it falls back to a redacted numeric proxy from RMS, peak, energy, noise, duration, pause, confidence, and stability signals.
 
 Smoke-test the toolchain without audio files:
 

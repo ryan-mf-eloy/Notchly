@@ -1,3 +1,5 @@
+import Accelerate
+import AVFoundation
 import CoreML
 import Foundation
 
@@ -155,6 +157,7 @@ struct QuestionMultimodalSignal: Codable, Hashable, Sendable {
 
 struct QuestionAudioLogMelFeature: Codable, Hashable, Sendable {
     static let expectedBandCount = 40
+    static let trainedModelFrameCount = 240
     static let maximumFrameCount = 600
 
     var bands: Int
@@ -223,6 +226,318 @@ struct QuestionAudioLogMelFeature: Codable, Hashable, Sendable {
     func value(band: Int, frame: Int) -> Double {
         guard band >= 0, band < bands, frame >= 0, frame < frames else { return 0 }
         return values[(band * frames) + frame]
+    }
+}
+
+final class QuestionAudioLogMelRingBuffer: @unchecked Sendable {
+    private struct Chunk {
+        var startFrame: Int64
+        var endFrame: Int64
+        var startTime: TimeInterval
+        var endTime: TimeInterval
+        var samples: [Float]
+    }
+
+    private let lock = NSLock()
+    private var chunksBySource: [TranscriptAudioSource: [Chunk]] = [:]
+    private var nextFrameBySource: [TranscriptAudioSource: Int64] = [:]
+    private let retentionSeconds: TimeInterval
+    private let sampleRate = QuestionAudioLogMelExtractor.sampleRate
+
+    init(retentionSeconds: TimeInterval = 45) {
+        self.retentionSeconds = max(4, retentionSeconds)
+    }
+
+    func reset() {
+        lock.lock()
+        chunksBySource = [:]
+        nextFrameBySource = [:]
+        lock.unlock()
+    }
+
+    func append(_ buffer: AudioBuffer, meetingStartedAt: Date) {
+        guard let pcmBuffer = buffer.pcmBuffer,
+              let samples = QuestionAudioLogMelExtractor.monoSamples16k(from: pcmBuffer),
+              !samples.isEmpty else { return }
+        let source = normalizedSource(buffer.audioSource)
+        let duration = TimeInterval(samples.count) / sampleRate
+        let endTime = max(0, buffer.createdAt.timeIntervalSince(meetingStartedAt))
+        let startTime = max(0, endTime - duration)
+
+        lock.lock()
+        let startFrame = nextFrameBySource[source] ?? Int64((startTime * sampleRate).rounded(.down))
+        let endFrame = startFrame + Int64(samples.count)
+        nextFrameBySource[source] = endFrame
+        var chunks = chunksBySource[source] ?? []
+        chunks.append(Chunk(
+            startFrame: startFrame,
+            endFrame: endFrame,
+            startTime: startTime,
+            endTime: endTime,
+            samples: samples
+        ))
+        trim(&chunks, latestEndTime: endTime)
+        chunksBySource[source] = chunks
+        lock.unlock()
+    }
+
+    func feature(for segment: TranscriptSegment, targetFrames: Int = QuestionAudioLogMelFeature.trainedModelFrameCount) -> QuestionAudioLogMelFeature? {
+        let source = normalizedSource(segment.audioSource)
+        let fallbackSources = fallbackOrder(for: source)
+        lock.lock()
+        let candidateChunks = fallbackSources.compactMap { chunksBySource[$0] }.first { !$0.isEmpty } ?? []
+        lock.unlock()
+        let samples = samples(for: segment, in: candidateChunks)
+        guard let samples, !samples.isEmpty else { return nil }
+        return QuestionAudioLogMelExtractor.feature(
+            from: samples,
+            targetFrames: targetFrames,
+            source: "captured_logmel"
+        )
+    }
+
+    private func samples(for segment: TranscriptSegment, in chunks: [Chunk]) -> [Float]? {
+        guard !chunks.isEmpty else { return nil }
+        if let range = segment.sourceFrameRange {
+            let preRollFrames = Int64(sampleRate * 0.18)
+            let postRollFrames = Int64(sampleRate * 0.10)
+            let samples = samplesByFrameRange(
+                chunks: chunks,
+                start: max(0, range.start - preRollFrames),
+                end: max(range.start + 1, range.end + postRollFrames)
+            )
+            if samples.count >= Int(sampleRate * 0.12) {
+                return samples
+            }
+        }
+
+        let duration = max(segment.endTime - segment.startTime, 0)
+        guard segment.startTime.isFinite, segment.endTime.isFinite, duration > 0 else {
+            return nil
+        }
+        let samples = samplesByTimeRange(
+            chunks: chunks,
+            start: max(0, segment.startTime - 0.18),
+            end: max(segment.startTime + 0.12, segment.endTime + 0.10)
+        )
+        return samples.count >= Int(sampleRate * 0.12) ? samples : nil
+    }
+
+    private func samplesByFrameRange(chunks: [Chunk], start: Int64, end: Int64) -> [Float] {
+        var output: [Float] = []
+        for chunk in chunks where chunk.endFrame > start && chunk.startFrame < end {
+            let localStart = Int(max(0, start - chunk.startFrame))
+            let localEnd = Int(min(Int64(chunk.samples.count), end - chunk.startFrame))
+            guard localEnd > localStart else { continue }
+            output.append(contentsOf: chunk.samples[localStart..<localEnd])
+        }
+        return output
+    }
+
+    private func samplesByTimeRange(chunks: [Chunk], start: TimeInterval, end: TimeInterval) -> [Float] {
+        var output: [Float] = []
+        for chunk in chunks where chunk.endTime > start && chunk.startTime < end {
+            let localStart = Int(max(0, ((start - chunk.startTime) * sampleRate).rounded(.down)))
+            let localEnd = Int(min(Double(chunk.samples.count), ((end - chunk.startTime) * sampleRate).rounded(.up)))
+            guard localEnd > localStart else { continue }
+            output.append(contentsOf: chunk.samples[localStart..<localEnd])
+        }
+        return output
+    }
+
+    private func trim(_ chunks: inout [Chunk], latestEndTime: TimeInterval) {
+        let cutoff = max(0, latestEndTime - retentionSeconds)
+        chunks.removeAll { $0.endTime < cutoff }
+    }
+
+    private func normalizedSource(_ source: TranscriptAudioSource) -> TranscriptAudioSource {
+        source == .unknown ? .mixed : source
+    }
+
+    private func fallbackOrder(for source: TranscriptAudioSource) -> [TranscriptAudioSource] {
+        switch source {
+        case .mixed:
+            [.mixed, .microphone, .system, .cloud, .unknown]
+        case .microphone:
+            [.microphone, .mixed, .unknown]
+        case .system:
+            [.system, .mixed, .unknown]
+        case .cloud:
+            [.cloud, .mixed, .microphone, .system, .unknown]
+        case .unknown:
+            [.mixed, .microphone, .system, .cloud, .unknown]
+        }
+    }
+}
+
+private enum QuestionAudioLogMelExtractor {
+    static let sampleRate: TimeInterval = 16_000
+    private static let bandCount = QuestionAudioLogMelFeature.expectedBandCount
+    private static let windowLength = 320
+    private static let hopLength = 160
+    private static let fftSize = 512
+    private static let binCount = (fftSize / 2) + 1
+    private static let minimumUsableSamples = 640
+
+    static func monoSamples16k(from buffer: AVAudioPCMBuffer) -> [Float]? {
+        let frameCount = Int(buffer.frameLength)
+        let channelCount = max(1, Int(buffer.format.channelCount))
+        guard frameCount > 0 else { return nil }
+
+        var mono = [Float](repeating: 0, count: frameCount)
+        if let channelData = buffer.floatChannelData {
+            for frame in 0..<frameCount {
+                var sum: Float = 0
+                for channel in 0..<channelCount {
+                    sum += channelData[channel][frame]
+                }
+                mono[frame] = sum / Float(channelCount)
+            }
+        } else if let channelData = buffer.int16ChannelData {
+            for frame in 0..<frameCount {
+                var sum: Float = 0
+                for channel in 0..<channelCount {
+                    sum += Float(channelData[channel][frame]) / Float(Int16.max)
+                }
+                mono[frame] = sum / Float(channelCount)
+            }
+        } else {
+            return nil
+        }
+
+        return resampleLinear(mono, sourceRate: buffer.format.sampleRate, targetRate: sampleRate)
+    }
+
+    static func feature(
+        from samples: [Float],
+        targetFrames: Int,
+        source: String
+    ) -> QuestionAudioLogMelFeature? {
+        let safeFrames = min(max(targetFrames, 1), QuestionAudioLogMelFeature.maximumFrameCount)
+        guard samples.count >= minimumUsableSamples else { return nil }
+        guard let fft = vDSP.FFT(
+            log2n: vDSP_Length(log2(Double(fftSize))),
+            radix: .radix2,
+            ofType: DSPSplitComplex.self
+        ) else {
+            return nil
+        }
+
+        var raw = [Double](repeating: 0, count: bandCount * safeFrames)
+        let frameCount = min(safeFrames, max(1, Int(ceil(Double(max(samples.count - windowLength, 0)) / Double(hopLength))) + 1))
+        for frame in 0..<frameCount {
+            let start = frame * hopLength
+            let power = spectrumPower(samples: samples, start: start, fft: fft)
+            for band in 0..<bandCount {
+                let energy = melWeights[band].reduce(Double(0)) { partial, item in
+                    partial + Double(power[item.bin]) * item.weight
+                }
+                raw[(band * safeFrames) + frame] = log1p(max(0, energy))
+            }
+        }
+
+        let activeEnergy = raw.reduce(0) { $0 + abs($1) }
+        guard activeEnergy > 0.00001 else { return nil }
+
+        let mean = raw.reduce(0, +) / Double(raw.count)
+        let variance = raw.reduce(0) { $0 + pow($1 - mean, 2) } / Double(raw.count)
+        let std = max(sqrt(variance), 0.0001)
+        let normalized = raw.map { ($0 - mean) / std }
+        return QuestionAudioLogMelFeature(frames: safeFrames, values: normalized, source: source)
+    }
+
+    private static func resampleLinear(_ samples: [Float], sourceRate: Double, targetRate: Double) -> [Float] {
+        guard sourceRate.isFinite, sourceRate > 0, targetRate.isFinite, targetRate > 0, !samples.isEmpty else {
+            return samples
+        }
+        guard abs(sourceRate - targetRate) > 0.5 else { return samples }
+        let outputCount = max(1, Int((Double(samples.count) * targetRate / sourceRate).rounded()))
+        guard outputCount > 1, samples.count > 1 else { return samples }
+        let scale = sourceRate / targetRate
+        return (0..<outputCount).map { index in
+            let sourcePosition = Double(index) * scale
+            let lower = min(Int(sourcePosition.rounded(.down)), samples.count - 1)
+            let upper = min(lower + 1, samples.count - 1)
+            let fraction = Float(sourcePosition - Double(lower))
+            return samples[lower] + (samples[upper] - samples[lower]) * fraction
+        }
+    }
+
+    private static func spectrumPower(samples: [Float], start: Int, fft: vDSP.FFT<DSPSplitComplex>) -> [Float] {
+        var frame = [Float](repeating: 0, count: fftSize)
+        for sampleIndex in 0..<windowLength {
+            let sourceIndex = start + sampleIndex
+            frame[sampleIndex] = (sourceIndex < samples.count ? samples[sourceIndex] : 0) * hannWindow[sampleIndex]
+        }
+
+        var real = [Float](repeating: 0, count: fftSize / 2)
+        var imaginary = [Float](repeating: 0, count: fftSize / 2)
+        real.withUnsafeMutableBufferPointer { realPointer in
+            imaginary.withUnsafeMutableBufferPointer { imaginaryPointer in
+                var split = DSPSplitComplex(
+                    realp: realPointer.baseAddress!,
+                    imagp: imaginaryPointer.baseAddress!
+                )
+                frame.withUnsafeBufferPointer { framePointer in
+                    framePointer.baseAddress!.withMemoryRebound(to: DSPComplex.self, capacity: fftSize / 2) { complexPointer in
+                        vDSP_ctoz(complexPointer, 2, &split, 1, vDSP_Length(fftSize / 2))
+                    }
+                }
+                fft.forward(input: split, output: &split)
+            }
+        }
+
+        var power = [Float](repeating: 0, count: binCount)
+        power[0] = real[0] * real[0]
+        for bin in 1..<(fftSize / 2) {
+            power[bin] = real[bin] * real[bin] + imaginary[bin] * imaginary[bin]
+        }
+        power[fftSize / 2] = imaginary[0] * imaginary[0]
+        return power
+    }
+
+    private static let hannWindow: [Float] = {
+        (0..<windowLength).map { index in
+            0.5 - 0.5 * cos((2 * .pi * Float(index)) / Float(max(windowLength - 1, 1)))
+        }
+    }()
+
+    private static let melWeights: [[(bin: Int, weight: Double)]] = {
+        let minMel = melFrequency(0)
+        let maxMel = melFrequency(sampleRate / 2)
+        let melPoints = (0..<(bandCount + 2)).map { index in
+            minMel + (maxMel - minMel) * Double(index) / Double(bandCount + 1)
+        }
+        let hzPoints = melPoints.map(inverseMelFrequency)
+        let binFrequencies = (0..<binCount).map { Double($0) * sampleRate / Double(fftSize) }
+        return (0..<bandCount).map { band in
+            let lower = hzPoints[band]
+            let center = hzPoints[band + 1]
+            let upper = hzPoints[band + 2]
+            var weights: [(bin: Int, weight: Double)] = []
+            for (bin, frequency) in binFrequencies.enumerated() {
+                let weight: Double
+                if frequency < lower || frequency > upper {
+                    weight = 0
+                } else if frequency <= center {
+                    weight = (frequency - lower) / max(center - lower, 0.0001)
+                } else {
+                    weight = (upper - frequency) / max(upper - center, 0.0001)
+                }
+                if weight > 0 {
+                    weights.append((bin, weight))
+                }
+            }
+            return weights
+        }
+    }()
+
+    private static func melFrequency(_ frequency: Double) -> Double {
+        2595 * log10(1 + frequency / 700)
+    }
+
+    private static func inverseMelFrequency(_ mel: Double) -> Double {
+        700 * (pow(10, mel / 2595) - 1)
     }
 }
 

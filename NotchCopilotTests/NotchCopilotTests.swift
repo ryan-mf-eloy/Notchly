@@ -7065,6 +7065,67 @@ final class NotchCopilotTests: XCTestCase {
         XCTAssertEqual(feature.source, "signal_proxy")
     }
 
+    func testQuestionAudioLogMelRingBufferBuildsCapturedFeatureForSegmentRange() throws {
+        let sampleRate = 16_000.0
+        let seconds = 0.8
+        guard let format = AVAudioFormat(
+            commonFormat: .pcmFormatFloat32,
+            sampleRate: sampleRate,
+            channels: 1,
+            interleaved: false
+        ) else {
+            return XCTFail("Could not create test audio format")
+        }
+        let frameCount = AVAudioFrameCount(sampleRate * seconds)
+        let pcmBuffer = try XCTUnwrap(AVAudioPCMBuffer(pcmFormat: format, frameCapacity: frameCount))
+        pcmBuffer.frameLength = frameCount
+        let channel = try XCTUnwrap(pcmBuffer.floatChannelData?[0])
+        for frame in 0..<Int(frameCount) {
+            let t = Double(frame) / sampleRate
+            channel[frame] = Float(0.18 * sin(2 * Double.pi * 440 * t))
+        }
+
+        let meetingStartedAt = Date(timeIntervalSinceReferenceDate: 1_000)
+        let ringBuffer = QuestionAudioLogMelRingBuffer(retentionSeconds: 8)
+        ringBuffer.append(
+            AudioBuffer(
+                pcmBuffer: pcmBuffer,
+                time: nil,
+                rms: 0.12,
+                peak: 0.18,
+                createdAt: meetingStartedAt.addingTimeInterval(seconds),
+                audioSource: .microphone
+            ),
+            meetingStartedAt: meetingStartedAt
+        )
+
+        let segment = TranscriptSegment(
+            meetingId: UUID(),
+            speakerLabel: "You",
+            audioSource: .microphone,
+            text: "What is the rollout risk?",
+            sourceFrameRange: AudioSourceFrameRange(start: 1_600, end: 9_600),
+            startTime: 0.1,
+            endTime: 0.6,
+            isFinal: true
+        )
+
+        let started = Date()
+        let feature = try XCTUnwrap(ringBuffer.feature(
+            for: segment,
+            targetFrames: QuestionAudioLogMelFeature.trainedModelFrameCount
+        ))
+        let elapsedMs = Date().timeIntervalSince(started) * 1_000
+        XCTAssertEqual(feature.source, "captured_logmel")
+        XCTAssertEqual(feature.bands, QuestionAudioLogMelFeature.expectedBandCount)
+        XCTAssertEqual(feature.frames, QuestionAudioLogMelFeature.trainedModelFrameCount)
+        XCTAssertEqual(feature.values.count, 9_600)
+        XCTAssertTrue(feature.values.contains { abs($0) > 0.01 })
+        let mean = feature.values.reduce(0, +) / Double(feature.values.count)
+        XCTAssertEqual(mean, 0, accuracy: 0.1)
+        XCTAssertLessThan(elapsedMs, 100)
+    }
+
     func testRealtimeQAMultimodalScorerBlocksUnstablePartialWhenEnforced() async throws {
         let signal = QuestionMultimodalSignal(
             language: "en-US",

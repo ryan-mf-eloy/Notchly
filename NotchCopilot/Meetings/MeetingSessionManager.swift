@@ -256,6 +256,7 @@ final class MeetingSessionManager {
     private let translationCompletenessPass = TranslationCompletenessPass()
     private let semanticTranslationRefiner = SemanticTranslationRefiner()
     private var speechQualityMonitors: [TranscriptAudioSource: SpeechAudioQualityMonitor] = [:]
+    private let questionAudioLogMelBuffer = QuestionAudioLogMelRingBuffer()
     private let transcriptLedger = MeetingTranscriptLedger()
 
     private var activeTranscriptionService: (any TranscriptionService)?
@@ -480,6 +481,7 @@ final class MeetingSessionManager {
         appState.currentMeeting = session
         appState.speechAudioQualityBySource = [:]
         speechQualityMonitors = [:]
+        questionAudioLogMelBuffer.reset()
         appState.selectedMeeting = nil
         appState.elapsed = 0
         appState.resetQuestionAnswerFlow()
@@ -832,7 +834,12 @@ final class MeetingSessionManager {
     private func questionMultimodalSignal(for segment: TranscriptSegment) -> QuestionMultimodalSignal {
         let source = segment.audioSource == .unknown ? TranscriptAudioSource.mixed : segment.audioSource
         let quality = appState.speechAudioQualityBySource[source] ?? appState.speechAudioQualityBySource[segment.audioSource]
-        return QuestionMultimodalSignal(segment: segment, quality: quality)
+        var signal = QuestionMultimodalSignal(segment: segment, quality: quality)
+        signal.audioLogMel = questionAudioLogMelBuffer.feature(
+            for: segment,
+            targetFrames: QuestionAudioLogMelFeature.trainedModelFrameCount
+        )
+        return signal
     }
 
     private func resolvedLanguage(
@@ -1430,6 +1437,9 @@ final class MeetingSessionManager {
         let snapshot = monitor.ingest(buffer)
         speechQualityMonitors[source] = monitor
         appState.speechAudioQualityBySource[source] = snapshot
+        if let meeting = appState.currentMeeting {
+            questionAudioLogMelBuffer.append(buffer, meetingStartedAt: meeting.startedAt)
+        }
     }
 
     private func updateAudioReceivingStatus(for buffer: AudioBuffer) {
@@ -1484,6 +1494,7 @@ final class MeetingSessionManager {
         if !keepMeeting {
             audioRecorder.stopRecording()
             cancelPendingTranslations()
+            questionAudioLogMelBuffer.reset()
         }
         activeTranscriptionService = nil
         if !keepMeeting {
