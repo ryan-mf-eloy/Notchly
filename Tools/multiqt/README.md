@@ -33,6 +33,16 @@ Artifacts/multiqt/
   notchly-multiqt-v1.mlpackage
 ```
 
+Bootstrap a synthetic speech manifest from the existing QA gold fixture:
+
+```sh
+python3 Tools/multiqt/build_synthetic_manifest.py \
+  --out-dir Data/multiqt_synthetic \
+  --generate-audio
+```
+
+Synthetic speech is only a bootstrap set. The enforced gate still requires consented real meeting audio, public/license-compatible audio, or manually reviewed local datasets.
+
 ## Commands
 
 Install offline training dependencies on the training machine:
@@ -68,7 +78,15 @@ python3 Tools/multiqt/train.py \
   --manifest Data/multiqt/train.jsonl \
   --dev Data/multiqt/dev.jsonl \
   --test Data/multiqt/test.jsonl \
+  --hard-test Data/multiqt/hard_test.jsonl \
   --out Artifacts/multiqt
+```
+
+```sh
+python3 Tools/multiqt/predict.py \
+  --checkpoint Artifacts/multiqt/best.pt \
+  --manifest Data/multiqt/hard_test.jsonl \
+  --out Artifacts/multiqt/hard_test_predictions.jsonl
 ```
 
 ```sh

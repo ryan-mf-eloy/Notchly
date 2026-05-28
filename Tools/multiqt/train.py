@@ -7,10 +7,11 @@ import argparse
 import json
 import random
 import re
+import time
 from pathlib import Path
 from typing import Any
 
-from common import DEFAULT_LABELS_PATH, load_labels, read_jsonl, safe_div, write_json
+from common import DEFAULT_LABELS_PATH, load_labels, read_jsonl, safe_div, write_json, write_jsonl
 
 try:
     import torch
@@ -35,6 +36,7 @@ def main() -> int:
     parser.add_argument("--manifest", required=True, type=Path)
     parser.add_argument("--dev", required=True, type=Path)
     parser.add_argument("--test", required=True, type=Path)
+    parser.add_argument("--hard-test", type=Path, default=None)
     parser.add_argument("--labels", type=Path, default=DEFAULT_LABELS_PATH)
     parser.add_argument("--audio-root", type=Path, default=None)
     parser.add_argument("--out", required=True, type=Path)
@@ -60,12 +62,14 @@ def main() -> int:
     train_rows = read_jsonl(args.manifest)
     dev_rows = read_jsonl(args.dev)
     test_rows = read_jsonl(args.test)
+    hard_rows = read_jsonl(args.hard_test) if args.hard_test else []
     vocab = build_vocab(train_rows, min_count=2, max_size=30000)
 
     audio_root = args.audio_root or args.manifest.parent
     train_data = MultiQTDataset(train_rows, vocab, label_to_id, audio_root, args.max_tokens, args.max_frames)
     dev_data = MultiQTDataset(dev_rows, vocab, label_to_id, args.audio_root or args.dev.parent, args.max_tokens, args.max_frames)
     test_data = MultiQTDataset(test_rows, vocab, label_to_id, args.audio_root or args.test.parent, args.max_tokens, args.max_frames)
+    hard_data = MultiQTDataset(hard_rows, vocab, label_to_id, args.audio_root or args.hard_test.parent, args.max_tokens, args.max_frames) if args.hard_test else None
 
     model = MultiQTConcatModel(
         vocab_size=len(vocab),
@@ -137,10 +141,18 @@ def main() -> int:
     model.load_state_dict(best_state["model_state"])
     test_predictions = predict(model, test_data, args.batch_size)
     test_metrics = compute_metrics(test_predictions, best_state["threshold"])
+    hard_metrics = None
+    hard_predictions: list[dict[str, float | bool]] = []
+    if hard_data is not None:
+        hard_predictions = predict(model, hard_data, args.batch_size)
+        hard_metrics = compute_metrics(hard_predictions, best_state["threshold"])
     torch.save(best_state, args.out / "best.pt")
-    write_json(args.out / "metrics.json", {"test": test_metrics, "threshold": best_state["threshold"]})
+    write_json(args.out / "metrics.json", {"test": test_metrics, "hard_test": hard_metrics, "threshold": best_state["threshold"]})
     write_json(args.out / "calibration.json", {"response_threshold": best_state["threshold"]})
     write_json(args.out / "vocab.json", best_state["vocab"])
+    write_jsonl(args.out / "test_predictions.jsonl", prediction_rows(test_rows, test_predictions))
+    if hard_rows:
+        write_jsonl(args.out / "hard_test_predictions.jsonl", prediction_rows(hard_rows, hard_predictions))
     return 0
 
 
@@ -253,12 +265,46 @@ def predict(model: MultiQTConcatModel, dataset: MultiQTDataset, batch_size: int)
     loader = DataLoader(dataset, batch_size=batch_size, shuffle=False)
     with torch.no_grad():
         for batch in loader:
-            response_logit, _, _, _ = model(batch["text_tokens"], batch["audio_logmel"], batch["scalars"])
+            started = time.perf_counter()
+            response_logit, label_logits, complete_logit, rhetorical_logit = model(batch["text_tokens"], batch["audio_logmel"], batch["scalars"])
+            elapsed_ms = (time.perf_counter() - started) * 1000.0
             scores = torch.sigmoid(response_logit).cpu().tolist()
+            label_ids = torch.argmax(label_logits, dim=1).cpu().tolist()
+            complete_scores = torch.sigmoid(complete_logit).cpu().tolist()
+            rhetorical_scores = torch.sigmoid(rhetorical_logit).cpu().tolist()
             truths = batch["response_needed"].cpu().tolist()
-            for score, truth in zip(scores, truths):
-                output.append({"score": float(score), "truth": bool(truth)})
+            per_item_ms = safe_div(elapsed_ms, max(1, len(scores)))
+            for score, label_id, complete_score, rhetorical_score, truth in zip(scores, label_ids, complete_scores, rhetorical_scores, truths):
+                output.append(
+                    {
+                        "score": float(score),
+                        "label_id": float(label_id),
+                        "complete_score": float(complete_score),
+                        "rhetorical_score": float(rhetorical_score),
+                        "decision_ms": per_item_ms,
+                        "truth": bool(truth),
+                    }
+                )
     return output
+
+
+def prediction_rows(
+    manifest_rows: list[dict[str, Any]],
+    predictions: list[dict[str, float | bool]],
+) -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
+    for manifest, prediction in zip(manifest_rows, predictions):
+        rows.append(
+            {
+                "id": manifest["id"],
+                "score": prediction["score"],
+                "label_id": prediction["label_id"],
+                "complete_score": prediction["complete_score"],
+                "rhetorical_score": prediction["rhetorical_score"],
+                "decision_ms": prediction["decision_ms"],
+            }
+        )
+    return rows
 
 
 def tune_threshold(predictions: list[dict[str, float | bool]]) -> tuple[float, dict[str, float]]:

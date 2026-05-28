@@ -210,7 +210,8 @@ struct ProviderRouter {
         let classifier = QuestionClassifier(
             adaptiveProfile: preferences.questionAnsweringProfile,
             precisionMode: preferences.qaPrecisionMode,
-            multimodalMode: preferences.qaMultimodalMode
+            multimodalMode: preferences.qaMultimodalMode,
+            trainedModelRunner: CoreMLQuestionMultiQTModelRunner()
         )
         return classifier
     }

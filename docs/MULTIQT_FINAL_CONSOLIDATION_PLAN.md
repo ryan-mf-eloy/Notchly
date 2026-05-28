@@ -102,8 +102,10 @@ The model must predict more than a binary question flag:
 
 4. `MultiQTModelRunner`
    - Loads `notchly-multiqt-v1.mlmodelc`.
+   - Loads sidecar metadata from `notchly-multiqt-v1.metadata.json`.
    - Uses `MLModelConfiguration.computeUnits = .all` in normal mode, CPU-only benchmark mode for reproducibility.
    - Falls back to MultiQT-lite only when model is missing or explicitly disabled.
+   - Current repo integration point: `CoreMLQuestionMultiQTModelRunner` feeds trained predictions into `QuestionClassifier` in shadow/enforced modes.
 
 5. `MultiQTDecisionSmoother`
    - Requires confidence hysteresis.
@@ -190,6 +192,18 @@ The model can be trained earlier, but `qaMultimodalMode.enforced` cannot become 
 
 Training should happen outside the app, under `Tools/multiqt/`.
 
+Implemented entrypoints in the repo:
+
+```text
+Tools/multiqt/build_synthetic_manifest.py
+Tools/multiqt/train.py
+Tools/multiqt/predict.py
+Tools/multiqt/evaluate.py
+Tools/multiqt/export_coreml.py
+```
+
+`build_synthetic_manifest.py` converts the existing multilingual QA gold fixture into train/dev/test/hard_test manifests and can synthesize local macOS speech audio. This is a bootstrap/regression set only; final enforcement still requires consented real meeting audio, public/license-compatible audio, or manually reviewed local datasets.
+
 ### Baselines
 
 These must all run in CI or local benchmark:
@@ -243,22 +257,33 @@ Inputs:
 
 | Name | Shape/type |
 | --- | --- |
-| `audioLogMel` | Float32 `[1, frames, 40]` |
-| `textIds` | Int32 `[1, tokens]` or Float32 `[1, steps, vocab]` |
-| `scalarFeatures` | Float32 `[1, n]` |
-| `languageId` | Int32 `[1]` |
+| `audio_logmel` | Float32 `[1, 40, max_frames]` |
+| `text_tokens` | Int32 `[1, max_tokens]` |
+| `scalars` | Float32 `[1, scalar_count]` |
 
 Outputs:
 
 | Name | Shape/type |
 | --- | --- |
-| `intentLabel` | String or class probability map |
-| `intentProbabilities` | Dictionary/String->Double or Float32 vector |
-| `responseNeededProbability` | Double |
-| `criticalNegativeProbability` | Double |
-| `completeProbability` | Double |
-| `spanStart` / `spanEnd` | Int32 |
-| `calibratedScore` | Double |
+| `response_logit` | Float32 `[1]` |
+| `label_logits` | Float32 `[label_count]` |
+| `complete_logit` | Float32 `[1]` |
+| `rhetorical_logit` | Float32 `[1]` |
+
+Required metadata sidecar:
+
+```json
+{
+  "labels": ["answerable_question"],
+  "vocab": { "<pad>": 0, "<unk>": 1 },
+  "threshold": 0.5,
+  "config": {
+    "max_tokens": 96,
+    "max_frames": 600,
+    "scalar_count": 7
+  }
+}
+```
 
 ### Integration switch
 
@@ -392,4 +417,3 @@ This goal is complete only when current evidence proves all of the following:
 - Runtime uses the trained model in `shadow` and `enforced` modes with safe fallback.
 - UI E2E proves the live meeting flow.
 - Documentation reflects the real state and does not call MultiQT-lite a trained MultiQT model.
-

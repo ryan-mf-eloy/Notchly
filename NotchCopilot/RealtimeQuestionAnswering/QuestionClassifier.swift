@@ -16,6 +16,31 @@ struct QuestionMultimodalDecision: Hashable, Sendable {
     var shouldAllow: Bool
     var decisionSignals: [String]
     var suppressionSignals: [String]
+
+    init(
+        textualConfidence: Double,
+        multimodalConfidence: Double,
+        decisionScore: Double,
+        shouldAllow: Bool,
+        decisionSignals: [String],
+        suppressionSignals: [String]
+    ) {
+        self.textualConfidence = textualConfidence
+        self.multimodalConfidence = multimodalConfidence
+        self.decisionScore = decisionScore
+        self.shouldAllow = shouldAllow
+        self.decisionSignals = decisionSignals
+        self.suppressionSignals = suppressionSignals
+    }
+
+    init(trainedPrediction: QuestionTrainedMultimodalPrediction, textualConfidence: Double) {
+        self.textualConfidence = textualConfidence
+        self.multimodalConfidence = trainedPrediction.responseScore
+        self.decisionScore = trainedPrediction.responseScore
+        self.shouldAllow = trainedPrediction.shouldAllow
+        self.decisionSignals = trainedPrediction.decisionSignals
+        self.suppressionSignals = trainedPrediction.suppressionSignals
+    }
 }
 
 struct QuestionMultimodalScorer: Sendable {
@@ -288,6 +313,7 @@ struct QuestionClassifier: QuestionClassifierProvider {
     var spanExtractor: QuestionSpanExtractor
     var precisionMode: QAPrecisionMode
     var multimodalMode: QAMultimodalMode
+    var trainedModelRunner: (any QuestionTrainedMultimodalModelRunning)?
 
     init(
         intentRulePack: QuestionIntentRulePack = .default,
@@ -295,7 +321,8 @@ struct QuestionClassifier: QuestionClassifierProvider {
         adaptiveProfile: QuestionAnsweringAdaptiveProfile = QuestionAnsweringAdaptiveProfile(),
         priorityScorer: QuestionPriorityScorer = QuestionPriorityScorer(),
         precisionMode: QAPrecisionMode = .highPrecision,
-        multimodalMode: QAMultimodalMode = .shadow
+        multimodalMode: QAMultimodalMode = .shadow,
+        trainedModelRunner: (any QuestionTrainedMultimodalModelRunning)? = nil
     ) {
         self.rhetoricalFilter = RhetoricalQuestionFilter(rulePack: intentRulePack)
         self.intentGate = QuestionIntentGate(rulePack: intentRulePack, adaptiveProfile: adaptiveProfile)
@@ -307,6 +334,7 @@ struct QuestionClassifier: QuestionClassifierProvider {
         self.spanExtractor = QuestionSpanExtractor(rulePack: intentRulePack)
         self.precisionMode = precisionMode
         self.multimodalMode = multimodalMode
+        self.trainedModelRunner = trainedModelRunner
     }
 
     func classifyQuestion(
@@ -336,12 +364,18 @@ struct QuestionClassifier: QuestionClassifierProvider {
             precisionMode: precisionMode,
             isPartial: candidate.isPartial
         )
-        let multimodalDecision = multimodalScorer.score(
+        let fallbackMultimodalDecision = multimodalScorer.score(
             understanding: understanding,
             signal: candidate.multimodalSignal,
             precisionMode: precisionMode,
             isPartial: candidate.isPartial
         )
+        let trainedPrediction = multimodalMode == .off
+            ? nil
+            : await trainedModelRunner?.prediction(for: candidate, signal: candidate.multimodalSignal)
+        let multimodalDecision = trainedPrediction.map {
+            QuestionMultimodalDecision(trainedPrediction: $0, textualConfidence: understanding.confidence)
+        } ?? fallbackMultimodalDecision
         let acceptedByMultimodalGate = multimodalMode == .enforced ? multimodalDecision.shouldAllow : true
         let responseNeeded = acceptedByDecisionGate
             && acceptedByMultimodalGate

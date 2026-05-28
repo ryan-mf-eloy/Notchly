@@ -149,6 +149,271 @@ struct QuestionMultimodalSignal: Codable, Hashable, Sendable {
     }
 }
 
+protocol QuestionTrainedMultimodalModelRunning: Sendable {
+    func prediction(
+        for candidate: QuestionCandidate,
+        signal: QuestionMultimodalSignal?
+    ) async -> QuestionTrainedMultimodalPrediction?
+}
+
+struct QuestionTrainedMultimodalPrediction: Codable, Hashable, Sendable {
+    var responseScore: Double
+    var label: String?
+    var completeScore: Double?
+    var rhetoricalScore: Double?
+    var threshold: Double
+    var decisionLatencyMs: Double?
+    var decisionSignals: [String]
+    var suppressionSignals: [String]
+
+    var shouldAllow: Bool {
+        responseScore >= threshold
+            && (completeScore ?? 1) >= 0.5
+            && (rhetoricalScore ?? 0) < 0.5
+            && suppressionSignals.isEmpty
+    }
+}
+
+struct QuestionMultiQTModelMetadata: Codable, Hashable, Sendable {
+    struct Config: Codable, Hashable, Sendable {
+        var maxTokens: Int
+        var maxFrames: Int
+        var scalarCount: Int
+
+        enum CodingKeys: String, CodingKey {
+            case maxTokens = "max_tokens"
+            case maxFrames = "max_frames"
+            case scalarCount = "scalar_count"
+        }
+    }
+
+    var modelResourceName: String?
+    var labels: [String]
+    var vocab: [String: Int]
+    var threshold: Double
+    var config: Config
+
+    enum CodingKeys: String, CodingKey {
+        case modelResourceName = "model_resource_name"
+        case labels
+        case vocab
+        case threshold
+        case config
+    }
+}
+
+final class CoreMLQuestionMultiQTModelRunner: QuestionTrainedMultimodalModelRunning, @unchecked Sendable {
+    private let modelResourceName: String
+    private var cachedModel: MLModel?
+    private var cachedMetadata: QuestionMultiQTModelMetadata?
+
+    init(modelResourceName: String = "notchly-multiqt-v1") {
+        self.modelResourceName = modelResourceName
+    }
+
+    func prediction(
+        for candidate: QuestionCandidate,
+        signal: QuestionMultimodalSignal?
+    ) async -> QuestionTrainedMultimodalPrediction? {
+        do {
+            guard let model = try loadModel(),
+                  let metadata = try loadMetadata() else {
+                return nil
+            }
+            let encoder = QuestionMultiQTFeatureEncoder(metadata: metadata)
+            let input = try encoder.featureProvider(for: candidate, signal: signal)
+            let started = Date()
+            let options = MLPredictionOptions()
+            let output = try await model.prediction(from: input, options: options)
+            let elapsedMs = Date().timeIntervalSince(started) * 1000
+            guard let responseLogit = scalarOutput(named: "response_logit", from: output) else {
+                return nil
+            }
+            let label = labelOutput(named: "label_logits", from: output, labels: metadata.labels)
+            let complete = scalarOutput(named: "complete_logit", from: output).map(sigmoid)
+            let rhetorical = scalarOutput(named: "rhetorical_logit", from: output).map(sigmoid)
+            let score = sigmoid(responseLogit)
+            var suppression: [String] = []
+            if let complete, complete < 0.5 {
+                suppression.append("trained_incomplete")
+            }
+            if let rhetorical, rhetorical >= 0.5 {
+                suppression.append("trained_rhetorical")
+            }
+            if score < metadata.threshold {
+                suppression.append("trained_below_threshold")
+            }
+            return QuestionTrainedMultimodalPrediction(
+                responseScore: min(max(score, 0), 1),
+                label: label,
+                completeScore: complete,
+                rhetoricalScore: rhetorical,
+                threshold: metadata.threshold,
+                decisionLatencyMs: elapsedMs,
+                decisionSignals: ["trained_multiqt_coreml"] + (label.map { ["trained_label:\($0)"] } ?? []),
+                suppressionSignals: suppression
+            )
+        } catch {
+            return nil
+        }
+    }
+
+    private func loadModel() throws -> MLModel? {
+        if let cachedModel {
+            return cachedModel
+        }
+        guard let url = resourceURL(name: modelResourceName, extension: "mlmodelc") else {
+            return nil
+        }
+        let configuration = MLModelConfiguration()
+        configuration.computeUnits = .all
+        let model = try MLModel(contentsOf: url, configuration: configuration)
+        cachedModel = model
+        return model
+    }
+
+    private func loadMetadata() throws -> QuestionMultiQTModelMetadata? {
+        if let cachedMetadata {
+            return cachedMetadata
+        }
+        guard let url = resourceURL(name: "\(modelResourceName).metadata", extension: "json") else {
+            return nil
+        }
+        let data = try Data(contentsOf: url)
+        let metadata = try JSONDecoder().decode(QuestionMultiQTModelMetadata.self, from: data)
+        cachedMetadata = metadata
+        return metadata
+    }
+
+    private func resourceURL(name: String, extension fileExtension: String) -> URL? {
+        [Bundle.main, Bundle(for: QuestionMultiQTBundleMarker.self)]
+            .compactMap { $0.url(forResource: name, withExtension: fileExtension) }
+            .first
+    }
+
+    private func scalarOutput(named name: String, from output: MLFeatureProvider) -> Double? {
+        guard let value = output.featureValue(for: name) else { return nil }
+        if value.type == .double {
+            return value.doubleValue
+        }
+        if value.type == .int64 {
+            return Double(value.int64Value)
+        }
+        if let array = value.multiArrayValue, array.count > 0 {
+            return array[0].doubleValue
+        }
+        return nil
+    }
+
+    private func labelOutput(named name: String, from output: MLFeatureProvider, labels: [String]) -> String? {
+        guard let array = output.featureValue(for: name)?.multiArrayValue,
+              array.count > 0 else {
+            return nil
+        }
+        var bestIndex = 0
+        var bestValue = array[0].doubleValue
+        for index in 1..<array.count {
+            let value = array[index].doubleValue
+            if value > bestValue {
+                bestValue = value
+                bestIndex = index
+            }
+        }
+        guard labels.indices.contains(bestIndex) else { return nil }
+        return labels[bestIndex]
+    }
+
+    private func sigmoid(_ value: Double) -> Double {
+        1 / (1 + exp(-value))
+    }
+}
+
+private final class QuestionMultiQTBundleMarker {}
+
+private struct QuestionMultiQTFeatureEncoder {
+    var metadata: QuestionMultiQTModelMetadata
+
+    func featureProvider(
+        for candidate: QuestionCandidate,
+        signal: QuestionMultimodalSignal?
+    ) throws -> MLFeatureProvider {
+        let text = try textTokens(for: candidate.rawText)
+        let audio = try neutralAudioLogMel()
+        let scalars = try scalarTensor(for: signal, language: candidate.language)
+        return try MLDictionaryFeatureProvider(dictionary: [
+            "text_tokens": text,
+            "audio_logmel": audio,
+            "scalars": scalars
+        ])
+    }
+
+    private func textTokens(for text: String) throws -> MLMultiArray {
+        let maxTokens = max(1, metadata.config.maxTokens)
+        let output = try MLMultiArray(
+            shape: [NSNumber(value: 1), NSNumber(value: maxTokens)],
+            dataType: .int32
+        )
+        let tokens = tokenize(text)
+        for index in 0..<maxTokens {
+            let tokenId: Int
+            if index < tokens.count {
+                tokenId = metadata.vocab[tokens[index]] ?? metadata.vocab["<unk>"] ?? 1
+            } else {
+                tokenId = metadata.vocab["<pad>"] ?? 0
+            }
+            output[[NSNumber(value: 0), NSNumber(value: index)]] = NSNumber(value: tokenId)
+        }
+        return output
+    }
+
+    private func neutralAudioLogMel() throws -> MLMultiArray {
+        let maxFrames = max(1, metadata.config.maxFrames)
+        let output = try MLMultiArray(
+            shape: [NSNumber(value: 1), NSNumber(value: 40), NSNumber(value: maxFrames)],
+            dataType: .float32
+        )
+        for index in 0..<output.count {
+            output[index] = 0
+        }
+        return output
+    }
+
+    private func scalarTensor(for signal: QuestionMultimodalSignal?, language: String?) throws -> MLMultiArray {
+        let scalarCount = max(1, metadata.config.scalarCount)
+        let output = try MLMultiArray(
+            shape: [NSNumber(value: 1), NSNumber(value: scalarCount)],
+            dataType: .float32
+        )
+        let resolvedLanguage = signal?.language ?? language
+        let duration = min(max((signal?.duration ?? 0) / 20, 0), 1)
+        let values = [
+            signal?.asrConfidence ?? 1,
+            signal?.isPartial == true ? 1 : 0,
+            duration,
+            resolvedLanguage == "pt-BR" ? 1 : 0,
+            resolvedLanguage == "en-US" ? 1 : 0,
+            resolvedLanguage == "es-ES" ? 1 : 0,
+            resolvedLanguage == "ja-JP" ? 1 : 0
+        ]
+        for index in 0..<scalarCount {
+            output[[NSNumber(value: 0), NSNumber(value: index)]] = NSNumber(value: index < values.count ? values[index] : 0)
+        }
+        return output
+    }
+
+    private func tokenize(_ text: String) -> [String] {
+        let lowercased = text.lowercased()
+        let parts = lowercased
+            .components(separatedBy: CharacterSet.alphanumerics.inverted)
+            .filter { !$0.isEmpty }
+        if !parts.isEmpty {
+            return parts
+        }
+        let compact = lowercased.trimmingCharacters(in: .whitespacesAndNewlines)
+        return compact.isEmpty ? [] : [compact]
+    }
+}
+
 enum QuestionStatus: String, Codable, CaseIterable, Identifiable, Sendable {
     case candidate
     case confirmed

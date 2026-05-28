@@ -17,6 +17,7 @@ except ImportError as error:  # pragma: no cover - executed only on export machi
     ) from error
 
 from model import MultiQTConcatModel
+from common import write_json
 
 
 def main() -> int:
@@ -62,6 +63,23 @@ def main() -> int:
     )
     args.out.parent.mkdir(parents=True, exist_ok=True)
     mlmodel.save(str(args.out))
+    metadata_out = args.out.with_name(f"{args.out.stem}.metadata.json")
+    write_json(
+        metadata_out,
+        {
+            "model_resource_name": args.out.stem,
+            "labels": checkpoint["labels"],
+            "vocab": checkpoint["vocab"],
+            "threshold": checkpoint.get("threshold", 0.5),
+            "config": checkpoint["config"],
+            "inputs": {
+                "text_tokens": [1, max_tokens],
+                "audio_logmel": [1, 40, max_frames],
+                "scalars": [1, scalar_count],
+            },
+            "outputs": ["response_logit", "label_logits", "complete_logit", "rhetorical_logit"],
+        },
+    )
     return 0
 
 

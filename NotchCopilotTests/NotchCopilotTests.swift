@@ -7040,6 +7040,61 @@ final class NotchCopilotTests: XCTestCase {
         XCTAssertNotNil(classification.decisionScore)
     }
 
+    func testRealtimeQATrainedMultiQTDecisionOverridesFallbackWhenAvailable() async throws {
+        let prediction = QuestionTrainedMultimodalPrediction(
+            responseScore: 0.93,
+            label: "technical_explanation",
+            completeScore: 0.97,
+            rhetoricalScore: 0.02,
+            threshold: 0.50,
+            decisionLatencyMs: 7.2,
+            decisionSignals: ["trained_multiqt_coreml", "trained_label:technical_explanation"],
+            suppressionSignals: []
+        )
+        let classifier = QuestionClassifier(
+            multimodalMode: .enforced,
+            trainedModelRunner: StubTrainedMultiQTModelRunner(prediction: prediction)
+        )
+        let candidate = makeQuestion("What is the API cache strategy?")
+        let classification = try await classifier.classifyQuestion(
+            candidate: candidate,
+            context: makeContext(candidate.rawText),
+            userProfile: makeProfile()
+        )
+
+        XCTAssertTrue(classification.responseNeeded)
+        XCTAssertEqual(classification.decisionScore ?? 0, 0.93, accuracy: 0.0001)
+        XCTAssertTrue(classification.decisionSignals?.contains("trained_multiqt_coreml") == true)
+    }
+
+    func testRealtimeQATrainedMultiQTCanRejectBelowThresholdCandidate() async throws {
+        let prediction = QuestionTrainedMultimodalPrediction(
+            responseScore: 0.21,
+            label: "statement",
+            completeScore: 0.94,
+            rhetoricalScore: 0.01,
+            threshold: 0.50,
+            decisionLatencyMs: 6.8,
+            decisionSignals: ["trained_multiqt_coreml", "trained_label:statement"],
+            suppressionSignals: ["trained_below_threshold"]
+        )
+        let classifier = QuestionClassifier(
+            multimodalMode: .enforced,
+            trainedModelRunner: StubTrainedMultiQTModelRunner(prediction: prediction)
+        )
+        let candidate = makeQuestion("What is the API cache strategy?")
+        let classification = try await classifier.classifyQuestion(
+            candidate: candidate,
+            context: makeContext(candidate.rawText),
+            userProfile: makeProfile()
+        )
+
+        XCTAssertFalse(classification.responseNeeded)
+        XCTAssertFalse(classification.isQuestion)
+        XCTAssertEqual(classification.decisionScore ?? 0, 0.21, accuracy: 0.0001)
+        XCTAssertTrue(classification.suppressionSignals?.contains("trained_below_threshold") == true)
+    }
+
     func testRealtimeQACleansExtractedQuestionWithoutDroppingIntent() async throws {
         let text = "Ryan, quick question can we ship the endpoint by Friday?"
         let signal = QuestionMultimodalSignal(
@@ -9799,6 +9854,17 @@ private final class SlowRawAIProvider: AIProvider {
 
     func embed(texts: [String]) async throws -> [[Double]] {
         []
+    }
+}
+
+private struct StubTrainedMultiQTModelRunner: QuestionTrainedMultimodalModelRunning {
+    var prediction: QuestionTrainedMultimodalPrediction?
+
+    func prediction(
+        for candidate: QuestionCandidate,
+        signal: QuestionMultimodalSignal?
+    ) async -> QuestionTrainedMultimodalPrediction? {
+        prediction
     }
 }
 
