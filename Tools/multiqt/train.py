@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 import random
 import re
 import time
@@ -48,6 +49,12 @@ def main() -> int:
     parser.add_argument("--input-mode", choices=MODEL_INPUT_MODES, default="multimodal")
     parser.add_argument("--positive-weight", type=float, default=1.0)
     parser.add_argument("--critical-negative-weight", type=float, default=2.5)
+    parser.add_argument(
+        "--min-threshold",
+        type=float,
+        default=0.50,
+        help="Lowest response threshold considered during calibration; keep high for precision-first promotion.",
+    )
     parser.add_argument("--seed", type=int, default=42)
     args = parser.parse_args()
 
@@ -113,13 +120,14 @@ def main() -> int:
             total_loss += float(loss.detach().cpu())
 
         dev_predictions = predict(model, dev_data, args.batch_size)
-        threshold, dev_metrics, dev_gates = tune_threshold(dev_rows, dev_predictions, labels_config)
+        threshold, dev_metrics, dev_gates = tune_threshold(dev_rows, dev_predictions, labels_config, min_threshold=args.min_threshold)
         language_thresholds = tune_thresholds_by_group(
             dev_rows,
             dev_predictions,
             labels_config,
             key="language",
             expected_values=labels_config.get("languages", []),
+            min_threshold=args.min_threshold,
         )
         score = calibration_score(dev_metrics, dev_gates, threshold)
         print(
@@ -423,12 +431,15 @@ def tune_threshold(
     manifest_rows: list[dict[str, Any]],
     predictions: list[dict[str, float | bool]],
     labels_config: dict[str, Any],
+    min_threshold: float = 0.50,
 ) -> tuple[float, dict[str, Any], dict[str, bool]]:
-    best_threshold = 0.5
+    floor = min(max(min_threshold, 0.05), 0.99)
+    best_threshold = floor
     best_metrics: dict[str, Any] = {"precision": 0.0, "recall": 0.0, "critical_negative_false_positives": 0}
     best_gates: dict[str, bool] = {}
     best_score: tuple[float, ...] = (-1.0,)
-    for step in range(5, 100):
+    first_step = max(5, min(99, math.ceil(floor * 100)))
+    for step in range(first_step, 100):
         threshold = step / 100.0
         metrics = compute_metrics(manifest_rows, predictions, threshold, labels_config)
         gates = calibration_gates(metrics)
@@ -447,6 +458,7 @@ def tune_thresholds_by_group(
     labels_config: dict[str, Any],
     key: str,
     expected_values: list[str],
+    min_threshold: float = 0.50,
 ) -> dict[str, float]:
     thresholds: dict[str, float] = {}
     paired = list(zip(manifest_rows, predictions))
@@ -456,7 +468,7 @@ def tune_thresholds_by_group(
             continue
         group_rows = [row for row, _ in group_pairs]
         group_predictions = [prediction for _, prediction in group_pairs]
-        threshold, _, _ = tune_threshold(group_rows, group_predictions, labels_config)
+        threshold, _, _ = tune_threshold(group_rows, group_predictions, labels_config, min_threshold=min_threshold)
         thresholds[value] = threshold
     return thresholds
 

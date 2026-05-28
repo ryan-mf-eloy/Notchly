@@ -45,6 +45,17 @@ python3 Tools/multiqt/build_synthetic_manifest.py \
 
 Synthetic speech is only a bootstrap set. The final production gate still requires consented real meeting audio, public/license-compatible audio, or manually reviewed local datasets.
 
+Build the expanded multilingual regression manifest from both QA and Copilot intent gold fixtures without storing audio:
+
+```sh
+python3 Tools/multiqt/build_synthetic_manifest.py \
+  --out-dir Data/multiqt_expanded \
+  --include-copilot-fixture \
+  --audio-feature-source signal_proxy
+```
+
+The expanded path maps Copilot-only intents (`calculation`, `conversion`, `news`, `web`, `reminder`, `memory`) into the MultiQT answerability schema while preserving response-needed truth labels. `signal_proxy` rows are trainable from numeric acoustic/temporal fields and remain a bootstrap/CI path, not a substitute for consented real meeting audio.
+
 ## Commands
 
 Install offline training dependencies on the training machine:
@@ -125,10 +136,11 @@ python3 Tools/multiqt/compare_baselines.py \
   --epochs 16 \
   --batch-size 64 \
   --critical-negative-weight 2.5 \
+  --min-threshold 0.50 \
   --max-frames 240
 ```
 
-Supported `--input-mode`/baseline modes are `multimodal`, `text_only`, `audio_only`, `text_audio`, and `scalar_only`. The model keeps one architecture and masks unused modalities, so comparisons are reproducible and do not fork runtime behavior.
+Supported `--input-mode`/baseline modes are `multimodal`, `text_only`, `audio_only`, `text_audio`, and `scalar_only`. The model keeps one architecture and masks unused modalities, so comparisons are reproducible and do not fork runtime behavior. Promotion is precision-first: multimodal must pass absolute precision/recall/latency/critical-FP gates and must improve precision or critical-FP behavior over text-only while preserving absolute recall gates.
 
 ```sh
 python3 Tools/multiqt/predict.py \

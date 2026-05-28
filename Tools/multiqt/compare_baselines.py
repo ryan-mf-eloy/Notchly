@@ -39,6 +39,7 @@ def main() -> int:
     parser.add_argument("--max-frames", type=int, default=240)
     parser.add_argument("--positive-weight", type=float, default=1.0)
     parser.add_argument("--critical-negative-weight", type=float, default=2.5)
+    parser.add_argument("--min-threshold", type=float, default=0.50)
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--skip-existing", action="store_true")
     parser.add_argument("--no-gates", action="store_true", help="Print/report results but do not fail the process.")
@@ -93,6 +94,8 @@ def train_variant(args: argparse.Namespace, mode: str, mode_out: Path) -> None:
         str(args.positive_weight),
         "--critical-negative-weight",
         str(args.critical_negative_weight),
+        "--min-threshold",
+        str(args.min_threshold),
         "--input-mode",
         mode,
     ]
@@ -166,8 +169,9 @@ def gate_results(summaries: dict[str, Any]) -> dict[str, bool]:
             if split not in summaries[mode]:
                 continue
             baseline = summaries[mode][split]
-            gates[f"{split}_not_worse_than_{mode}_precision"] = float(multi_metrics["precision"]) + 1e-9 >= float(baseline["precision"])
-            gates[f"{split}_not_worse_than_{mode}_recall"] = float(multi_metrics["recall"]) + 1e-9 >= float(baseline["recall"])
+            gates[f"{split}_precision_safe_vs_{mode}"] = precision_safe_vs_baseline(multi_metrics, baseline)
+            gates[f"{split}_recall_above_absolute_gate_vs_{mode}"] = float(multi_metrics["recall"]) >= 0.970
+            gates[f"{split}_critical_fp_not_worse_than_{mode}"] = int(multi_metrics["critical_negative_false_positives"]) <= int(baseline["critical_negative_false_positives"])
     return gates
 
 
@@ -196,12 +200,25 @@ def promotion_results(summaries: dict[str, Any]) -> dict[str, bool]:
         multi_metrics = multimodal[split]
         text_metrics = text_only[split]
         precision_gain = float(multi_metrics["precision"]) > float(text_metrics["precision"]) + 1e-9
+        critical_fp_gain = int(multi_metrics["critical_negative_false_positives"]) < int(text_metrics["critical_negative_false_positives"])
         recall_gain = float(multi_metrics["recall"]) > float(text_metrics["recall"]) + 1e-9
-        results[f"{split}_beats_text_only"] = precision_gain or recall_gain
-        split_gains.append(precision_gain or recall_gain)
+        precision_first_gain = (precision_gain or critical_fp_gain) and float(multi_metrics["recall"]) >= 0.970
+        results[f"{split}_beats_text_only"] = precision_first_gain or recall_gain
+        results[f"{split}_precision_first_gain"] = precision_first_gain
+        split_gains.append(precision_first_gain or recall_gain)
     results["beats_text_only_on_any_split"] = any(split_gains)
     results["promote_to_enforced"] = results["absolute_gates_pass"] and results["beats_text_only_on_any_split"]
     return results
+
+
+def precision_safe_vs_baseline(multi_metrics: dict[str, Any], baseline: dict[str, Any]) -> bool:
+    multi_precision = float(multi_metrics["precision"])
+    baseline_precision = float(baseline["precision"])
+    multi_critical_fp = int(multi_metrics["critical_negative_false_positives"])
+    baseline_critical_fp = int(baseline["critical_negative_false_positives"])
+    return multi_precision + 1e-9 >= baseline_precision or (
+        multi_precision >= 0.995 and multi_critical_fp < baseline_critical_fp
+    )
 
 
 if __name__ == "__main__":

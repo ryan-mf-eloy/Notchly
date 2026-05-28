@@ -51,6 +51,12 @@ FILLER_PREFIXES = {
     "es-ES": ["una duda rapida", "solo para entender", "una pregunta"],
     "ja-JP": ["確認ですが", "一つ質問です", "念のため"],
 }
+CODE_SWITCH_PREFIXES = {
+    "pt-BR": ["quick question", "one thing"],
+    "en-US": ["uma duvida", "solo para entender"],
+    "es-ES": ["quick question", "uma duda"],
+    "ja-JP": ["quick question", "uma duvida"],
+}
 REPORTED_TEMPLATES = {
     "pt-BR": "perguntaram se {text} mas isso ja foi respondido",
     "en-US": "someone asked whether {text} but we already answered it",
@@ -124,6 +130,9 @@ def augment_rows(
         prefix = rng.choice(FILLER_PREFIXES.get(language, FILLER_PREFIXES["en-US"]))
         candidates.append(("asr_filler_prefix", mutate_asr(row, f"{prefix} {text}", confidence_delta=-0.03)))
 
+        code_switch_prefix = rng.choice(CODE_SWITCH_PREFIXES.get(language, CODE_SWITCH_PREFIXES["en-US"]))
+        candidates.append(("asr_code_switch_prefix", mutate_asr(row, f"{code_switch_prefix} {text}", confidence_delta=-0.05)))
+
         if positive:
             partial = partial_text(text, language)
             if partial and partial != text:
@@ -161,6 +170,11 @@ def fragment_row(row: dict[str, Any], fragment: str) -> dict[str, Any]:
     mutated["label"] = "fragment"
     duration_ms = max(400, int((int(row["end_ms"]) - int(row["start_ms"])) * 0.45))
     mutated["end_ms"] = int(row["start_ms"]) + duration_ms
+    if mutated.get("audio_feature_source") == "signal_proxy":
+        mutated["partial_stability"] = min(float(mutated.get("partial_stability", 0.38)), 0.38)
+        mutated["terminal_pause_ms"] = 0
+        mutated["gap_count"] = max(1, int(mutated.get("gap_count") or 0))
+        mutated["audio_energy"] = max(0.001, float(mutated.get("audio_energy", 0.018)) * 0.65)
     return mutated
 
 
@@ -179,6 +193,9 @@ def negative_wrapper(row: dict[str, Any], templates: dict[str, str], label: str)
     mutated["question_span"] = [0, len(wrapped)]
     if mutated.get("asr_confidence") is not None:
         mutated["asr_confidence"] = clamp(float(mutated["asr_confidence"]) - 0.04, 0.50, 0.99)
+    if mutated.get("audio_feature_source") == "signal_proxy":
+        mutated["partial_stability"] = 1.0
+        mutated["terminal_pause_ms"] = max(360, int(mutated.get("terminal_pause_ms") or 0))
     return mutated
 
 

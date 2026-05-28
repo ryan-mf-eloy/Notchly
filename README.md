@@ -253,6 +253,7 @@ O plano final esta em `docs/MULTIQT_FINAL_CONSOLIDATION_PLAN.md`. O workspace ex
 - validador de manifesto;
 - modelo PyTorch audio+texto com fusao concat;
 - avaliacao por precision/recall, negativos criticos e latencia;
+- manifest expandido com `qa_intent_gold.jsonl` + `copilot_intent_gold.jsonl`, incluindo `calculation`, `conversion`, `news`, `web`, `reminder` e `memory` mapeados para o schema MultiQT;
 - importacao de shadow logs redigidos via `Tools/multiqt/build_shadow_manifest.py`, com rejeicao de texto/audio bruto e treino por `signal_proxy`;
 - export para Core ML (`notchly-multiqt-v1.mlpackage`/`.mlmodelc`) com sidecar `notchly-multiqt-v1.metadata.json`.
 
@@ -278,6 +279,13 @@ Comparativo de baselines treinaveis (`Tools/multiqt/compare_baselines.py`, 16 ep
 | `audio_only` | 0.9649 / 0.2895 | 0.5000 / 0.2195 | 27 | 3.911 ms |
 
 O multimodal passa os gates absolutos, supera `audio_only` e vence `text_only` no hard_test adversarial (`promotion.promote_to_enforced = true`). Por isso o default de produto volta a ser `enforced`: o modelo Core ML treinado participa da decisao local, enquanto os hard-blocks textuais continuam protegendo negativos criticos.
+
+Smoke expandido com `qa_intent_gold` + `copilot_intent_gold`, `signal_proxy`, code-switch e `--min-threshold 0.50`:
+
+- manifesto hardened: 94.222 exemplos, 34.087 positivos, 60.135 negativos;
+- `multimodal` 1 epoca: test precision 1.0000, recall 0.9968, critical FP 0, p95 1.081 ms; hard_test precision 1.0000, recall 0.9976, critical FP 0, p95 1.148 ms;
+- `text_only` 1 epoca: test precision 1.0000, recall 0.9985, critical FP 0; hard_test precision 0.9719, recall 0.9986, critical FP 60;
+- promocao precision-first no smoke: `promotion.promote_to_enforced = true`, mas o artefato empacotado ainda e o checkpoint hardened descrito acima ate um treino/export completo substituir o bundle.
 
 O metadata empacotado tambem registra gates detalhados: 63/63 gates passam, incluindo precision >= 0.990 e recall >= 0.950 por idioma (`pt-BR`, `en-US`, `es-ES`, `ja-JP`), p95 <= 60 ms, p99 <= 100 ms e zero FP critico por label negativo (`fragment`, `operational_check`, `reported_question`, `rhetorical`, `self_answered`, `small_talk`, `title_noise`). A mesma metadata agora carrega os thresholds por idioma, permitindo subir thresholds por bucket sem alterar o binario do app quando uma proxima rodada de calibracao exigir mais conservadorismo.
 
