@@ -1,0 +1,125 @@
+[
+  {
+    "metadataOutputVersion" : "3.0",
+    "storagePrecision" : "Float16",
+    "outputSchema" : [
+      {
+        "hasShapeFlexibility" : "0",
+        "isOptional" : "0",
+        "dataType" : "Float16",
+        "formattedType" : "MultiArray (Float16 1)",
+        "shortDescription" : "",
+        "shape" : "[1]",
+        "name" : "response_logit",
+        "type" : "MultiArray"
+      },
+      {
+        "hasShapeFlexibility" : "0",
+        "isOptional" : "0",
+        "dataType" : "Float16",
+        "formattedType" : "MultiArray (Float16 1 × 18)",
+        "shortDescription" : "",
+        "shape" : "[1, 18]",
+        "name" : "label_logits",
+        "type" : "MultiArray"
+      },
+      {
+        "hasShapeFlexibility" : "0",
+        "isOptional" : "0",
+        "dataType" : "Float16",
+        "formattedType" : "MultiArray (Float16 1)",
+        "shortDescription" : "",
+        "shape" : "[1]",
+        "name" : "complete_logit",
+        "type" : "MultiArray"
+      },
+      {
+        "hasShapeFlexibility" : "0",
+        "isOptional" : "0",
+        "dataType" : "Float16",
+        "formattedType" : "MultiArray (Float16 1)",
+        "shortDescription" : "",
+        "shape" : "[1]",
+        "name" : "rhetorical_logit",
+        "type" : "MultiArray"
+      }
+    ],
+    "modelParameters" : [
+
+    ],
+    "specificationVersion" : 8,
+    "mlProgramOperationTypeHistogram" : {
+      "Ios16.reduceMin" : 1,
+      "Ios17.linear" : 8,
+      "Select" : 1,
+      "Ios17.transpose" : 1,
+      "Ios17.conv" : 2,
+      "Ios17.gather" : 1,
+      "Ios17.add" : 1,
+      "Ios17.concat" : 3,
+      "Ios16.reduceMean" : 1,
+      "Ios16.gelu" : 6,
+      "Ios17.greaterEqual" : 1,
+      "Ios16.reduceMax" : 2,
+      "Ios17.squeeze" : 4,
+      "Ios17.cast" : 5,
+      "Ios17.layerNorm" : 2
+    },
+    "computePrecision" : "Mixed (Float16, Int16, Int32)",
+    "isUpdatable" : "0",
+    "stateSchema" : [
+
+    ],
+    "availability" : {
+      "macOS" : "14.0",
+      "tvOS" : "17.0",
+      "visionOS" : "1.0",
+      "watchOS" : "10.0",
+      "iOS" : "17.0",
+      "macCatalyst" : "17.0"
+    },
+    "modelType" : {
+      "name" : "MLModelType_mlProgram"
+    },
+    "userDefinedMetadata" : {
+      "com.github.apple.coremltools.conversion_date" : "2026-05-28",
+      "com.github.apple.coremltools.source" : "torch==2.12.0",
+      "com.github.apple.coremltools.version" : "9.0",
+      "com.github.apple.coremltools.source_dialect" : "TorchScript"
+    },
+    "inputSchema" : [
+      {
+        "hasShapeFlexibility" : "0",
+        "isOptional" : "0",
+        "dataType" : "Int32",
+        "formattedType" : "MultiArray (Int32 1 × 96)",
+        "shortDescription" : "",
+        "shape" : "[1, 96]",
+        "name" : "text_tokens",
+        "type" : "MultiArray"
+      },
+      {
+        "hasShapeFlexibility" : "0",
+        "isOptional" : "0",
+        "dataType" : "Float32",
+        "formattedType" : "MultiArray (Float32 1 × 40 × 240)",
+        "shortDescription" : "",
+        "shape" : "[1, 40, 240]",
+        "name" : "audio_logmel",
+        "type" : "MultiArray"
+      },
+      {
+        "hasShapeFlexibility" : "0",
+        "isOptional" : "0",
+        "dataType" : "Float32",
+        "formattedType" : "MultiArray (Float32 1 × 7)",
+        "shortDescription" : "",
+        "shape" : "[1, 7]",
+        "name" : "scalars",
+        "type" : "MultiArray"
+      }
+    ],
+    "generatedClassName" : "notchly_multiqt_v1",
+    "method" : "predict"
+  }
+]

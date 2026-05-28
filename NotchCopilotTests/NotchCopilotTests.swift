@@ -47,6 +47,18 @@ final class NotchCopilotTests: XCTestCase {
         XCTAssertTrue(normalized.stealthModeEnabled)
     }
 
+    func testAppPreferencesPromotesLegacyQAShadowModeToTrainedEnforcedDefault() throws {
+        let legacy = try JSONDecoder().decode(
+            AppPreferences.self,
+            from: Data(#"{ "qaMultimodalMode": "shadow" }"#.utf8)
+        )
+
+        let normalized = legacy.normalizedForPersistence()
+
+        XCTAssertEqual(normalized.qaMultimodalMode, .enforced)
+        XCTAssertTrue(normalized.didPromoteTrainedQAMultimodalDefault)
+    }
+
     func testLocalDataCryptorRoundTripsAndRejectsWrongKey() throws {
         let cryptor = try testCryptor(byte: 0x11)
         let wrongCryptor = try testCryptor(byte: 0x22)
@@ -7131,6 +7143,42 @@ final class NotchCopilotTests: XCTestCase {
         XCTAssertFalse(classification.isQuestion)
         XCTAssertEqual(classification.decisionScore ?? 0, 0.21, accuracy: 0.0001)
         XCTAssertTrue(classification.suppressionSignals?.contains("trained_below_threshold") == true)
+    }
+
+    func testRealtimeQABundledTrainedMultiQTModelLoadsAndScoresKnownQuestion() async throws {
+        let signal = QuestionMultimodalSignal(
+            language: "en-US",
+            asrConfidence: 0.94,
+            isFinal: true,
+            isPartial: false,
+            speakerLabel: "Speaker",
+            audioSource: .microphone,
+            duration: 2.2,
+            hasTerminalPause: true,
+            partialStability: 1,
+            rms: 0.028,
+            peak: 0.18,
+            isClipping: false,
+            isSilence: false,
+            isTooQuiet: false,
+            gapCount: 0,
+            noiseFloor: 0.002,
+            audioEnergy: 0.026
+        )
+        let candidate = makeQuestion(
+            "Ryan can you walk through the OAuth flow",
+            multimodalSignal: signal
+        )
+
+        let prediction = await CoreMLQuestionMultiQTModelRunner().prediction(
+            for: candidate,
+            signal: signal
+        )
+
+        XCTAssertNotNil(prediction)
+        XCTAssertEqual(prediction?.threshold ?? 0, 0.99, accuracy: 0.0001)
+        XCTAssertGreaterThan(prediction?.responseScore ?? 0, prediction?.threshold ?? 1)
+        XCTAssertTrue(prediction?.decisionSignals.contains("trained_multiqt_coreml") == true)
     }
 
     func testRealtimeQACleansExtractedQuestionWithoutDroppingIntent() async throws {

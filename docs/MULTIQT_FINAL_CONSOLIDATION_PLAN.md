@@ -14,6 +14,24 @@ The current detector is not yet the final target. It is a MultiQT-lite implement
 
 This plan is the authoritative consolidation path. The goal is not "more rules"; the goal is a trained, measured, multilingual, low-latency detector that only triggers answer generation for real answerable questions.
 
+## Current repo checkpoint
+
+The repo now includes a first trained Core ML checkpoint:
+
+- `NotchCopilot/Resources/Models/notchly-multiqt-v1.mlmodelc`
+- `NotchCopilot/Resources/Models/notchly-multiqt-v1.metadata.json`
+
+This checkpoint is a bootstrap model, not the final production-quality endpoint. It was trained from `qa_intent_gold.jsonl` converted into a synthetic MultiQT manifest with macOS `say` audio. It proves the complete path: dataset validation, audio+text training, threshold calibration, Core ML export, app bundling, runtime load, and Swift inference. It does not replace the required consented real-meeting dataset.
+
+Validation on the synthetic held-out splits:
+
+| Split | TP | FP | FN | TN | Precision | Recall | p95 |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| test | 71 | 0 | 0 | 121 | 1.0000 | 1.0000 | 1.279 ms |
+| hard_test | 47 | 0 | 0 | 72 | 1.0000 | 1.0000 | 1.202 ms |
+
+The bundled model uses text tokens, log-mel audio features, and scalar ASR/temporal/language features. The runtime still falls back safely to MultiQT-lite if the model or metadata cannot be loaded.
+
 Primary reference:
 - MultiQT paper: https://aclanthology.org/2020.acl-main.215.pdf
 - arXiv page: https://arxiv.org/abs/2005.00812

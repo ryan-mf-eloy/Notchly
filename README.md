@@ -245,7 +245,7 @@ O objetivo do modo padrao e reduzir interrupcoes: alta precisao e preferida a co
 
 ### MultiQT treinado e fallback local
 
-O objetivo final do Notchly e usar um modelo MultiQT-style treinado, multilingual e local-first para decidir se uma transcricao de reuniao contem uma pergunta real que precisa de resposta. O estado atual ainda nao deve ser confundido com esse modelo treinado: o app inclui um fallback "MultiQT-lite" deterministico enquanto o dataset de audio+texto, treino, avaliacao e export Core ML sao consolidados.
+O Notchly inclui um primeiro artefato treinado MultiQT-style, multilingual e local-first para decidir se uma transcricao de reuniao contem uma pergunta real que precisa de resposta. O modelo fica em `NotchCopilot/Resources/Models/notchly-multiqt-v1.mlmodelc`, com sidecar `notchly-multiqt-v1.metadata.json`, e e carregado por `CoreMLQuestionMultiQTModelRunner`. O fallback "MultiQT-lite" deterministico permanece apenas como degradacao segura quando o modelo estiver ausente, desativado ou falhar.
 
 O plano final esta em `docs/MULTIQT_FINAL_CONSOLIDATION_PLAN.md`. O workspace executavel de treino fica em `Tools/multiqt/` e define:
 
@@ -253,9 +253,17 @@ O plano final esta em `docs/MULTIQT_FINAL_CONSOLIDATION_PLAN.md`. O workspace ex
 - validador de manifesto;
 - modelo PyTorch audio+texto com fusao concat;
 - avaliacao por precision/recall, negativos criticos e latencia;
-- export para Core ML (`notchly-multiqt-v1.mlpackage`) com sidecar `notchly-multiqt-v1.metadata.json`.
+- export para Core ML (`notchly-multiqt-v1.mlpackage`/`.mlmodelc`) com sidecar `notchly-multiqt-v1.metadata.json`.
 
-No runtime, `CoreMLQuestionMultiQTModelRunner` procura `notchly-multiqt-v1.mlmodelc` e o metadata no bundle. Quando esses artefatos existem, `QuestionClassifier` usa a predicao treinada em `shadow`/`enforced`; quando nao existem, degrada para o fallback atual sem crash. A entrada acustica usa `QuestionAudioLogMelFeature` quando o app anexar log-mel capturado; enquanto isso, usa um proxy numerico de RMS/peak/energia/noise/duracao, sem persistir audio bruto.
+No runtime, `CoreMLQuestionMultiQTModelRunner` procura `notchly-multiqt-v1.mlmodelc` e o metadata no bundle, incluindo `Resources/Models`. Quando esses artefatos existem, `QuestionClassifier` usa a predicao treinada em `shadow`/`enforced`; quando nao existem, degrada para o fallback atual sem crash. A entrada acustica usa `QuestionAudioLogMelFeature` quando o app anexar log-mel capturado; enquanto isso, usa um proxy numerico de RMS/peak/energia/noise/duracao, sem persistir audio bruto.
+
+Checkpoint atual:
+
+- dataset bootstrap sintetico: 2.021 exemplos, 809 positivos, 1.212 negativos, pt-BR/en-US/es-ES/ja-JP;
+- modelo: audio log-mel + texto + scalars, exportado para Core ML, threshold `0.99`;
+- test split: TP 71, FP 0, FN 0, TN 121, precision 1.0000, recall 1.0000, p95 1.279 ms;
+- hard_test split: TP 47, FP 0, FN 0, TN 72, precision 1.0000, recall 1.0000, p95 1.202 ms;
+- zero FP em negativos criticos nos splits avaliados.
 
 Enquanto o artefato treinado nao passa os gates, o app cria `QuestionMultimodalSignal` a partir do `TranscriptSegment`, qualidade de audio por fonte e energia disponivel. Os campos sao numericos/redigiveis: idioma, confidence ASR, final/partial, speaker/source, duracao, estabilidade entre parciais, pausa terminal, RMS/peak, clipping, silencio/tooQuiet, gaps, noise floor e `audioEnergy`.
 
@@ -605,7 +613,7 @@ Alguns defaults relevantes de `AppPreferences`:
 | `saveAudioRecordings` | `false` | nao salvar audio bruto por padrao. |
 | `realtimeSuggestionsEnabled` | `true` | habilitar o fluxo central do copilot. |
 | `qaPrecisionMode` | `highPrecision` | reduzir falsos positivos. |
-| `qaMultimodalMode` | `shadow` | auditar sinais multimodais e manter fallback enquanto o MultiQT treinado nao passa os gates. |
+| `qaMultimodalMode` | `enforced` | usar o MultiQT Core ML treinado quando presente, com fallback seguro se o artefato estiver ausente. |
 | `allowLocalModelDownloads` | `true` | permitir caminhos locais quando configurados. |
 | `copilotHotkeyEnabled` | `true` | acesso rapido ao copilot. |
 | `copilotRetentionDays` | `7` | reduzir memoria local de curto prazo. |
@@ -618,7 +626,7 @@ Alguns defaults relevantes de `AppPreferences`:
 - Web search e parcialmente dependente do provedor escolhido e das flags de cloud.
 - RAG usa keyword search como fallback principal; embeddings locais/cloud ainda sao caminho de evolucao.
 - Transcricao realtime cloud esta focada em ElevenLabs.
-- MultiQT treinado ainda nao esta empacotado no app. O fallback atual usa score calibrado deterministico e sinais sinteticos nos testes; `Tools/multiqt/` contem o caminho de treino/export Core ML para substituir esse fallback quando houver dataset suficiente e gates aprovados.
+- O MultiQT treinado empacotado e um checkpoint bootstrap gerado com audio sintetico local a partir da fixture multilingual. Ele passa os gates atuais, mas ainda deve ser validado contra audio consentido de reunioes reais antes de ser tratado como modelo final de producao.
 - Gemini e Claude account login dependem dos CLIs oficiais instalados e autenticados.
 - Perplexity account/OAuth esta indisponivel por design nesta versao.
 - Launch at login aparece nas preferencias, mas a integracao final pode exigir ajustes de signing/entitlements.
@@ -635,7 +643,7 @@ Alguns defaults relevantes de `AppPreferences`:
 - Expandir suporte de provedores realtime alem de OpenAI/ElevenLabs.
 - Tornar launch at login totalmente operacional.
 - Evoluir RAG para busca semantica local.
-- Treinar, exportar e aprovar `notchly-multiqt-v1` antes de promover `qaMultimodalMode` de `shadow` para `enforced`.
+- Coletar/validar dataset consentido de reunioes reais para substituir ou reforcar o checkpoint bootstrap `notchly-multiqt-v1`.
 - Publicar politica de contribuicao e licenca.
 
 ## Licenca

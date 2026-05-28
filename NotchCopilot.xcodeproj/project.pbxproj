@@ -86,6 +86,7 @@
 		9A7BF423552F7B758B5CF6AF /* ProviderCLIAIProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = A0898F72375B0BDFE387EEA7 /* ProviderCLIAIProvider.swift */; };
 		9EBF4FE3E3B0C910868CCC3D /* NIOCore in Frameworks */ = {isa = PBXBuildFile; productRef = 84FA72530E739F0F87C5F9B3 /* NIOCore */; };
 		9F9E0A85CC290D7DE0B28D0D /* DocumentIngestionService.swift in Sources */ = {isa = PBXBuildFile; fileRef = E7B94A96289B19AE8C1B2881 /* DocumentIngestionService.swift */; };
+		A12F0F1DA9C74F8793565C44 /* Models in Resources */ = {isa = PBXBuildFile; fileRef = B21E2AA8C48D49608A2C9BC7 /* Models */; };
 		A0BFA5E9476C38AFF2D54358 /* OAuthPKCEGenerator.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6DC8C95BF09605ED162E97FB /* OAuthPKCEGenerator.swift */; };
 		A37EF54E87A7C9DDB6FEF623 /* MeetingPanelView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 466EDA10F95631DA399456CD /* MeetingPanelView.swift */; };
 		A72076331B2C446BD41F6374 /* CopilotSpeechPolicy in Resources */ = {isa = PBXBuildFile; fileRef = 32DC4F7A46B86649B0779036 /* CopilotSpeechPolicy */; };
@@ -250,6 +251,7 @@
 		AFC031E396DA622EE23085EE /* copilot_intent_gold.jsonl */ = {isa = PBXFileReference; path = copilot_intent_gold.jsonl; sourceTree = "<group>"; };
 		AFE5E083C85DB976D0CF64DB /* ProviderAPIKeyAuthProvider.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProviderAPIKeyAuthProvider.swift; sourceTree = "<group>"; };
 		B1531B09CBB606795F9CFFE8 /* Debouncer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Debouncer.swift; sourceTree = "<group>"; };
+		B21E2AA8C48D49608A2C9BC7 /* Models */ = {isa = PBXFileReference; lastKnownFileType = folder; name = Models; path = NotchCopilot/Resources/Models; sourceTree = SOURCE_ROOT; };
 		B243CE4E0FDEF40B80DF6521 /* OpenAIProvider.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OpenAIProvider.swift; sourceTree = "<group>"; };
 		B6AE4E2810C4C9AD2402D1DC /* KeychainService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeychainService.swift; sourceTree = "<group>"; };
 		B6B2CA4A7DFAB318A2596130 /* AppleMetalWaveformRenderer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppleMetalWaveformRenderer.swift; sourceTree = "<group>"; };
@@ -505,6 +507,7 @@
 			children = (
 				5A7FB51AF568E1F49491B413 /* Assets.xcassets */,
 				B8779CE586FE3E82AD4082EE /* Info.plist */,
+				B21E2AA8C48D49608A2C9BC7 /* Models */,
 				F5F0A1739CDF83590E569361 /* speech-default.json */,
 			);
 			path = Resources;
@@ -746,6 +749,7 @@
 				492E2CBF3455D1159180DED4 /* Assets.xcassets in Resources */,
 				AED3017C7DC4116865F5D0A9 /* CopilotIntentPolicy in Resources */,
 				A72076331B2C446BD41F6374 /* CopilotSpeechPolicy in Resources */,
+				A12F0F1DA9C74F8793565C44 /* Models in Resources */,
 				16ABE265990540975A6E14B0 /* speech-default.json in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;

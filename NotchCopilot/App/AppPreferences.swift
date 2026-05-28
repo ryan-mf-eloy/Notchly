@@ -327,6 +327,7 @@ struct AppPreferences: Codable, Hashable {
     var captureSystemAudio: Bool = true
     var didMigrateRealtimeAudioDefaults: Bool = true
     var didMigrateLanguageDefaults: Bool = true
+    var didPromoteTrainedQAMultimodalDefault: Bool = true
     var saveAudioRecordings: Bool = false
     var audioQuality: String = "High"
     var transcriptionAccuracyMode: TranscriptionAccuracyMode = .highAccuracy
@@ -348,7 +349,7 @@ struct AppPreferences: Codable, Hashable {
     var doNotSendCodeSnippetsToCloud: Bool = true
     var questionAnsweringProfile: QuestionAnsweringAdaptiveProfile = QuestionAnsweringAdaptiveProfile()
     var qaPrecisionMode: QAPrecisionMode = .highPrecision
-    var qaMultimodalMode: QAMultimodalMode = .shadow
+    var qaMultimodalMode: QAMultimodalMode = .enforced
     var localQuestionModelProfile: LocalQuestionModelProfile = .maxAccuracyMDeBERTa
     var allowLocalModelDownloads: Bool = true
     var qaShadowMode: Bool = true
@@ -382,6 +383,7 @@ struct AppPreferences: Codable, Hashable {
         case captureSystemAudio
         case didMigrateRealtimeAudioDefaults
         case didMigrateLanguageDefaults
+        case didPromoteTrainedQAMultimodalDefault
         case saveAudioRecordings
         case audioQuality
         case transcriptionAccuracyMode
@@ -437,6 +439,7 @@ struct AppPreferences: Codable, Hashable {
         captureSystemAudio = try container.decodeIfPresent(Bool.self, forKey: .captureSystemAudio) ?? true
         didMigrateRealtimeAudioDefaults = try container.decodeIfPresent(Bool.self, forKey: .didMigrateRealtimeAudioDefaults) ?? false
         didMigrateLanguageDefaults = try container.decodeIfPresent(Bool.self, forKey: .didMigrateLanguageDefaults) ?? false
+        didPromoteTrainedQAMultimodalDefault = try container.decodeIfPresent(Bool.self, forKey: .didPromoteTrainedQAMultimodalDefault) ?? false
         saveAudioRecordings = try container.decodeIfPresent(Bool.self, forKey: .saveAudioRecordings) ?? false
         audioQuality = try container.decodeIfPresent(String.self, forKey: .audioQuality) ?? "High"
         transcriptionAccuracyMode = try container.decodeIfPresent(TranscriptionAccuracyMode.self, forKey: .transcriptionAccuracyMode)
@@ -459,7 +462,7 @@ struct AppPreferences: Codable, Hashable {
         doNotSendCodeSnippetsToCloud = try container.decodeIfPresent(Bool.self, forKey: .doNotSendCodeSnippetsToCloud) ?? true
         questionAnsweringProfile = try container.decodeIfPresent(QuestionAnsweringAdaptiveProfile.self, forKey: .questionAnsweringProfile) ?? QuestionAnsweringAdaptiveProfile()
         qaPrecisionMode = try container.decodeIfPresent(QAPrecisionMode.self, forKey: .qaPrecisionMode) ?? .highPrecision
-        qaMultimodalMode = try container.decodeIfPresent(QAMultimodalMode.self, forKey: .qaMultimodalMode) ?? .shadow
+        qaMultimodalMode = try container.decodeIfPresent(QAMultimodalMode.self, forKey: .qaMultimodalMode) ?? .enforced
         localQuestionModelProfile = try container.decodeIfPresent(LocalQuestionModelProfile.self, forKey: .localQuestionModelProfile) ?? .maxAccuracyMDeBERTa
         allowLocalModelDownloads = try container.decodeIfPresent(Bool.self, forKey: .allowLocalModelDownloads) ?? true
         qaShadowMode = try container.decodeIfPresent(Bool.self, forKey: .qaShadowMode) ?? true
@@ -503,6 +506,13 @@ struct AppPreferences: Codable, Hashable {
                 defaultLanguage = SupportedLanguage.portugueseBR.rawValue
             }
             didMigrateLanguageDefaults = true
+        }
+
+        if !didPromoteTrainedQAMultimodalDefault {
+            if qaMultimodalMode == .shadow {
+                qaMultimodalMode = .enforced
+            }
+            didPromoteTrainedQAMultimodalDefault = true
         }
 
         if audioCaptureMode == .microphoneAndSystem || audioCaptureMode == .systemOnly {

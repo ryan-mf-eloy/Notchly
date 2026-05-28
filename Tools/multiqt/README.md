@@ -1,8 +1,8 @@
 # Notchly MultiQT Training Toolchain
 
-This directory is the offline training/export workspace for the final trained MultiQT-style realtime question tracker.
+This directory is the offline training/export workspace for the trained MultiQT-style realtime question tracker.
 
-The app currently ships a deterministic MultiQT-lite fallback plus an optional trained Core ML runtime. The final target is a trained audio+text sequence model exported to Core ML as `notchly-multiqt-v1.mlmodelc`.
+The app ships a deterministic MultiQT-lite fallback plus a trained Core ML runtime. The bundled bootstrap checkpoint is `NotchCopilot/Resources/Models/notchly-multiqt-v1.mlmodelc` with sidecar metadata.
 
 See the full execution plan:
 
@@ -31,6 +31,7 @@ Artifacts/multiqt/
   calibration.json
   errors.jsonl
   notchly-multiqt-v1.mlpackage
+  notchly-multiqt-v1.metadata.json
 ```
 
 Bootstrap a synthetic speech manifest from the existing QA gold fixture:
@@ -38,7 +39,8 @@ Bootstrap a synthetic speech manifest from the existing QA gold fixture:
 ```sh
 python3 Tools/multiqt/build_synthetic_manifest.py \
   --out-dir Data/multiqt_synthetic \
-  --generate-audio
+  --generate-audio \
+  --jobs 4
 ```
 
 Synthetic speech is only a bootstrap set. The enforced gate still requires consented real meeting audio, public/license-compatible audio, or manually reviewed local datasets.
@@ -81,7 +83,8 @@ python3 Tools/multiqt/train.py \
   --dev Data/multiqt/dev.jsonl \
   --test Data/multiqt/test.jsonl \
   --hard-test Data/multiqt/hard_test.jsonl \
-  --out Artifacts/multiqt
+  --out Artifacts/multiqt \
+  --max-frames 240
 ```
 
 ```sh
@@ -101,7 +104,19 @@ python3 Tools/multiqt/evaluate.py \
 ```sh
 python3 Tools/multiqt/export_coreml.py \
   --checkpoint Artifacts/multiqt/best.pt \
-  --out NotchCopilot/Resources/Models/notchly-multiqt-v1.mlpackage
+  --out Artifacts/multiqt/notchly-multiqt-v1.mlpackage
+```
+
+Compile and bundle for the app:
+
+```sh
+xcrun coremlcompiler compile \
+  Artifacts/multiqt/notchly-multiqt-v1.mlpackage \
+  Artifacts/multiqt/compiled
+cp -R Artifacts/multiqt/compiled/notchly-multiqt-v1.mlmodelc \
+  NotchCopilot/Resources/Models/
+cp Artifacts/multiqt/notchly-multiqt-v1.metadata.json \
+  NotchCopilot/Resources/Models/
 ```
 
 ## Gate summary
@@ -113,6 +128,18 @@ python3 Tools/multiqt/export_coreml.py \
 - pt-BR/en-US/es-ES/ja-JP recall >= 0.950 each
 - p95 local decision <= 60 ms on target Mac hardware
 - p99 local decision <= 100 ms
+
+## Bundled bootstrap checkpoint
+
+The current bundled checkpoint was trained from the QA gold fixture converted into synthetic audio with macOS `say`.
+
+- rows: 2,021 total; 809 positive; 1,212 negative
+- languages: pt-BR, en-US, es-ES, ja-JP
+- threshold: 0.99
+- test: TP 71, FP 0, FN 0, TN 121, precision 1.0000, recall 1.0000, p95 1.279 ms
+- hard_test: TP 47, FP 0, FN 0, TN 72, precision 1.0000, recall 1.0000, p95 1.202 ms
+
+This checkpoint proves the runtime path and is safe to ship as a local-first bootstrap. It is not the final production evidence set; that still requires consented real meeting audio and shadow replay.
 
 ## Privacy
 

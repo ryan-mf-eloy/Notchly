@@ -363,9 +363,15 @@ final class CoreMLQuestionMultiQTModelRunner: QuestionTrainedMultimodalModelRunn
     }
 
     private func resourceURL(name: String, extension fileExtension: String) -> URL? {
-        [Bundle.main, Bundle(for: QuestionMultiQTBundleMarker.self)]
-            .compactMap { $0.url(forResource: name, withExtension: fileExtension) }
-            .first
+        for bundle in [Bundle.main, Bundle(for: QuestionMultiQTBundleMarker.self)] {
+            if let url = bundle.url(forResource: name, withExtension: fileExtension) {
+                return url
+            }
+            if let url = bundle.url(forResource: name, withExtension: fileExtension, subdirectory: "Models") {
+                return url
+            }
+        }
+        return nil
     }
 
     private func scalarOutput(named name: String, from output: MLFeatureProvider) -> Double? {

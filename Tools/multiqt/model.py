@@ -27,15 +27,11 @@ class MultiQTConcatModel(nn.Module):
             nn.AdaptiveMaxPool1d(1),
         )
         self.audio_encoder = nn.Sequential(
-            nn.Conv2d(1, 32, kernel_size=3, padding=1),
+            nn.Linear(40 * 3, 128),
+            nn.LayerNorm(128),
             nn.GELU(),
-            nn.MaxPool2d((2, 2)),
-            nn.Conv2d(32, 64, kernel_size=3, padding=1),
+            nn.Linear(128, 96),
             nn.GELU(),
-            nn.MaxPool2d((2, 2)),
-            nn.Conv2d(64, 96, kernel_size=3, padding=1),
-            nn.GELU(),
-            nn.AdaptiveAvgPool2d((1, 1)),
         )
         fused_dim = hidden_dim + 96 + scalar_count
         self.fusion = nn.Sequential(
@@ -59,7 +55,16 @@ class MultiQTConcatModel(nn.Module):
     ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
         embedded = self.embedding(text_tokens.long()).transpose(1, 2)
         text_features = self.text_encoder(embedded).squeeze(-1)
-        audio_features = self.audio_encoder(audio_logmel.float().unsqueeze(1)).flatten(1)
+        audio = audio_logmel.float()
+        audio_summary = torch.cat(
+            [
+                audio.mean(dim=2),
+                torch.amax(audio, dim=2),
+                torch.amin(audio, dim=2),
+            ],
+            dim=1,
+        )
+        audio_features = self.audio_encoder(audio_summary)
         fused = self.fusion(torch.cat([text_features, audio_features, scalars.float()], dim=1))
         return (
             self.response_head(fused).squeeze(-1),

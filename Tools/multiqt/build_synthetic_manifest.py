@@ -9,6 +9,7 @@ not replace real consented meeting audio for the final gate dataset.
 from __future__ import annotations
 
 import argparse
+from concurrent.futures import ThreadPoolExecutor, as_completed
 import hashlib
 import subprocess
 from pathlib import Path
@@ -66,6 +67,7 @@ def main() -> int:
     parser.add_argument("--generate-audio", action="store_true")
     parser.add_argument("--max-rows", type=int, default=0)
     parser.add_argument("--sample-rate", type=int, default=16000)
+    parser.add_argument("--jobs", type=int, default=1, help="Concurrent local `say` jobs for synthetic audio generation.")
     args = parser.parse_args()
 
     source_rows = read_jsonl(args.fixture)
@@ -77,6 +79,7 @@ def main() -> int:
     if args.generate_audio:
         audio_dir.mkdir(parents=True, exist_ok=True)
 
+    pending_audio: list[tuple[str, str, Path, int]] = []
     for source in source_rows:
         text = str(source["text"])
         label = LABEL_MAP.get(str(source["label"]), str(source["label"]))
@@ -103,13 +106,31 @@ def main() -> int:
             "split": split,
         }
         if args.generate_audio:
-            synthesize_audio(text, source["language"], audio_dir / f"{source['id']}.aiff", args.sample_rate)
+            pending_audio.append((text, source["language"], audio_dir / f"{source['id']}.aiff", args.sample_rate))
         manifests[split].append(row)
+
+    if pending_audio:
+        synthesize_audio_batch(pending_audio, jobs=max(1, args.jobs))
 
     args.out_dir.mkdir(parents=True, exist_ok=True)
     for split, rows in manifests.items():
         write_jsonl(args.out_dir / f"{split}.jsonl", rows)
     return 0
+
+
+def synthesize_audio_batch(items: list[tuple[str, str, Path, int]], jobs: int) -> None:
+    if jobs <= 1:
+        for text, language, output, sample_rate in items:
+            synthesize_audio(text, language, output, sample_rate)
+        return
+
+    with ThreadPoolExecutor(max_workers=jobs) as executor:
+        futures = [
+            executor.submit(synthesize_audio, text, language, output, sample_rate)
+            for text, language, output, sample_rate in items
+        ]
+        for future in as_completed(futures):
+            future.result()
 
 
 def split_for_id(row_id: str) -> str:
@@ -129,10 +150,14 @@ def estimate_duration_ms(text: str) -> int:
 
 
 def synthesize_audio(text: str, language: str, output: Path, sample_rate: int) -> None:
-    if output.exists():
+    if output.exists() and output.stat().st_size > 0:
         return
+    if output.exists():
+        output.unlink()
     voice = VOICE_BY_LANGUAGE.get(language)
-    base = ["say", "-o", str(output), "--data-format", f"LEF32@{sample_rate}"]
+    # `say --data-format` support varies across macOS voices. Let `say` choose
+    # the native AIFF format and resample during training.
+    base = ["say", "-o", str(output)]
     command = [*base, "-v", voice, text] if voice else [*base, text]
     result = subprocess.run(command, capture_output=True, text=True, check=False)
     if result.returncode == 0:

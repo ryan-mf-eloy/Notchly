@@ -81,7 +81,7 @@ def main() -> int:
     label_loss = nn.CrossEntropyLoss()
     binary_loss = nn.BCEWithLogitsLoss()
 
-    best_dev = -1.0
+    best_dev: tuple[float, float, float, float] = (-1.0, -1.0, -1.0, -1.0)
     best_state: dict[str, Any] | None = None
     args.out.mkdir(parents=True, exist_ok=True)
 
@@ -109,7 +109,8 @@ def main() -> int:
 
         dev_predictions = predict(model, dev_data, args.batch_size)
         threshold, dev_metrics = tune_threshold(dev_predictions)
-        score = dev_metrics["precision"] * 0.7 + dev_metrics["recall"] * 0.3
+        gate_bonus = 1.0 if dev_metrics["precision"] >= 0.995 and dev_metrics["recall"] >= 0.970 else 0.0
+        score = (gate_bonus, dev_metrics["precision"], dev_metrics["recall"], threshold)
         print(
             json.dumps(
                 {
@@ -172,6 +173,7 @@ class MultiQTDataset(Dataset):
         self.audio_root = audio_root
         self.max_tokens = max_tokens
         self.max_frames = max_frames
+        self.audio_cache: dict[str, torch.Tensor] = {}
         self.mel = torchaudio.transforms.MelSpectrogram(
             sample_rate=16000,
             n_fft=400,
@@ -185,9 +187,12 @@ class MultiQTDataset(Dataset):
 
     def __getitem__(self, index: int) -> dict[str, torch.Tensor]:
         row = self.rows[index]
+        audio_key = str(row.get("audio_feature_path") or row.get("audio_path") or index)
+        if audio_key not in self.audio_cache:
+            self.audio_cache[audio_key] = load_logmel(row, self.audio_root, self.mel, self.max_frames)
         return {
             "text_tokens": torch.tensor(encode_text(text_for_row(row), self.vocab, self.max_tokens), dtype=torch.long),
-            "audio_logmel": load_logmel(row, self.audio_root, self.mel, self.max_frames),
+            "audio_logmel": self.audio_cache[audio_key],
             "scalars": torch.tensor(scalars_for_row(row), dtype=torch.float32),
             "response_needed": torch.tensor(float(row["response_needed"]), dtype=torch.float32),
             "complete": torch.tensor(float(row["complete"]), dtype=torch.float32),
@@ -310,12 +315,12 @@ def prediction_rows(
 def tune_threshold(predictions: list[dict[str, float | bool]]) -> tuple[float, dict[str, float]]:
     best_threshold = 0.5
     best_metrics: dict[str, float] = {"precision": 0.0, "recall": 0.0}
-    best_score = -1.0
-    for step in range(5, 96):
+    best_score: tuple[float, float, float, float] = (-1.0, -1.0, -1.0, -1.0)
+    for step in range(5, 100):
         threshold = step / 100.0
         metrics = compute_metrics(predictions, threshold)
-        gate_bonus = 1.0 if metrics["precision"] >= 0.995 else 0.0
-        score = gate_bonus + metrics["precision"] * 0.7 + metrics["recall"] * 0.3
+        gate_bonus = 1.0 if metrics["precision"] >= 0.995 and metrics["recall"] >= 0.970 else 0.0
+        score = (gate_bonus, metrics["precision"], metrics["recall"], threshold)
         if score > best_score:
             best_score = score
             best_threshold = threshold
