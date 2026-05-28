@@ -27,6 +27,12 @@ def main() -> int:
     parser.add_argument("--labels", type=Path, default=DEFAULT_LABELS_PATH)
     parser.add_argument("--training-report", type=Path, default=None)
     parser.add_argument("--baseline-comparison", type=Path, default=None)
+    parser.add_argument(
+        "--preferred-runtime-feature",
+        choices=["auto", "logmel", "signal_proxy"],
+        default="auto",
+        help="Feature source the Swift runtime should prefer for this checkpoint.",
+    )
     args = parser.parse_args()
 
     checkpoint = torch.load(args.checkpoint, map_location="cpu")
@@ -74,6 +80,12 @@ def main() -> int:
         language: threshold
         for language in label_policy.get("languages", [])
     }
+    preferred_runtime_feature = preferred_runtime_feature_for_checkpoint(checkpoint, args.preferred_runtime_feature)
+    audio_description = (
+        "Runtime prefers the numeric signal proxy for this checkpoint because training used proxy acoustic/temporal features."
+        if preferred_runtime_feature == "signal_proxy"
+        else "Runtime uses captured log-mel features when attached to QuestionMultimodalSignal, otherwise a numeric proxy from RMS/peak/energy/noise/temporal features."
+    )
     write_json(
         metadata_out,
         {
@@ -98,8 +110,10 @@ def main() -> int:
                 "bands": 40,
                 "max_frames": max_frames,
                 "raw_audio_persisted": False,
+                "training_sources": config.get("audio_feature_sources"),
+                "preferred_runtime_feature": preferred_runtime_feature,
                 "runtime_fallback": "signal_proxy",
-                "description": "Runtime uses captured log-mel features when attached to QuestionMultimodalSignal, otherwise a numeric proxy from RMS/peak/energy/noise/temporal features.",
+                "description": audio_description,
             },
             "outputs": ["response_logit", "label_logits", "complete_logit", "rhetorical_logit"],
             "training_report": load_optional_json(args.training_report),
@@ -136,6 +150,15 @@ def compact_baseline_comparison(payload: dict | None) -> dict | None:
         "promotion": payload.get("promotion"),
         "summaries": summaries,
     }
+
+
+def preferred_runtime_feature_for_checkpoint(checkpoint: dict, requested: str) -> str:
+    if requested != "auto":
+        return requested
+    sources = set(checkpoint.get("config", {}).get("audio_feature_sources") or [])
+    if sources == {"signal_proxy"}:
+        return "signal_proxy"
+    return "logmel"
 
 
 def compact_split_metrics(metrics: dict | None) -> dict | None:

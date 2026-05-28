@@ -4113,7 +4113,7 @@ final class NotchCopilotTests: XCTestCase {
 
     func testSmartMeetingDetectionIgnoresYouTubeBrowserTabUsingMicrophone() async {
         let service = MeetingDetectionService(
-            calendarDetector: CalendarMeetingDetector(),
+            calendarDetector: EmptyCalendarMeetingDetector(),
             microphoneUsageMonitor: FakeMicrophoneUsageMonitor(inUse: true),
             appActivityMonitor: MeetingAppActivityMonitor(snapshots: {
                 [
@@ -7264,8 +7264,10 @@ final class NotchCopilotTests: XCTestCase {
         let data = try Data(contentsOf: metadataURL)
         let metadata = try JSONDecoder().decode(QuestionMultiQTModelMetadata.self, from: data)
 
-        XCTAssertEqual(metadata.threshold, 0.99, accuracy: 0.0001)
-        XCTAssertEqual(try XCTUnwrap(metadata.languageThresholds?["pt-BR"]), 0.99, accuracy: 0.0001)
+        XCTAssertEqual(metadata.threshold, 0.55, accuracy: 0.0001)
+        XCTAssertEqual(try XCTUnwrap(metadata.languageThresholds?["pt-BR"]), 0.55, accuracy: 0.0001)
+        XCTAssertEqual(try XCTUnwrap(metadata.languageThresholds?["en-US"]), 0.99, accuracy: 0.0001)
+        XCTAssertEqual(metadata.audioFeatureContract?.preferredRuntimeFeature, "signal_proxy")
         XCTAssertTrue(metadata.labelPolicy?.criticalNegativeLabels?.contains("operational_check") == true)
         XCTAssertTrue(metadata.labelPolicy?.criticalNegativeLabels?.contains("reported_question") == true)
         XCTAssertTrue(metadata.labelPolicy?.positiveLabels?.contains("technical_explanation") == true)

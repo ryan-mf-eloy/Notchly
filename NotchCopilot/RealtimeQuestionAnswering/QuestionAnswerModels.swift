@@ -593,6 +593,14 @@ struct QuestionMultiQTModelMetadata: Codable, Hashable, Sendable {
         }
     }
 
+    struct AudioFeatureContract: Codable, Hashable, Sendable {
+        var preferredRuntimeFeature: String?
+
+        enum CodingKeys: String, CodingKey {
+            case preferredRuntimeFeature = "preferred_runtime_feature"
+        }
+    }
+
     var modelResourceName: String?
     var labels: [String]
     var labelPolicy: LabelPolicy?
@@ -600,6 +608,7 @@ struct QuestionMultiQTModelMetadata: Codable, Hashable, Sendable {
     var threshold: Double
     var languageThresholds: [String: Double]?
     var config: Config
+    var audioFeatureContract: AudioFeatureContract?
 
     enum CodingKeys: String, CodingKey {
         case modelResourceName = "model_resource_name"
@@ -609,6 +618,7 @@ struct QuestionMultiQTModelMetadata: Codable, Hashable, Sendable {
         case threshold
         case languageThresholds = "language_thresholds"
         case config
+        case audioFeatureContract = "audio_feature_contract"
     }
 }
 
@@ -832,9 +842,12 @@ private struct QuestionMultiQTFeatureEncoder {
             shape: [NSNumber(value: 1), NSNumber(value: 40), NSNumber(value: maxFrames)],
             dataType: .float32
         )
-        let feature = signal?.audioLogMel ?? signal.map {
-            QuestionAudioLogMelFeature.proxy(from: $0, targetFrames: maxFrames)
-        }
+        let prefersSignalProxy = metadata.audioFeatureContract?.preferredRuntimeFeature == "signal_proxy"
+        let feature = prefersSignalProxy
+            ? signal.map { QuestionAudioLogMelFeature.proxy(from: $0, targetFrames: maxFrames) }
+            : signal?.audioLogMel ?? signal.map {
+                QuestionAudioLogMelFeature.proxy(from: $0, targetFrames: maxFrames)
+            }
         guard let feature else {
             for index in 0..<output.count {
                 output[index] = 0

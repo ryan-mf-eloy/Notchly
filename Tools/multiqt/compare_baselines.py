@@ -40,6 +40,7 @@ def main() -> int:
     parser.add_argument("--positive-weight", type=float, default=1.0)
     parser.add_argument("--critical-negative-weight", type=float, default=2.5)
     parser.add_argument("--min-threshold", type=float, default=0.50)
+    parser.add_argument("--device", choices=["auto", "cpu", "mps"], default="auto")
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--skip-existing", action="store_true")
     parser.add_argument("--no-gates", action="store_true", help="Print/report results but do not fail the process.")
@@ -96,6 +97,8 @@ def train_variant(args: argparse.Namespace, mode: str, mode_out: Path) -> None:
         str(args.critical_negative_weight),
         "--min-threshold",
         str(args.min_threshold),
+        "--device",
+        str(args.device),
         "--input-mode",
         mode,
     ]

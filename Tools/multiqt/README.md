@@ -76,7 +76,7 @@ python3 Tools/multiqt/validate_manifest.py \
   --check-audio
 ```
 
-Manifests may include `audio_feature_path` and `audio_feature_source` (`logmel`, `signal_proxy`, or `synthetic_logmel`). The production app never stores raw audio for this path: runtime inference consumes an in-memory `QuestionAudioLogMelFeature` derived from the short-lived live PCM ring buffer when available, otherwise it falls back to a redacted numeric proxy from RMS, peak, energy, noise, duration, pause, confidence, and stability signals.
+Manifests may include `audio_feature_path` and `audio_feature_source` (`logmel`, `signal_proxy`, or `synthetic_logmel`). The production app never stores raw audio for this path. Runtime inference follows the exported `audio_feature_contract`: checkpoints trained on log-mel can consume an in-memory `QuestionAudioLogMelFeature` derived from the short-lived live PCM ring buffer, while `signal_proxy` checkpoints consume a redacted numeric proxy from RMS, peak, energy, noise, duration, pause, confidence, and stability signals.
 
 Harden a bootstrap manifest with deterministic ASR and intent stress cases:
 
@@ -137,6 +137,7 @@ python3 Tools/multiqt/compare_baselines.py \
   --batch-size 64 \
   --critical-negative-weight 2.5 \
   --min-threshold 0.50 \
+  --device auto \
   --max-frames 240
 ```
 
@@ -161,7 +162,8 @@ python3 Tools/multiqt/export_coreml.py \
   --checkpoint Artifacts/multiqt/best.pt \
   --out Artifacts/multiqt/notchly-multiqt-v1.mlpackage \
   --training-report Data/multiqt_hardened/augmentation_report.json \
-  --baseline-comparison Artifacts/multiqt_baselines/baseline_comparison.json
+  --baseline-comparison Artifacts/multiqt_baselines/baseline_comparison.json \
+  --preferred-runtime-feature auto
 ```
 
 Compile and bundle for the app:
@@ -188,28 +190,29 @@ cp Artifacts/multiqt/notchly-multiqt-v1.metadata.json \
 
 ## Bundled bootstrap checkpoint
 
-The current bundled checkpoint was trained from the QA gold fixture converted into synthetic audio with macOS `say`, then hardened with deterministic ASR/intent augmentations.
+The current bundled checkpoint was trained from `qa_intent_gold.jsonl` plus `copilot_intent_gold.jsonl` with `audio_feature_source=signal_proxy`, then hardened with deterministic ASR/intent augmentations.
 
-- rows: 6,794 total; 2,163 positive; 4,631 negative
+- rows: 94,222 total; 34,087 positive; 60,135 negative
 - languages: pt-BR, en-US, es-ES, ja-JP
-- threshold: 0.99
+- threshold: 0.55 global; language thresholds `pt-BR=0.55`, `en-US=0.99`, `es-ES=0.99`, `ja-JP=0.99`
 - critical negative weight: 2.5
 - threshold calibration: selected by global, per-language, and critical-negative-label gates on dev
 - exported runtime policy: `label_policy` plus `language_thresholds`, so Core ML label predictions for critical negatives can hard-suppress candidates
-- test: TP 190, FP 0, FN 0, TN 326, precision 1.0000, recall 1.0000, p95 2.128 ms
-- hard_test: TP 123, FP 0, FN 0, TN 321, precision 1.0000, recall 1.0000, p95 1.580 ms
+- exported audio contract: `preferred_runtime_feature=signal_proxy`, matching the proxy acoustic/temporal features used during training
+- test: TP 3425, FP 0, FN 1, TN 4596, precision 1.0000, recall 0.9997, p95 0.002 ms
+- hard_test: TP 2076, FP 0, FN 0, TN 4309, precision 1.0000, recall 1.0000, p95 0.002 ms
 
 Baseline comparison, 16 epochs, seed 42:
 
 | Mode | test precision/recall | hard_test precision/recall | hard_test Critical FP | test p95 |
 | --- | ---: | ---: | ---: | ---: |
-| `multimodal` | 1.0000 / 1.0000 | 1.0000 / 1.0000 | 0 | 2.128 ms |
-| `text_only` | 1.0000 / 1.0000 | 0.9919 / 1.0000 | 1 | 1.608 ms |
-| `audio_only` | 0.9649 / 0.2895 | 0.5000 / 0.2195 | 27 | 3.911 ms |
+| `multimodal` | 1.0000 / 0.9997 | 1.0000 / 1.0000 | 0 | 0.002 ms |
+| `text_only` | 1.0000 / 0.9982 | 1.0000 / 0.9986 | 0 | 0.002 ms |
+| `audio_only` | 1.0000 / 0.3357 | 1.0000 / 0.3348 | 0 | 0.002 ms |
 
 This checkpoint proves the runtime path and is safe to ship as a local-first hardened bootstrap in `enforced` (`promotion.promote_to_enforced = true`). It is not the final production evidence set; that still requires consented real meeting audio and shadow replay.
 
-The baseline report also stores detailed gates. Current bundled metadata has 63/63 gates passing: overall precision/recall, per-language precision/recall, p95/p99 latency, zero critical FP globally, and zero critical FP by negative label. Metadata also stores the critical-negative label list and per-language thresholds used by the Swift runtime.
+The baseline report also stores detailed gates. Current bundled metadata has 67/67 gates passing: overall precision/recall, per-language precision/recall, p95/p99 latency, zero critical FP globally, and zero critical FP by negative label. Metadata also stores the critical-negative label list, per-language thresholds, and preferred runtime audio feature used by the Swift runtime.
 
 ## Privacy
 

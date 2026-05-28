@@ -257,39 +257,33 @@ O plano final esta em `docs/MULTIQT_FINAL_CONSOLIDATION_PLAN.md`. O workspace ex
 - importacao de shadow logs redigidos via `Tools/multiqt/build_shadow_manifest.py`, com rejeicao de texto/audio bruto e treino por `signal_proxy`;
 - export para Core ML (`notchly-multiqt-v1.mlpackage`/`.mlmodelc`) com sidecar `notchly-multiqt-v1.metadata.json`.
 
-No runtime, `CoreMLQuestionMultiQTModelRunner` procura `notchly-multiqt-v1.mlmodelc` e o metadata no bundle, incluindo `Resources/Models`. Quando esses artefatos existem, `QuestionClassifier` usa a predicao treinada em `shadow`/`enforced`; quando nao existem, degrada para o fallback atual sem crash. A entrada acustica agora vem de um ring buffer in-memory por fonte (`QuestionAudioLogMelRingBuffer`) que converte o PCM condicionado em `QuestionAudioLogMelFeature` com 40 bandas e 240 frames via FFT/vDSP, alinhado por `sourceFrameRange` ou timestamps do segmento. Se nao houver audio suficiente, usa um proxy numerico de RMS/peak/energia/noise/duracao, sem persistir audio bruto.
+No runtime, `CoreMLQuestionMultiQTModelRunner` procura `notchly-multiqt-v1.mlmodelc` e o metadata no bundle, incluindo `Resources/Models`. Quando esses artefatos existem, `QuestionClassifier` usa a predicao treinada em `shadow`/`enforced`; quando nao existem, degrada para o fallback atual sem crash. A entrada acustica e escolhida pelo contrato exportado em `audio_feature_contract`: modelos treinados com log-mel podem consumir o ring buffer in-memory (`QuestionAudioLogMelRingBuffer`), enquanto o checkpoint empacotado atual prefere o proxy numerico redigivel (`signal_proxy`) de RMS/peak/energia/noise/duracao/pausa/confidence/estabilidade. Nenhum audio bruto e persistido.
 
 Checkpoint atual:
 
-- dataset bootstrap hardened: 6.794 exemplos, 2.163 positivos, 4.631 negativos, pt-BR/en-US/es-ES/ja-JP;
-- treino: manifest sintético + `Tools/multiqt/augment_manifest.py`, com ASR sem pontuação, fillers, parciais truncadas, perguntas reportadas e auto-respondidas;
-- modelo: audio log-mel + texto + scalars, exportado para Core ML, threshold `0.99`, `critical_negative_weight = 2.5`;
+- dataset bootstrap hardened expandido: 94.222 exemplos, 34.087 positivos, 60.135 negativos, pt-BR/en-US/es-ES/ja-JP;
+- treino: `qa_intent_gold.jsonl` + `copilot_intent_gold.jsonl` via `signal_proxy`, `Tools/multiqt/augment_manifest.py`, ASR sem pontuacao, fillers, code-switching, parciais truncadas, perguntas reportadas e auto-respondidas;
+- modelo: texto + scalars + proxy acustico/temporal, exportado para Core ML, threshold global `0.55`, thresholds por idioma `pt-BR=0.55`, `en-US=0.99`, `es-ES=0.99`, `ja-JP=0.99`, `critical_negative_weight = 2.5`;
 - calibracao: o threshold e escolhido por gates de precision/recall globais, por idioma e por label negativa critica, nao apenas pelo score global;
 - contrato de runtime: a metadata inclui `label_policy` e `language_thresholds`; se a cabeca treinada `label_logits` prever uma label negativa critica, o runner Core ML suprime o candidato mesmo antes do provider;
-- test split hardened: TP 190, FP 0, FN 0, TN 326, precision 1.0000, recall 1.0000, p95 2.128 ms;
-- hard_test split hardened: TP 123, FP 0, FN 0, TN 321, precision 1.0000, recall 1.0000, p95 1.580 ms;
+- contrato acustico: `preferred_runtime_feature=signal_proxy`, ou seja, este checkpoint deve receber o mesmo proxy numerico usado no treino em vez de log-mel capturado;
+- test split hardened: TP 3425, FP 0, FN 1, TN 4596, precision 1.0000, recall 0.9997, p95 0.002 ms;
+- hard_test split hardened: TP 2076, FP 0, FN 0, TN 4309, precision 1.0000, recall 1.0000, p95 0.002 ms;
 - zero FP em negativos criticos nos splits avaliados.
 
 Comparativo de baselines treinaveis (`Tools/multiqt/compare_baselines.py`, 16 epocas, seed 42, mesmos splits hardened):
 
 | Modo | test precision/recall | hard_test precision/recall | FP criticos hard_test | p95 test |
 | --- | ---: | ---: | ---: | ---: |
-| `multimodal` | 1.0000 / 1.0000 | 1.0000 / 1.0000 | 0 | 2.128 ms |
-| `text_only` | 1.0000 / 1.0000 | 0.9919 / 1.0000 | 1 | 1.608 ms |
-| `audio_only` | 0.9649 / 0.2895 | 0.5000 / 0.2195 | 27 | 3.911 ms |
+| `multimodal` | 1.0000 / 0.9997 | 1.0000 / 1.0000 | 0 | 0.002 ms |
+| `text_only` | 1.0000 / 0.9982 | 1.0000 / 0.9986 | 0 | 0.002 ms |
+| `audio_only` | 1.0000 / 0.3357 | 1.0000 / 0.3348 | 0 | 0.002 ms |
 
-O multimodal passa os gates absolutos, supera `audio_only` e vence `text_only` no hard_test adversarial (`promotion.promote_to_enforced = true`). Por isso o default de produto volta a ser `enforced`: o modelo Core ML treinado participa da decisao local, enquanto os hard-blocks textuais continuam protegendo negativos criticos.
+O multimodal passa os gates absolutos, supera `audio_only` em recall e vence `text_only` em recall no test/hard_test adversarial sem aumentar FP critico (`promotion.promote_to_enforced = true`). Por isso o default de produto continua `enforced`: o modelo Core ML treinado participa da decisao local, enquanto os hard-blocks textuais continuam protegendo negativos criticos.
 
-Smoke expandido com `qa_intent_gold` + `copilot_intent_gold`, `signal_proxy`, code-switch e `--min-threshold 0.50`:
+O metadata empacotado registra gates detalhados: 67/67 gates passam, incluindo precision >= 0.990 e recall >= 0.950 por idioma (`pt-BR`, `en-US`, `es-ES`, `ja-JP`), p95 <= 60 ms, p99 <= 100 ms e zero FP critico por label negativo (`fragment`, `operational_check`, `reported_question`, `rhetorical`, `self_answered`, `small_talk`, `title_noise`, `statement`). A mesma metadata carrega os thresholds por idioma e o contrato `preferred_runtime_feature`, permitindo ajustar calibracao/entrada acustica sem alterar o binario do app.
 
-- manifesto hardened: 94.222 exemplos, 34.087 positivos, 60.135 negativos;
-- `multimodal` 1 epoca: test precision 1.0000, recall 0.9968, critical FP 0, p95 1.081 ms; hard_test precision 1.0000, recall 0.9976, critical FP 0, p95 1.148 ms;
-- `text_only` 1 epoca: test precision 1.0000, recall 0.9985, critical FP 0; hard_test precision 0.9719, recall 0.9986, critical FP 60;
-- promocao precision-first no smoke: `promotion.promote_to_enforced = true`, mas o artefato empacotado ainda e o checkpoint hardened descrito acima ate um treino/export completo substituir o bundle.
-
-O metadata empacotado tambem registra gates detalhados: 63/63 gates passam, incluindo precision >= 0.990 e recall >= 0.950 por idioma (`pt-BR`, `en-US`, `es-ES`, `ja-JP`), p95 <= 60 ms, p99 <= 100 ms e zero FP critico por label negativo (`fragment`, `operational_check`, `reported_question`, `rhetorical`, `self_answered`, `small_talk`, `title_noise`). A mesma metadata agora carrega os thresholds por idioma, permitindo subir thresholds por bucket sem alterar o binario do app quando uma proxima rodada de calibracao exigir mais conservadorismo.
-
-O app cria `QuestionMultimodalSignal` a partir do `TranscriptSegment`, qualidade de audio por fonte, energia disponivel e, quando o audio recente esta no ring buffer, `captured_logmel`. Os campos sao numericos/redigiveis: idioma, confidence ASR, final/partial, speaker/source, duracao, estabilidade entre parciais, pausa terminal, RMS/peak, clipping, silencio/tooQuiet, gaps, noise floor e `audioEnergy`.
+O app cria `QuestionMultimodalSignal` a partir do `TranscriptSegment`, qualidade de audio por fonte, energia disponivel e, quando o audio recente esta no ring buffer, `captured_logmel`. O runner decide entre `captured_logmel` e `signal_proxy` pelo metadata do modelo. Os campos de decisao sao numericos/redigiveis: idioma, confidence ASR, final/partial, speaker/source, duracao, estabilidade entre parciais, pausa terminal, RMS/peak, clipping, silencio/tooQuiet, gaps, noise floor e `audioEnergy`.
 
 `QuestionMultimodalScorer` combina o entendimento textual com boosts leves para segmento final, ASR confiavel, duracao plausivel, pausa terminal e energia consistente. Ele penaliza partial instavel, ASR baixo, clipping forte, silencio/tooQuiet e gaps. Negativos criticos continuam como hard-blocks locais: small talk, operational checks, retoricas, perguntas reportadas, auto-respondidas, fragmentos, titulos e ruido ASR.
 

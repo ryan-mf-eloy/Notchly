@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+from functools import lru_cache
 import json
 import math
 import random
@@ -55,11 +56,13 @@ def main() -> int:
         default=0.50,
         help="Lowest response threshold considered during calibration; keep high for precision-first promotion.",
     )
+    parser.add_argument("--device", choices=["auto", "cpu", "mps"], default="auto")
     parser.add_argument("--seed", type=int, default=42)
     args = parser.parse_args()
 
     random.seed(args.seed)
     torch.manual_seed(args.seed)
+    device = resolve_device(args.device)
 
     labels_config = load_labels(args.labels)
     label_names = (
@@ -86,7 +89,7 @@ def main() -> int:
         label_count=len(label_names),
         scalar_count=7,
         input_mode=args.input_mode,
-    )
+    ).to(device)
     optimizer = torch.optim.AdamW(model.parameters(), lr=args.learning_rate, weight_decay=0.01)
     response_loss = nn.BCEWithLogitsLoss(reduction="none")
     label_loss = nn.CrossEntropyLoss(reduction="none")
@@ -101,6 +104,7 @@ def main() -> int:
         total_loss = 0.0
         loader = DataLoader(train_data, batch_size=args.batch_size, shuffle=True)
         for batch in loader:
+            batch = batch_to_device(batch, device)
             optimizer.zero_grad(set_to_none=True)
             response_logit, label_logits, complete_logit, rhetorical_logit = model(
                 batch["text_tokens"],
@@ -119,7 +123,7 @@ def main() -> int:
             optimizer.step()
             total_loss += float(loss.detach().cpu())
 
-        dev_predictions = predict(model, dev_data, args.batch_size)
+        dev_predictions = predict(model, dev_data, args.batch_size, device)
         threshold, dev_metrics, dev_gates = tune_threshold(dev_rows, dev_predictions, labels_config, min_threshold=args.min_threshold)
         language_thresholds = tune_thresholds_by_group(
             dev_rows,
@@ -146,7 +150,7 @@ def main() -> int:
         if score > best_dev:
             best_dev = score
             best_state = {
-                "model_state": model.state_dict(),
+                "model_state": clone_state_dict(model),
                 "vocab": vocab,
                 "labels": label_names,
                 "label_policy": {
@@ -164,6 +168,7 @@ def main() -> int:
                     "max_frames": args.max_frames,
                     "scalar_count": 7,
                     "input_mode": args.input_mode,
+                    "audio_feature_sources": audio_feature_sources(train_rows),
                     "positive_weight": args.positive_weight,
                     "critical_negative_weight": args.critical_negative_weight,
                 },
@@ -173,12 +178,12 @@ def main() -> int:
         raise SystemExit("Training produced no checkpoint")
 
     model.load_state_dict(best_state["model_state"])
-    test_predictions = predict(model, test_data, args.batch_size)
+    test_predictions = predict(model, test_data, args.batch_size, device)
     test_metrics = compute_metrics(test_rows, test_predictions, best_state["threshold"], labels_config)
     hard_metrics = None
     hard_predictions: list[dict[str, float | bool]] = []
     if hard_data is not None:
-        hard_predictions = predict(model, hard_data, args.batch_size)
+        hard_predictions = predict(model, hard_data, args.batch_size, device)
         hard_metrics = compute_metrics(hard_rows, hard_predictions, best_state["threshold"], labels_config)
     torch.save(best_state, args.out / "best.pt")
     write_json(
@@ -236,7 +241,7 @@ class MultiQTDataset(Dataset):
 
     def __getitem__(self, index: int) -> dict[str, torch.Tensor]:
         row = self.rows[index]
-        audio_key = str(row.get("audio_feature_path") or row.get("audio_path") or index)
+        audio_key = audio_cache_key(row, fallback=index)
         if audio_key not in self.audio_cache:
             self.audio_cache[audio_key] = load_logmel(row, self.audio_root, self.mel, self.max_frames)
         return {
@@ -264,6 +269,34 @@ def build_vocab(rows: list[dict[str, Any]], min_count: int, max_size: int) -> di
         if len(vocab) >= max_size:
             break
     return vocab
+
+
+def audio_cache_key(row: dict[str, Any], fallback: int) -> str:
+    if row.get("audio_feature_source") != "signal_proxy":
+        return str(row.get("audio_feature_path") or row.get("audio_path") or fallback)
+    fields = [
+        "start_ms",
+        "end_ms",
+        "rms",
+        "peak",
+        "audio_energy",
+        "noise_floor",
+        "partial_stability",
+        "gap_count",
+        "terminal_pause_ms",
+        "is_clipping",
+        "is_silence",
+        "is_too_quiet",
+    ]
+    return "signal_proxy:" + "|".join(str(row.get(field, "")) for field in fields)
+
+
+def audio_feature_sources(rows: list[dict[str, Any]]) -> list[str]:
+    sources = {
+        str(row.get("audio_feature_source") or "logmel")
+        for row in rows
+    }
+    return sorted(sources)
 
 
 def tokenize(text: str) -> list[str]:
@@ -326,8 +359,7 @@ def proxy_logmel(row: dict[str, Any], max_frames: int) -> torch.Tensor:
         base_energy *= 0.35
     gap_penalty = max(0.2, 1.0 - min(gap_count, 8) * 0.08)
     pause_shape = min(1.0, terminal_pause_ms / 900.0)
-    time_axis = torch.linspace(0, 1, frames)
-    band_axis = torch.linspace(0, 1, 40).unsqueeze(1)
+    time_axis, band_axis = proxy_axes(frames)
     envelope = torch.zeros(frames)
     envelope[:active_frames] = torch.linspace(0.85, 1.0, active_frames)
     if active_frames < frames:
@@ -343,6 +375,11 @@ def proxy_logmel(row: dict[str, Any], max_frames: int) -> torch.Tensor:
     mean = features.mean()
     std = features.std().clamp_min(1e-4)
     return (features - mean) / std
+
+
+@lru_cache(maxsize=16)
+def proxy_axes(frames: int) -> tuple[torch.Tensor, torch.Tensor]:
+    return torch.linspace(0, 1, frames), torch.linspace(0, 1, 40).unsqueeze(1)
 
 
 def clamp_float(value: Any, minimum: float, maximum: float, default: float) -> float:
@@ -379,12 +416,42 @@ def weighted_mean(losses: torch.Tensor, weights: torch.Tensor) -> torch.Tensor:
     return weighted.sum() / weights.sum().clamp_min(1e-6)
 
 
-def predict(model: MultiQTConcatModel, dataset: MultiQTDataset, batch_size: int) -> list[dict[str, float | bool]]:
+def clone_state_dict(model: nn.Module) -> dict[str, torch.Tensor]:
+    return {
+        key: value.detach().cpu().clone()
+        for key, value in model.state_dict().items()
+    }
+
+
+def resolve_device(requested: str) -> torch.device:
+    if requested == "mps":
+        if not torch.backends.mps.is_available():
+            raise SystemExit("MPS requested but not available")
+        return torch.device("mps")
+    if requested == "auto" and torch.backends.mps.is_available():
+        return torch.device("mps")
+    return torch.device("cpu")
+
+
+def batch_to_device(batch: dict[str, torch.Tensor], device: torch.device) -> dict[str, torch.Tensor]:
+    if device.type == "cpu":
+        return batch
+    return {key: value.to(device) for key, value in batch.items()}
+
+
+def predict(
+    model: MultiQTConcatModel,
+    dataset: MultiQTDataset,
+    batch_size: int,
+    device: torch.device | None = None,
+) -> list[dict[str, float | bool]]:
     model.eval()
     output: list[dict[str, float | bool]] = []
     loader = DataLoader(dataset, batch_size=batch_size, shuffle=False)
+    device = device or torch.device("cpu")
     with torch.no_grad():
         for batch in loader:
+            batch = batch_to_device(batch, device)
             started = time.perf_counter()
             response_logit, label_logits, complete_logit, rhetorical_logit = model(batch["text_tokens"], batch["audio_logmel"], batch["scalars"])
             elapsed_ms = (time.perf_counter() - started) * 1000.0
