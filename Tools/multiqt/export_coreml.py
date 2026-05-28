@@ -24,6 +24,8 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--checkpoint", required=True, type=Path)
     parser.add_argument("--out", required=True, type=Path)
+    parser.add_argument("--training-report", type=Path, default=None)
+    parser.add_argument("--baseline-comparison", type=Path, default=None)
     args = parser.parse_args()
 
     checkpoint = torch.load(args.checkpoint, map_location="cpu")
@@ -86,9 +88,55 @@ def main() -> int:
                 "description": "Runtime uses captured log-mel features when attached to QuestionMultimodalSignal, otherwise a numeric proxy from RMS/peak/energy/noise/temporal features.",
             },
             "outputs": ["response_logit", "label_logits", "complete_logit", "rhetorical_logit"],
+            "training_report": load_optional_json(args.training_report),
+            "baseline_comparison": compact_baseline_comparison(load_optional_json(args.baseline_comparison)),
         },
     )
     return 0
+
+
+def load_optional_json(path: Path | None) -> dict | None:
+    if path is None:
+        return None
+    import json
+
+    with path.open("r", encoding="utf-8") as handle:
+        payload = json.load(handle)
+    return payload if isinstance(payload, dict) else None
+
+
+def compact_baseline_comparison(payload: dict | None) -> dict | None:
+    if payload is None:
+        return None
+    summaries = {}
+    for mode, summary in payload.get("summaries", {}).items():
+        summaries[mode] = {
+            "threshold": summary.get("threshold"),
+            "input_mode": summary.get("input_mode"),
+            "test": compact_split_metrics(summary.get("test")),
+            "hard_test": compact_split_metrics(summary.get("hard_test")),
+        }
+    return {
+        "modes": payload.get("modes"),
+        "gates": payload.get("gates"),
+        "promotion": payload.get("promotion"),
+        "summaries": summaries,
+    }
+
+
+def compact_split_metrics(metrics: dict | None) -> dict | None:
+    if metrics is None:
+        return None
+    return {
+        "tp": metrics.get("tp"),
+        "fp": metrics.get("fp"),
+        "fn": metrics.get("fn"),
+        "tn": metrics.get("tn"),
+        "precision": metrics.get("precision"),
+        "recall": metrics.get("recall"),
+        "critical_negative_false_positives": metrics.get("critical_negative_false_positives"),
+        "latency_ms": metrics.get("latency_ms"),
+    }
 
 
 if __name__ == "__main__":

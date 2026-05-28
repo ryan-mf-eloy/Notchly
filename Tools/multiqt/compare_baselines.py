@@ -37,6 +37,8 @@ def main() -> int:
     parser.add_argument("--learning-rate", type=float, default=3e-4)
     parser.add_argument("--max-tokens", type=int, default=96)
     parser.add_argument("--max-frames", type=int, default=240)
+    parser.add_argument("--positive-weight", type=float, default=1.0)
+    parser.add_argument("--critical-negative-weight", type=float, default=2.5)
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--skip-existing", action="store_true")
     parser.add_argument("--no-gates", action="store_true", help="Print/report results but do not fail the process.")
@@ -87,6 +89,10 @@ def train_variant(args: argparse.Namespace, mode: str, mode_out: Path) -> None:
         str(args.max_frames),
         "--seed",
         str(args.seed),
+        "--positive-weight",
+        str(args.positive_weight),
+        "--critical-negative-weight",
+        str(args.critical_negative_weight),
         "--input-mode",
         mode,
     ]

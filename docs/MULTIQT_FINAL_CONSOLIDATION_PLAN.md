@@ -10,7 +10,7 @@ The current Notchly Q&A pipeline has the right product shape:
 
 `MeetingSessionManager.append(_:) -> RealtimeQuestionAnsweringEngine.ingest(...) -> QuestionDetectionService -> QuestionClassifier -> MeetingAnswerProvider -> RealtimeQuestionEventBus -> AppState / MeetingPanelView`
 
-The current detector is not yet the final target. It is a MultiQT-lite implementation: textual rules, calibrated local scoring, partial stability, and redacted shadow logging. The final target is a trained MultiQT-style model that jointly learns from streamed audio and noisy ASR text, then exports to Core ML and becomes the primary local decision engine.
+The current detector now includes a trained hardened MultiQT-style Core ML checkpoint, plus MultiQT-lite textual/acoustic fallbacks for safe degradation. The final target is still stricter: a trained model that jointly learns from streamed audio and noisy ASR text on consented real-meeting data, exports to Core ML, and remains the primary local decision engine with audited precision.
 
 This plan is the authoritative consolidation path. The goal is not "more rules"; the goal is a trained, measured, multilingual, low-latency detector that only triggers answer generation for real answerable questions.
 
@@ -21,24 +21,24 @@ The repo now includes a first trained Core ML checkpoint:
 - `NotchCopilot/Resources/Models/notchly-multiqt-v1.mlmodelc`
 - `NotchCopilot/Resources/Models/notchly-multiqt-v1.metadata.json`
 
-This checkpoint is a bootstrap model, not the final production-quality endpoint. It was trained from `qa_intent_gold.jsonl` converted into a synthetic MultiQT manifest with macOS `say` audio. It proves the complete path: dataset validation, audio+text training, threshold calibration, Core ML export, app bundling, runtime load, and Swift inference. It does not replace the required consented real-meeting dataset.
+This checkpoint is a hardened bootstrap model, not the final production-quality endpoint. It was trained from `qa_intent_gold.jsonl` converted into a synthetic MultiQT manifest with macOS `say` audio, then expanded with deterministic adversarial ASR/intent augmentations. It proves the complete path: dataset validation, audio+text training, threshold calibration, baseline comparison, Core ML export, app bundling, runtime load, and Swift inference. It does not replace the required consented real-meeting dataset.
 
-Validation on the synthetic held-out splits:
+Validation on the hardened held-out splits:
 
 | Split | TP | FP | FN | TN | Precision | Recall | p95 |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
-| test | 71 | 0 | 0 | 121 | 1.0000 | 1.0000 | 1.279 ms |
-| hard_test | 47 | 0 | 0 | 72 | 1.0000 | 1.0000 | 1.202 ms |
+| test | 190 | 0 | 0 | 326 | 1.0000 | 1.0000 | 1.805 ms |
+| hard_test | 123 | 0 | 0 | 321 | 1.0000 | 1.0000 | 1.982 ms |
 
-Baseline comparison from `Tools/multiqt/compare_baselines.py` with 16 epochs, seed 42, and identical splits:
+Baseline comparison from `Tools/multiqt/compare_baselines.py` with 16 epochs, seed 42, critical negative weight 2.5, and identical hardened splits:
 
 | Mode | test precision | test recall | hard precision | hard recall | Critical FP | test p95 |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| multimodal | 1.0000 | 1.0000 | 1.0000 | 1.0000 | 0 | 2.734 ms |
-| text_only | 1.0000 | 1.0000 | 1.0000 | 1.0000 | 0 | 1.120 ms |
-| audio_only | 1.0000 | 0.9859 | 1.0000 | 0.9787 | 0 | 1.201 ms |
+| multimodal | 1.0000 | 1.0000 | 1.0000 | 1.0000 | 0 | 1.805 ms |
+| text_only | 1.0000 | 1.0000 | 0.9919 | 1.0000 | 1 | 3.775 ms |
+| audio_only | 0.9796 | 0.7579 | 0.4971 | 0.6992 | 90 | 1.965 ms |
 
-The multimodal checkpoint passes the absolute gates and beats audio-only, but it does not beat text-only on the synthetic dataset (`promotion.promote_to_enforced = false`). Therefore `qaMultimodalMode` stays `shadow` by default: the Core ML model runs and records auditable scores, but it does not block decisions until a consented real-meeting dataset proves a measurable gain.
+The multimodal checkpoint passes the absolute gates, beats audio-only, and beats text-only on the adversarial hard split (`promotion.promote_to_enforced = true`). Therefore `qaMultimodalMode` is `enforced` by default for the local hardened checkpoint, while the final production claim still requires a consented real-meeting dataset.
 
 The bundled model uses text tokens, log-mel audio features, and scalar ASR/temporal/language features. The runtime now attaches captured in-memory log-mel from the live PCM ring buffer when enough recent audio is available, and still falls back safely to MultiQT-lite/proxy features if audio, model, or metadata cannot be loaded.
 

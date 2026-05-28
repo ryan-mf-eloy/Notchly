@@ -46,6 +46,8 @@ def main() -> int:
     parser.add_argument("--max-tokens", type=int, default=96)
     parser.add_argument("--max-frames", type=int, default=600)
     parser.add_argument("--input-mode", choices=MODEL_INPUT_MODES, default="multimodal")
+    parser.add_argument("--positive-weight", type=float, default=1.0)
+    parser.add_argument("--critical-negative-weight", type=float, default=2.5)
     parser.add_argument("--seed", type=int, default=42)
     args = parser.parse_args()
 
@@ -79,9 +81,9 @@ def main() -> int:
         input_mode=args.input_mode,
     )
     optimizer = torch.optim.AdamW(model.parameters(), lr=args.learning_rate, weight_decay=0.01)
-    response_loss = nn.BCEWithLogitsLoss()
-    label_loss = nn.CrossEntropyLoss()
-    binary_loss = nn.BCEWithLogitsLoss()
+    response_loss = nn.BCEWithLogitsLoss(reduction="none")
+    label_loss = nn.CrossEntropyLoss(reduction="none")
+    binary_loss = nn.BCEWithLogitsLoss(reduction="none")
 
     best_dev: tuple[float, float, float, float] = (-1.0, -1.0, -1.0, -1.0)
     best_state: dict[str, Any] | None = None
@@ -98,11 +100,12 @@ def main() -> int:
                 batch["audio_logmel"],
                 batch["scalars"],
             )
+            weights = sample_weights(batch, args.positive_weight, args.critical_negative_weight)
             loss = (
-                response_loss(response_logit, batch["response_needed"])
-                + 0.45 * label_loss(label_logits, batch["label_id"])
-                + 0.20 * binary_loss(complete_logit, batch["complete"])
-                + 0.20 * binary_loss(rhetorical_logit, batch["rhetorical"])
+                weighted_mean(response_loss(response_logit, batch["response_needed"]), weights)
+                + 0.45 * weighted_mean(label_loss(label_logits, batch["label_id"]), weights)
+                + 0.20 * weighted_mean(binary_loss(complete_logit, batch["complete"]), weights)
+                + 0.20 * weighted_mean(binary_loss(rhetorical_logit, batch["rhetorical"]), weights)
             )
             loss.backward()
             torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
@@ -136,6 +139,8 @@ def main() -> int:
                     "max_frames": args.max_frames,
                     "scalar_count": 7,
                     "input_mode": args.input_mode,
+                    "positive_weight": args.positive_weight,
+                    "critical_negative_weight": args.critical_negative_weight,
                 },
             }
 
@@ -208,6 +213,7 @@ class MultiQTDataset(Dataset):
             "response_needed": torch.tensor(float(row["response_needed"]), dtype=torch.float32),
             "complete": torch.tensor(float(row["complete"]), dtype=torch.float32),
             "rhetorical": torch.tensor(float(row["label"] == "rhetorical"), dtype=torch.float32),
+            "critical_negative": torch.tensor(float(row.get("critical_negative", False)), dtype=torch.float32),
             "label_id": torch.tensor(self.label_to_id[row["label"]], dtype=torch.long),
         }
 
@@ -273,6 +279,17 @@ def scalars_for_row(row: dict[str, Any]) -> list[float]:
         min(duration / 20.0, 1.0),
         *(1.0 if language == item else 0.0 for item in LANGUAGES),
     ]
+
+
+def sample_weights(batch: dict[str, torch.Tensor], positive_weight: float, critical_negative_weight: float) -> torch.Tensor:
+    positive = batch["response_needed"].float()
+    critical_negative = batch["critical_negative"].float()
+    return torch.ones_like(positive) + positive * max(0.0, positive_weight - 1.0) + critical_negative * max(0.0, critical_negative_weight - 1.0)
+
+
+def weighted_mean(losses: torch.Tensor, weights: torch.Tensor) -> torch.Tensor:
+    weighted = losses * weights
+    return weighted.sum() / weights.sum().clamp_min(1e-6)
 
 
 def predict(model: MultiQTConcatModel, dataset: MultiQTDataset, batch_size: int) -> list[dict[str, float | bool]]:

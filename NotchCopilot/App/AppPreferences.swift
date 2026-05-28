@@ -329,6 +329,7 @@ struct AppPreferences: Codable, Hashable {
     var didMigrateLanguageDefaults: Bool = true
     var didPromoteTrainedQAMultimodalDefault: Bool = true
     var didAuditSyntheticQAMultimodalDefault: Bool = true
+    var didPromoteHardenedQAMultimodalDefault: Bool = true
     var saveAudioRecordings: Bool = false
     var audioQuality: String = "High"
     var transcriptionAccuracyMode: TranscriptionAccuracyMode = .highAccuracy
@@ -350,7 +351,7 @@ struct AppPreferences: Codable, Hashable {
     var doNotSendCodeSnippetsToCloud: Bool = true
     var questionAnsweringProfile: QuestionAnsweringAdaptiveProfile = QuestionAnsweringAdaptiveProfile()
     var qaPrecisionMode: QAPrecisionMode = .highPrecision
-    var qaMultimodalMode: QAMultimodalMode = .shadow
+    var qaMultimodalMode: QAMultimodalMode = .enforced
     var localQuestionModelProfile: LocalQuestionModelProfile = .maxAccuracyMDeBERTa
     var allowLocalModelDownloads: Bool = true
     var qaShadowMode: Bool = true
@@ -386,6 +387,7 @@ struct AppPreferences: Codable, Hashable {
         case didMigrateLanguageDefaults
         case didPromoteTrainedQAMultimodalDefault
         case didAuditSyntheticQAMultimodalDefault
+        case didPromoteHardenedQAMultimodalDefault
         case saveAudioRecordings
         case audioQuality
         case transcriptionAccuracyMode
@@ -443,6 +445,7 @@ struct AppPreferences: Codable, Hashable {
         didMigrateLanguageDefaults = try container.decodeIfPresent(Bool.self, forKey: .didMigrateLanguageDefaults) ?? false
         didPromoteTrainedQAMultimodalDefault = try container.decodeIfPresent(Bool.self, forKey: .didPromoteTrainedQAMultimodalDefault) ?? false
         didAuditSyntheticQAMultimodalDefault = try container.decodeIfPresent(Bool.self, forKey: .didAuditSyntheticQAMultimodalDefault) ?? false
+        didPromoteHardenedQAMultimodalDefault = try container.decodeIfPresent(Bool.self, forKey: .didPromoteHardenedQAMultimodalDefault) ?? false
         saveAudioRecordings = try container.decodeIfPresent(Bool.self, forKey: .saveAudioRecordings) ?? false
         audioQuality = try container.decodeIfPresent(String.self, forKey: .audioQuality) ?? "High"
         transcriptionAccuracyMode = try container.decodeIfPresent(TranscriptionAccuracyMode.self, forKey: .transcriptionAccuracyMode)
@@ -465,7 +468,7 @@ struct AppPreferences: Codable, Hashable {
         doNotSendCodeSnippetsToCloud = try container.decodeIfPresent(Bool.self, forKey: .doNotSendCodeSnippetsToCloud) ?? true
         questionAnsweringProfile = try container.decodeIfPresent(QuestionAnsweringAdaptiveProfile.self, forKey: .questionAnsweringProfile) ?? QuestionAnsweringAdaptiveProfile()
         qaPrecisionMode = try container.decodeIfPresent(QAPrecisionMode.self, forKey: .qaPrecisionMode) ?? .highPrecision
-        qaMultimodalMode = try container.decodeIfPresent(QAMultimodalMode.self, forKey: .qaMultimodalMode) ?? .shadow
+        qaMultimodalMode = try container.decodeIfPresent(QAMultimodalMode.self, forKey: .qaMultimodalMode) ?? .enforced
         localQuestionModelProfile = try container.decodeIfPresent(LocalQuestionModelProfile.self, forKey: .localQuestionModelProfile) ?? .maxAccuracyMDeBERTa
         allowLocalModelDownloads = try container.decodeIfPresent(Bool.self, forKey: .allowLocalModelDownloads) ?? true
         qaShadowMode = try container.decodeIfPresent(Bool.self, forKey: .qaShadowMode) ?? true
@@ -512,10 +515,14 @@ struct AppPreferences: Codable, Hashable {
         }
 
         if !didAuditSyntheticQAMultimodalDefault {
-            if didPromoteTrainedQAMultimodalDefault, qaMultimodalMode == .enforced {
-                qaMultimodalMode = .shadow
-            }
             didAuditSyntheticQAMultimodalDefault = true
+        }
+
+        if !didPromoteHardenedQAMultimodalDefault {
+            if qaMultimodalMode == .shadow {
+                qaMultimodalMode = .enforced
+            }
+            didPromoteHardenedQAMultimodalDefault = true
         }
 
         if audioCaptureMode == .microphoneAndSystem || audioCaptureMode == .systemOnly {

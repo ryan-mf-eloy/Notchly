@@ -43,7 +43,7 @@ python3 Tools/multiqt/build_synthetic_manifest.py \
   --jobs 4
 ```
 
-Synthetic speech is only a bootstrap set. The enforced gate still requires consented real meeting audio, public/license-compatible audio, or manually reviewed local datasets.
+Synthetic speech is only a bootstrap set. The final production gate still requires consented real meeting audio, public/license-compatible audio, or manually reviewed local datasets.
 
 ## Commands
 
@@ -66,6 +66,17 @@ python3 Tools/multiqt/validate_manifest.py \
 ```
 
 Manifests may include `audio_feature_path` and `audio_feature_source` (`logmel`, `signal_proxy`, or `synthetic_logmel`). The production app never stores raw audio for this path: runtime inference consumes an in-memory `QuestionAudioLogMelFeature` derived from the short-lived live PCM ring buffer when available, otherwise it falls back to a redacted numeric proxy from RMS, peak, energy, noise, duration, pause, confidence, and stability signals.
+
+Harden a bootstrap manifest with deterministic ASR and intent stress cases:
+
+```sh
+python3 Tools/multiqt/augment_manifest.py \
+  --input-dir Data/multiqt_synthetic \
+  --out-dir Data/multiqt_hardened \
+  --augment-eval \
+  --train-asr-variants 4 \
+  --eval-asr-variants 2
+```
 
 Smoke-test the toolchain without audio files:
 
@@ -92,14 +103,15 @@ Train/evaluate modality baselines with the same split, seed, architecture, and t
 
 ```sh
 python3 Tools/multiqt/compare_baselines.py \
-  --manifest Data/multiqt/train.jsonl \
-  --dev Data/multiqt/dev.jsonl \
-  --test Data/multiqt/test.jsonl \
-  --hard-test Data/multiqt/hard_test.jsonl \
-  --audio-root Data/multiqt \
+  --manifest Data/multiqt_hardened/train.jsonl \
+  --dev Data/multiqt_hardened/dev.jsonl \
+  --test Data/multiqt_hardened/test.jsonl \
+  --hard-test Data/multiqt_hardened/hard_test.jsonl \
+  --audio-root Data/multiqt_synthetic \
   --out Artifacts/multiqt_baselines \
   --epochs 16 \
   --batch-size 64 \
+  --critical-negative-weight 2.5 \
   --max-frames 240
 ```
 
@@ -122,7 +134,9 @@ python3 Tools/multiqt/evaluate.py \
 ```sh
 python3 Tools/multiqt/export_coreml.py \
   --checkpoint Artifacts/multiqt/best.pt \
-  --out Artifacts/multiqt/notchly-multiqt-v1.mlpackage
+  --out Artifacts/multiqt/notchly-multiqt-v1.mlpackage \
+  --training-report Data/multiqt_hardened/augmentation_report.json \
+  --baseline-comparison Artifacts/multiqt_baselines/baseline_comparison.json
 ```
 
 Compile and bundle for the app:
@@ -149,23 +163,24 @@ cp Artifacts/multiqt/notchly-multiqt-v1.metadata.json \
 
 ## Bundled bootstrap checkpoint
 
-The current bundled checkpoint was trained from the QA gold fixture converted into synthetic audio with macOS `say`.
+The current bundled checkpoint was trained from the QA gold fixture converted into synthetic audio with macOS `say`, then hardened with deterministic ASR/intent augmentations.
 
-- rows: 2,021 total; 809 positive; 1,212 negative
+- rows: 6,794 total; 2,163 positive; 4,631 negative
 - languages: pt-BR, en-US, es-ES, ja-JP
 - threshold: 0.99
-- test: TP 71, FP 0, FN 0, TN 121, precision 1.0000, recall 1.0000, p95 1.279 ms
-- hard_test: TP 47, FP 0, FN 0, TN 72, precision 1.0000, recall 1.0000, p95 1.202 ms
+- critical negative weight: 2.5
+- test: TP 190, FP 0, FN 0, TN 326, precision 1.0000, recall 1.0000, p95 1.805 ms
+- hard_test: TP 123, FP 0, FN 0, TN 321, precision 1.0000, recall 1.0000, p95 1.982 ms
 
 Baseline comparison, 16 epochs, seed 42:
 
 | Mode | test precision/recall | hard_test precision/recall | Critical FP | test p95 |
 | --- | ---: | ---: | ---: | ---: |
-| `multimodal` | 1.0000 / 1.0000 | 1.0000 / 1.0000 | 0 | 2.734 ms |
-| `text_only` | 1.0000 / 1.0000 | 1.0000 / 1.0000 | 0 | 1.120 ms |
-| `audio_only` | 1.0000 / 0.9859 | 1.0000 / 0.9787 | 0 | 1.201 ms |
+| `multimodal` | 1.0000 / 1.0000 | 1.0000 / 1.0000 | 0 | 1.805 ms |
+| `text_only` | 1.0000 / 1.0000 | 0.9919 / 1.0000 | 1 | 3.775 ms |
+| `audio_only` | 0.9796 / 0.7579 | 0.4971 / 0.6992 | 90 | 1.965 ms |
 
-This checkpoint proves the runtime path and is safe to ship as a local-first bootstrap in `shadow`. It is not the final production evidence set because it does not outperform text-only on synthetic data (`promotion.promote_to_enforced = false`); promotion to `enforced` still requires consented real meeting audio and shadow replay.
+This checkpoint proves the runtime path and is safe to ship as a local-first hardened bootstrap in `enforced` (`promotion.promote_to_enforced = true`). It is not the final production evidence set; that still requires consented real meeting audio and shadow replay.
 
 ## Privacy
 

@@ -47,7 +47,7 @@ final class NotchCopilotTests: XCTestCase {
         XCTAssertTrue(normalized.stealthModeEnabled)
     }
 
-    func testAppPreferencesKeepsUnprovenMultiQTDefaultInShadowMode() throws {
+    func testAppPreferencesPromotesShadowModeToHardenedMultiQTEnforcedDefault() throws {
         let legacy = try JSONDecoder().decode(
             AppPreferences.self,
             from: Data(#"{ "qaMultimodalMode": "shadow" }"#.utf8)
@@ -55,11 +55,12 @@ final class NotchCopilotTests: XCTestCase {
 
         let normalized = legacy.normalizedForPersistence()
 
-        XCTAssertEqual(normalized.qaMultimodalMode, .shadow)
+        XCTAssertEqual(normalized.qaMultimodalMode, .enforced)
         XCTAssertTrue(normalized.didAuditSyntheticQAMultimodalDefault)
+        XCTAssertTrue(normalized.didPromoteHardenedQAMultimodalDefault)
     }
 
-    func testAppPreferencesRevertsAutoPromotedSyntheticMultiQTDefaultToShadow() throws {
+    func testAppPreferencesKeepsAlreadyEnforcedHardenedMultiQTDefault() throws {
         let promoted = try JSONDecoder().decode(
             AppPreferences.self,
             from: Data(#"{ "qaMultimodalMode": "enforced", "didPromoteTrainedQAMultimodalDefault": true }"#.utf8)
@@ -67,8 +68,9 @@ final class NotchCopilotTests: XCTestCase {
 
         let normalized = promoted.normalizedForPersistence()
 
-        XCTAssertEqual(normalized.qaMultimodalMode, .shadow)
+        XCTAssertEqual(normalized.qaMultimodalMode, .enforced)
         XCTAssertTrue(normalized.didAuditSyntheticQAMultimodalDefault)
+        XCTAssertTrue(normalized.didPromoteHardenedQAMultimodalDefault)
     }
 
     func testLocalDataCryptorRoundTripsAndRejectsWrongKey() throws {
