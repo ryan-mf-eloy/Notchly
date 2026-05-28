@@ -44,6 +44,7 @@ def main() -> int:
         vocab_size=len(checkpoint["vocab"]),
         label_count=len(checkpoint["labels"]),
         scalar_count=int(config["scalar_count"]),
+        input_mode=str(config.get("input_mode", "multimodal")),
     )
     model.load_state_dict(checkpoint["model_state"])
     model.eval()

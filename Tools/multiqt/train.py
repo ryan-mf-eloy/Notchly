@@ -24,7 +24,7 @@ except ImportError as error:  # pragma: no cover - executed only on training mac
         "python3 -m pip install -r Tools/multiqt/requirements.txt"
     ) from error
 
-from model import MultiQTConcatModel
+from model import MODEL_INPUT_MODES, MultiQTConcatModel
 
 
 TOKEN_RE = re.compile(r"[\w']+", re.UNICODE)
@@ -45,6 +45,7 @@ def main() -> int:
     parser.add_argument("--learning-rate", type=float, default=3e-4)
     parser.add_argument("--max-tokens", type=int, default=96)
     parser.add_argument("--max-frames", type=int, default=600)
+    parser.add_argument("--input-mode", choices=MODEL_INPUT_MODES, default="multimodal")
     parser.add_argument("--seed", type=int, default=42)
     args = parser.parse_args()
 
@@ -75,6 +76,7 @@ def main() -> int:
         vocab_size=len(vocab),
         label_count=len(label_names),
         scalar_count=7,
+        input_mode=args.input_mode,
     )
     optimizer = torch.optim.AdamW(model.parameters(), lr=args.learning_rate, weight_decay=0.01)
     response_loss = nn.BCEWithLogitsLoss()
@@ -133,6 +135,7 @@ def main() -> int:
                     "max_tokens": args.max_tokens,
                     "max_frames": args.max_frames,
                     "scalar_count": 7,
+                    "input_mode": args.input_mode,
                 },
             }
 
@@ -148,7 +151,15 @@ def main() -> int:
         hard_predictions = predict(model, hard_data, args.batch_size)
         hard_metrics = compute_metrics(hard_predictions, best_state["threshold"])
     torch.save(best_state, args.out / "best.pt")
-    write_json(args.out / "metrics.json", {"test": test_metrics, "hard_test": hard_metrics, "threshold": best_state["threshold"]})
+    write_json(
+        args.out / "metrics.json",
+        {
+            "input_mode": args.input_mode,
+            "test": test_metrics,
+            "hard_test": hard_metrics,
+            "threshold": best_state["threshold"],
+        },
+    )
     write_json(args.out / "calibration.json", {"response_threshold": best_state["threshold"]})
     write_json(args.out / "vocab.json", best_state["vocab"])
     write_jsonl(args.out / "test_predictions.jsonl", prediction_rows(test_rows, test_predictions))

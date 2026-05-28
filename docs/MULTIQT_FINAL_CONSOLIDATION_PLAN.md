@@ -30,6 +30,16 @@ Validation on the synthetic held-out splits:
 | test | 71 | 0 | 0 | 121 | 1.0000 | 1.0000 | 1.279 ms |
 | hard_test | 47 | 0 | 0 | 72 | 1.0000 | 1.0000 | 1.202 ms |
 
+Baseline comparison from `Tools/multiqt/compare_baselines.py` with 16 epochs, seed 42, and identical splits:
+
+| Mode | test precision | test recall | hard precision | hard recall | Critical FP | test p95 |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| multimodal | 1.0000 | 1.0000 | 1.0000 | 1.0000 | 0 | 2.734 ms |
+| text_only | 1.0000 | 1.0000 | 1.0000 | 1.0000 | 0 | 1.120 ms |
+| audio_only | 1.0000 | 0.9859 | 1.0000 | 0.9787 | 0 | 1.201 ms |
+
+The multimodal checkpoint passes the absolute gates and beats audio-only, but it does not beat text-only on the synthetic dataset (`promotion.promote_to_enforced = false`). Therefore `qaMultimodalMode` stays `shadow` by default: the Core ML model runs and records auditable scores, but it does not block decisions until a consented real-meeting dataset proves a measurable gain.
+
 The bundled model uses text tokens, log-mel audio features, and scalar ASR/temporal/language features. The runtime now attaches captured in-memory log-mel from the live PCM ring buffer when enough recent audio is available, and still falls back safely to MultiQT-lite/proxy features if audio, model, or metadata cannot be loaded.
 
 Primary reference:

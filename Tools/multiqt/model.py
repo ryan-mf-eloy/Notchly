@@ -7,17 +7,24 @@ import torch
 from torch import nn
 
 
+MODEL_INPUT_MODES = ("multimodal", "text_only", "audio_only", "text_audio", "scalar_only")
+
+
 class MultiQTConcatModel(nn.Module):
     def __init__(
         self,
         vocab_size: int,
         label_count: int,
         scalar_count: int,
+        input_mode: str = "multimodal",
         embedding_dim: int = 128,
         hidden_dim: int = 192,
         padding_idx: int = 0,
     ) -> None:
         super().__init__()
+        if input_mode not in MODEL_INPUT_MODES:
+            raise ValueError(f"Unsupported input mode: {input_mode}")
+        self.input_mode = input_mode
         self.embedding = nn.Embedding(vocab_size, embedding_dim, padding_idx=padding_idx)
         self.text_encoder = nn.Sequential(
             nn.Conv1d(embedding_dim, hidden_dim, kernel_size=3, padding=1),
@@ -65,7 +72,14 @@ class MultiQTConcatModel(nn.Module):
             dim=1,
         )
         audio_features = self.audio_encoder(audio_summary)
-        fused = self.fusion(torch.cat([text_features, audio_features, scalars.float()], dim=1))
+        scalar_features = scalars.float()
+        if self.input_mode in {"audio_only", "scalar_only"}:
+            text_features = torch.zeros_like(text_features)
+        if self.input_mode in {"text_only", "scalar_only"}:
+            audio_features = torch.zeros_like(audio_features)
+        if self.input_mode in {"text_only", "audio_only", "text_audio"}:
+            scalar_features = torch.zeros_like(scalar_features)
+        fused = self.fusion(torch.cat([text_features, audio_features, scalar_features], dim=1))
         return (
             self.response_head(fused).squeeze(-1),
             self.label_head(fused),

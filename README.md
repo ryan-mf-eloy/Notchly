@@ -265,6 +265,16 @@ Checkpoint atual:
 - hard_test split: TP 47, FP 0, FN 0, TN 72, precision 1.0000, recall 1.0000, p95 1.202 ms;
 - zero FP em negativos criticos nos splits avaliados.
 
+Comparativo de baselines treinaveis (`Tools/multiqt/compare_baselines.py`, 16 epocas, seed 42, mesmos splits):
+
+| Modo | test precision/recall | hard_test precision/recall | FP criticos | p95 test |
+| --- | ---: | ---: | ---: | ---: |
+| `multimodal` | 1.0000 / 1.0000 | 1.0000 / 1.0000 | 0 | 2.734 ms |
+| `text_only` | 1.0000 / 1.0000 | 1.0000 / 1.0000 | 0 | 1.120 ms |
+| `audio_only` | 1.0000 / 0.9859 | 1.0000 / 0.9787 | 0 | 1.201 ms |
+
+O multimodal passa os gates absolutos e supera `audio_only`, mas empata com `text_only` no dataset sintetico (`promotion.promote_to_enforced = false`). Por isso o default de produto permanece `shadow`: o modelo Core ML roda e produz sinais auditaveis, mas ainda nao bloqueia decisoes ate haver ganho comprovado em audio real consentido.
+
 O app cria `QuestionMultimodalSignal` a partir do `TranscriptSegment`, qualidade de audio por fonte, energia disponivel e, quando o audio recente esta no ring buffer, `captured_logmel`. Os campos sao numericos/redigiveis: idioma, confidence ASR, final/partial, speaker/source, duracao, estabilidade entre parciais, pausa terminal, RMS/peak, clipping, silencio/tooQuiet, gaps, noise floor e `audioEnergy`.
 
 `QuestionMultimodalScorer` combina o entendimento textual com boosts leves para segmento final, ASR confiavel, duracao plausivel, pausa terminal e energia consistente. Ele penaliza partial instavel, ASR baixo, clipping forte, silencio/tooQuiet e gaps. Negativos criticos continuam como hard-blocks locais: small talk, operational checks, retoricas, perguntas reportadas, auto-respondidas, fragmentos, titulos e ruido ASR.
@@ -613,7 +623,7 @@ Alguns defaults relevantes de `AppPreferences`:
 | `saveAudioRecordings` | `false` | nao salvar audio bruto por padrao. |
 | `realtimeSuggestionsEnabled` | `true` | habilitar o fluxo central do copilot. |
 | `qaPrecisionMode` | `highPrecision` | reduzir falsos positivos. |
-| `qaMultimodalMode` | `enforced` | usar o MultiQT Core ML treinado quando presente, com fallback seguro se o artefato estiver ausente. |
+| `qaMultimodalMode` | `shadow` | rodar o MultiQT Core ML treinado para auditoria sem bloquear decisoes ate haver ganho comprovado sobre text-only em audio real. |
 | `allowLocalModelDownloads` | `true` | permitir caminhos locais quando configurados. |
 | `copilotHotkeyEnabled` | `true` | acesso rapido ao copilot. |
 | `copilotRetentionDays` | `7` | reduzir memoria local de curto prazo. |
@@ -626,7 +636,7 @@ Alguns defaults relevantes de `AppPreferences`:
 - Web search e parcialmente dependente do provedor escolhido e das flags de cloud.
 - RAG usa keyword search como fallback principal; embeddings locais/cloud ainda sao caminho de evolucao.
 - Transcricao realtime cloud esta focada em ElevenLabs.
-- O MultiQT treinado empacotado e um checkpoint bootstrap gerado com audio sintetico local a partir da fixture multilingual. Ele passa os gates atuais, mas ainda deve ser validado contra audio consentido de reunioes reais antes de ser tratado como modelo final de producao.
+- O MultiQT treinado empacotado e um checkpoint bootstrap gerado com audio sintetico local a partir da fixture multilingual. Ele passa os gates absolutos e supera audio-only, mas empata com text-only no split sintetico; por isso fica em `shadow` por padrao ate validacao com audio consentido de reunioes reais.
 - Gemini e Claude account login dependem dos CLIs oficiais instalados e autenticados.
 - Perplexity account/OAuth esta indisponivel por design nesta versao.
 - Launch at login aparece nas preferencias, mas a integracao final pode exigir ajustes de signing/entitlements.

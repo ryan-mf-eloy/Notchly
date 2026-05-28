@@ -84,8 +84,26 @@ python3 Tools/multiqt/train.py \
   --test Data/multiqt/test.jsonl \
   --hard-test Data/multiqt/hard_test.jsonl \
   --out Artifacts/multiqt \
+  --input-mode multimodal \
   --max-frames 240
 ```
+
+Train/evaluate modality baselines with the same split, seed, architecture, and threshold policy:
+
+```sh
+python3 Tools/multiqt/compare_baselines.py \
+  --manifest Data/multiqt/train.jsonl \
+  --dev Data/multiqt/dev.jsonl \
+  --test Data/multiqt/test.jsonl \
+  --hard-test Data/multiqt/hard_test.jsonl \
+  --audio-root Data/multiqt \
+  --out Artifacts/multiqt_baselines \
+  --epochs 16 \
+  --batch-size 64 \
+  --max-frames 240
+```
+
+Supported `--input-mode`/baseline modes are `multimodal`, `text_only`, `audio_only`, `text_audio`, and `scalar_only`. The model keeps one architecture and masks unused modalities, so comparisons are reproducible and do not fork runtime behavior.
 
 ```sh
 python3 Tools/multiqt/predict.py \
@@ -139,7 +157,15 @@ The current bundled checkpoint was trained from the QA gold fixture converted in
 - test: TP 71, FP 0, FN 0, TN 121, precision 1.0000, recall 1.0000, p95 1.279 ms
 - hard_test: TP 47, FP 0, FN 0, TN 72, precision 1.0000, recall 1.0000, p95 1.202 ms
 
-This checkpoint proves the runtime path and is safe to ship as a local-first bootstrap. It is not the final production evidence set; that still requires consented real meeting audio and shadow replay.
+Baseline comparison, 16 epochs, seed 42:
+
+| Mode | test precision/recall | hard_test precision/recall | Critical FP | test p95 |
+| --- | ---: | ---: | ---: | ---: |
+| `multimodal` | 1.0000 / 1.0000 | 1.0000 / 1.0000 | 0 | 2.734 ms |
+| `text_only` | 1.0000 / 1.0000 | 1.0000 / 1.0000 | 0 | 1.120 ms |
+| `audio_only` | 1.0000 / 0.9859 | 1.0000 / 0.9787 | 0 | 1.201 ms |
+
+This checkpoint proves the runtime path and is safe to ship as a local-first bootstrap in `shadow`. It is not the final production evidence set because it does not outperform text-only on synthetic data (`promotion.promote_to_enforced = false`); promotion to `enforced` still requires consented real meeting audio and shadow replay.
 
 ## Privacy
 
