@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -o pipefail
 
-raw_log="${XCODEBUILD_CLEAN_RAW_LOG:-$(mktemp "${TMPDIR:-/tmp}/notchly-xcodebuild.XXXXXX.log")}"
+raw_log="${XCODEBUILD_CLEAN_RAW_LOG:-$(mktemp -t notchly-xcodebuild)}"
 
 xcodebuild "$@" 2>&1 | tee "$raw_log" | sed -E \
   -e '/^[0-9-]+ [0-9:.]+ xcodebuild\[[0-9]+:[0-9]+\] \[MT\] IDELaunchParametersSnapshot: The operation couldn.t be completed\. \(DebuggerLLDB\.DebuggerVersionStore\.StoreError error 0\.\)$/d' \
