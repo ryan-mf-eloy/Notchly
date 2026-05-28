@@ -30,6 +30,8 @@ class MultiQTConcatModel(nn.Module):
             raise ValueError(f"Unsupported audio encoder: {audio_encoder}")
         self.input_mode = input_mode
         self.audio_encoder_name = audio_encoder
+        self.text_feature_dim = hidden_dim
+        self.audio_feature_dim = 96
         self.embedding = nn.Embedding(vocab_size, embedding_dim, padding_idx=padding_idx)
         self.text_encoder = nn.Sequential(
             nn.Conv1d(embedding_dim, hidden_dim, kernel_size=3, padding=1),
@@ -56,7 +58,7 @@ class MultiQTConcatModel(nn.Module):
                 nn.GELU(),
                 nn.AdaptiveMaxPool1d(1),
             )
-        fused_dim = hidden_dim + 96 + scalar_count
+        fused_dim = self.text_feature_dim + self.audio_feature_dim + scalar_count
         self.fusion = nn.Sequential(
             nn.Linear(fused_dim, hidden_dim),
             nn.LayerNorm(hidden_dim),
@@ -76,26 +78,31 @@ class MultiQTConcatModel(nn.Module):
         audio_logmel: torch.Tensor,
         scalars: torch.Tensor,
     ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
-        embedded = self.embedding(text_tokens.long()).transpose(1, 2)
-        text_features = self.text_encoder(embedded).squeeze(-1)
-        audio = audio_logmel.float()
-        if self.audio_encoder_name == "summary_stats":
-            audio_summary = torch.cat(
-                [
-                    audio.mean(dim=2),
-                    torch.amax(audio, dim=2),
-                    torch.amin(audio, dim=2),
-                ],
-                dim=1,
-            )
-            audio_features = self.audio_encoder(audio_summary)
-        else:
-            audio_features = self.audio_encoder(audio).squeeze(-1)
+        batch_size = text_tokens.shape[0]
         scalar_features = scalars.float()
         if self.input_mode in {"audio_only", "scalar_only"}:
-            text_features = torch.zeros_like(text_features)
+            text_features = torch.zeros(batch_size, self.text_feature_dim, device=scalar_features.device)
+        else:
+            embedded = self.embedding(text_tokens.long()).transpose(1, 2)
+            text_features = self.text_encoder(embedded).squeeze(-1)
+
         if self.input_mode in {"text_only", "scalar_only"}:
-            audio_features = torch.zeros_like(audio_features)
+            audio_features = torch.zeros(batch_size, self.audio_feature_dim, device=scalar_features.device)
+        else:
+            audio = audio_logmel.float()
+            if self.audio_encoder_name == "summary_stats":
+                audio_summary = torch.cat(
+                    [
+                        audio.mean(dim=2),
+                        torch.amax(audio, dim=2),
+                        torch.amin(audio, dim=2),
+                    ],
+                    dim=1,
+                )
+                audio_features = self.audio_encoder(audio_summary)
+            else:
+                audio_features = self.audio_encoder(audio).squeeze(-1)
+
         if self.input_mode in {"text_only", "audio_only", "text_audio"}:
             scalar_features = torch.zeros_like(scalar_features)
         fused = self.fusion(torch.cat([text_features, audio_features, scalar_features], dim=1))

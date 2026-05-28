@@ -264,7 +264,7 @@ Checkpoint atual:
 
 - dataset bootstrap hardened expandido: 94.222 exemplos, 34.087 positivos, 60.135 negativos, pt-BR/en-US/es-ES/ja-JP;
 - treino: `qa_intent_gold.jsonl` + `copilot_intent_gold.jsonl` via `signal_proxy`, `Tools/multiqt/augment_manifest.py`, ASR sem pontuacao, fillers, code-switching, parciais truncadas, perguntas reportadas e auto-respondidas;
-- modelo: texto + scalars + proxy acustico/temporal, exportado para Core ML, threshold global `0.55`, thresholds por idioma `pt-BR=0.55`, `en-US=0.99`, `es-ES=0.99`, `ja-JP=0.99`, `critical_negative_weight = 2.5`;
+- modelo: texto + scalars + proxy acustico/temporal com encoder acustico `summary_stats`, exportado para Core ML, threshold global `0.55`, thresholds por idioma `pt-BR=0.55`, `en-US=0.99`, `es-ES=0.99`, `ja-JP=0.99`, `critical_negative_weight = 2.5`;
 - calibracao: o threshold e escolhido por gates de precision/recall globais, por idioma e por label negativa critica, nao apenas pelo score global;
 - contrato de runtime: a metadata inclui `label_policy` e `language_thresholds`; se a cabeca treinada `label_logits` prever uma label negativa critica, o runner Core ML suprime o candidato mesmo antes do provider;
 - contrato acustico: `preferred_runtime_feature=signal_proxy`, ou seja, este checkpoint deve receber o mesmo proxy numerico usado no treino em vez de log-mel capturado;
@@ -281,6 +281,8 @@ Comparativo de baselines treinaveis (`Tools/multiqt/compare_baselines.py`, 16 ep
 | `audio_only` | 1.0000 / 0.3357 | 1.0000 / 0.3348 | 0 | 0.002 ms |
 
 O multimodal passa os gates absolutos, supera `audio_only` em recall e vence `text_only` em recall no test/hard_test adversarial sem aumentar FP critico (`promotion.promote_to_enforced = true`). Por isso o default de produto continua `enforced`: o modelo Core ML treinado participa da decisao local, enquanto os hard-blocks textuais continuam protegendo negativos criticos.
+
+Um candidato `temporal_cnn` foi treinado com os mesmos 94.222 exemplos e tambem passou 67/67 gates agregados (`test` 1.0000 precision / 0.9997 recall, `hard_test` 1.0000 / 1.0000), mas nao foi promovido porque falhou no smoke qualitativo pt-BR que reproduz a pergunta real "Quais sao os principios SOLID de programacao" no runtime Core ML (`responseScore` abaixo do threshold). O bundle atual foi restaurado e tem teste dedicado garantindo que essa pergunta seja aceita pelo modelo empacotado.
 
 O metadata empacotado registra gates detalhados: 67/67 gates passam, incluindo precision >= 0.990 e recall >= 0.950 por idioma (`pt-BR`, `en-US`, `es-ES`, `ja-JP`), p95 <= 60 ms, p99 <= 100 ms e zero FP critico por label negativo (`fragment`, `operational_check`, `reported_question`, `rhetorical`, `self_answered`, `small_talk`, `title_noise`, `statement`). A mesma metadata carrega os thresholds por idioma e o contrato `preferred_runtime_feature`, permitindo ajustar calibracao/entrada acustica sem alterar o binario do app.
 
@@ -645,7 +647,7 @@ Alguns defaults relevantes de `AppPreferences`:
 - Web search e parcialmente dependente do provedor escolhido e das flags de cloud.
 - RAG usa keyword search como fallback principal; embeddings locais/cloud ainda sao caminho de evolucao.
 - Transcricao realtime cloud esta focada em ElevenLabs.
-- O MultiQT treinado empacotado e um checkpoint hardened gerado com texto gold + proxy acustico/temporal e augmentations adversariais. Ele passa os gates locais e fica em `enforced` por padrao; o caminho de log-mel materializado ja existe, mas a validacao final ainda exige audio consentido de reunioes reais antes de tratar o modelo como producao extrema.
+- O MultiQT treinado empacotado e um checkpoint hardened gerado com texto gold + proxy acustico/temporal e augmentations adversariais. Ele passa os gates locais, aceita o smoke pt-BR "Quais sao os principios SOLID de programacao" no Core ML runtime e fica em `enforced` por padrao. O caminho de log-mel materializado e o encoder `temporal_cnn` ja existem, mas a validacao final ainda exige audio consentido de reunioes reais antes de tratar o modelo como producao extrema.
 - Gemini e Claude account login dependem dos CLIs oficiais instalados e autenticados.
 - Perplexity account/OAuth esta indisponivel por design nesta versao.
 - Launch at login aparece nas preferencias, mas a integracao final pode exigir ajustes de signing/entitlements.

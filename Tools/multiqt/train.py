@@ -81,10 +81,11 @@ def main() -> int:
     vocab = build_vocab(train_rows, min_count=2, max_size=30000)
 
     audio_root = args.audio_root or args.manifest.parent
-    train_data = MultiQTDataset(train_rows, vocab, label_to_id, audio_root, args.max_tokens, args.max_frames)
-    dev_data = MultiQTDataset(dev_rows, vocab, label_to_id, args.audio_root or args.dev.parent, args.max_tokens, args.max_frames)
-    test_data = MultiQTDataset(test_rows, vocab, label_to_id, args.audio_root or args.test.parent, args.max_tokens, args.max_frames)
-    hard_data = MultiQTDataset(hard_rows, vocab, label_to_id, args.audio_root or args.hard_test.parent, args.max_tokens, args.max_frames) if args.hard_test else None
+    load_audio = args.input_mode not in {"text_only", "scalar_only"}
+    train_data = MultiQTDataset(train_rows, vocab, label_to_id, audio_root, args.max_tokens, args.max_frames, load_audio=load_audio)
+    dev_data = MultiQTDataset(dev_rows, vocab, label_to_id, args.audio_root or args.dev.parent, args.max_tokens, args.max_frames, load_audio=load_audio)
+    test_data = MultiQTDataset(test_rows, vocab, label_to_id, args.audio_root or args.test.parent, args.max_tokens, args.max_frames, load_audio=load_audio)
+    hard_data = MultiQTDataset(hard_rows, vocab, label_to_id, args.audio_root or args.hard_test.parent, args.max_tokens, args.max_frames, load_audio=load_audio) if args.hard_test else None
 
     model = MultiQTConcatModel(
         vocab_size=len(vocab),
@@ -224,6 +225,7 @@ class MultiQTDataset(Dataset):
         audio_root: Path,
         max_tokens: int,
         max_frames: int,
+        load_audio: bool = True,
     ) -> None:
         self.rows = rows
         self.vocab = vocab
@@ -231,6 +233,8 @@ class MultiQTDataset(Dataset):
         self.audio_root = audio_root
         self.max_tokens = max_tokens
         self.max_frames = max_frames
+        self.load_audio = load_audio
+        self.zero_audio = torch.zeros(40, max_frames, dtype=torch.float32)
         self.audio_cache: dict[str, torch.Tensor] = {}
         self.mel = torchaudio.transforms.MelSpectrogram(
             sample_rate=16000,
@@ -245,12 +249,16 @@ class MultiQTDataset(Dataset):
 
     def __getitem__(self, index: int) -> dict[str, torch.Tensor]:
         row = self.rows[index]
-        audio_key = audio_cache_key(row, fallback=index)
-        if audio_key not in self.audio_cache:
-            self.audio_cache[audio_key] = load_logmel(row, self.audio_root, self.mel, self.max_frames)
+        if self.load_audio:
+            audio_key = audio_cache_key(row, fallback=index)
+            if audio_key not in self.audio_cache:
+                self.audio_cache[audio_key] = load_logmel(row, self.audio_root, self.mel, self.max_frames)
+            audio_logmel = self.audio_cache[audio_key]
+        else:
+            audio_logmel = self.zero_audio
         return {
             "text_tokens": torch.tensor(encode_text(text_for_row(row), self.vocab, self.max_tokens), dtype=torch.long),
-            "audio_logmel": self.audio_cache[audio_key],
+            "audio_logmel": audio_logmel,
             "scalars": torch.tensor(scalars_for_row(row), dtype=torch.float32),
             "response_needed": torch.tensor(float(row["response_needed"]), dtype=torch.float32),
             "complete": torch.tensor(float(row["complete"]), dtype=torch.float32),

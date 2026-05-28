@@ -32,6 +32,7 @@ def main() -> int:
     config = checkpoint["config"]
     label_to_id = {label: index for index, label in enumerate(checkpoint["labels"])}
     rows = read_jsonl(args.manifest)
+    input_mode = str(config.get("input_mode", "multimodal"))
     dataset = MultiQTDataset(
         rows,
         checkpoint["vocab"],
@@ -39,12 +40,13 @@ def main() -> int:
         args.audio_root or args.manifest.parent,
         int(config["max_tokens"]),
         int(config["max_frames"]),
+        load_audio=input_mode not in {"text_only", "scalar_only"},
     )
     model = MultiQTConcatModel(
         vocab_size=len(checkpoint["vocab"]),
         label_count=len(checkpoint["labels"]),
         scalar_count=int(config["scalar_count"]),
-        input_mode=str(config.get("input_mode", "multimodal")),
+        input_mode=input_mode,
         audio_encoder=str(config.get("audio_encoder", "summary_stats")),
     )
     model.load_state_dict(checkpoint["model_state"])

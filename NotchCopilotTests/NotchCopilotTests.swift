@@ -7256,6 +7256,40 @@ final class NotchCopilotTests: XCTestCase {
         XCTAssertTrue(prediction?.decisionSignals.contains("trained_multiqt_coreml") == true)
     }
 
+    func testRealtimeQABundledTrainedMultiQTAllowsPortugueseTechnicalQuestion() async throws {
+        let text = "Quais são os princípios SOLID de programação"
+        let signal = QuestionMultimodalSignal(
+            language: "pt-BR",
+            asrConfidence: 0.96,
+            isFinal: true,
+            isPartial: false,
+            speakerLabel: "Speaker",
+            audioSource: .microphone,
+            duration: 2.4,
+            hasTerminalPause: true,
+            partialStability: 1,
+            rms: 0.028,
+            peak: 0.18,
+            isClipping: false,
+            isSilence: false,
+            isTooQuiet: false,
+            gapCount: 0,
+            noiseFloor: 0.002,
+            audioEnergy: 0.026
+        )
+        let candidate = makeQuestion(text, multimodalSignal: signal)
+
+        let prediction = await CoreMLQuestionMultiQTModelRunner().prediction(
+            for: candidate,
+            signal: signal
+        )
+
+        XCTAssertNotNil(prediction)
+        XCTAssertGreaterThanOrEqual(prediction?.responseScore ?? 0, prediction?.threshold ?? 1)
+        XCTAssertTrue(prediction?.shouldAllow ?? false)
+        XCTAssertTrue(prediction?.decisionSignals.contains("trained_multiqt_coreml") == true)
+    }
+
     func testRealtimeQABundledTrainedMultiQTMetadataCarriesCriticalLabelPolicy() throws {
         let metadataURL = try XCTUnwrap(
             Bundle.main.url(forResource: "notchly-multiqt-v1.metadata", withExtension: "json", subdirectory: "Models")

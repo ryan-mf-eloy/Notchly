@@ -164,7 +164,7 @@ python3 Tools/multiqt/compare_baselines.py \
   --max-frames 240
 ```
 
-Supported `--input-mode`/baseline modes are `multimodal`, `text_only`, `audio_only`, `text_audio`, and `scalar_only`. The model keeps one architecture and masks unused modalities, so comparisons are reproducible and do not fork runtime behavior. `--audio-encoder temporal_cnn` is the default for new checkpoints and uses a separate temporal convolutional encoder over 40-band log-mel/proxy frames; `summary_stats` remains available only for loading/re-exporting older checkpoints. Promotion is precision-first: multimodal must pass absolute precision/recall/latency/critical-FP gates and must improve precision or critical-FP behavior over text-only while preserving absolute recall gates.
+Supported `--input-mode`/baseline modes are `multimodal`, `text_only`, `audio_only`, `text_audio`, and `scalar_only`. The model keeps one architecture and masks unused modalities, so comparisons are reproducible and do not fork runtime behavior. `--audio-encoder temporal_cnn` is available for new candidate checkpoints and uses a separate temporal convolutional encoder over 40-band log-mel/proxy frames; `summary_stats` remains available for the currently bundled bootstrap checkpoint and for compatibility re-exports. Promotion is precision-first: multimodal must pass absolute precision/recall/latency/critical-FP gates and must improve precision or critical-FP behavior over text-only while preserving absolute recall gates.
 
 ```sh
 python3 Tools/multiqt/predict.py \
@@ -224,6 +224,8 @@ The current bundled checkpoint was trained from `qa_intent_gold.jsonl` plus `cop
 - exported audio contract: `preferred_runtime_feature=signal_proxy`, matching the proxy acoustic/temporal features used during training
 - test: TP 3425, FP 0, FN 1, TN 4596, precision 1.0000, recall 0.9997, p95 0.002 ms
 - hard_test: TP 2076, FP 0, FN 0, TN 4309, precision 1.0000, recall 1.0000, p95 0.002 ms
+
+A `temporal_cnn` candidate trained on the same 94,222-row hardened set passed the aggregate gates, but it was not promoted because the Core ML runtime smoke for the live pt-BR phrase `Quais sao os principios SOLID de programacao` fell below threshold. The shipped bundle therefore remains the `summary_stats`/`signal_proxy` checkpoint until a temporal/log-mel candidate passes both aggregate gates and targeted qualitative smokes.
 
 Baseline comparison, 16 epochs, seed 42:
 
