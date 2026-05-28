@@ -16,7 +16,7 @@ from pathlib import Path
 from typing import Any
 
 from common import DEFAULT_LABELS_PATH, binary_metrics, load_labels, percentile, read_jsonl, write_json
-from model import MODEL_INPUT_MODES
+from model import AUDIO_ENCODERS, MODEL_INPUT_MODES
 
 
 DEFAULT_MODES = ("multimodal", "text_only", "audio_only")
@@ -37,6 +37,7 @@ def main() -> int:
     parser.add_argument("--learning-rate", type=float, default=3e-4)
     parser.add_argument("--max-tokens", type=int, default=96)
     parser.add_argument("--max-frames", type=int, default=240)
+    parser.add_argument("--audio-encoder", choices=AUDIO_ENCODERS, default="temporal_cnn")
     parser.add_argument("--positive-weight", type=float, default=1.0)
     parser.add_argument("--critical-negative-weight", type=float, default=2.5)
     parser.add_argument("--min-threshold", type=float, default=0.50)
@@ -89,6 +90,8 @@ def train_variant(args: argparse.Namespace, mode: str, mode_out: Path) -> None:
         str(args.max_tokens),
         "--max-frames",
         str(args.max_frames),
+        "--audio-encoder",
+        str(args.audio_encoder),
         "--seed",
         str(args.seed),
         "--positive-weight",

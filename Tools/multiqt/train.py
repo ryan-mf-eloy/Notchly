@@ -27,7 +27,7 @@ except ImportError as error:  # pragma: no cover - executed only on training mac
         "python3 -m pip install -r Tools/multiqt/requirements.txt"
     ) from error
 
-from model import MODEL_INPUT_MODES, MultiQTConcatModel
+from model import AUDIO_ENCODERS, MODEL_INPUT_MODES, MultiQTConcatModel
 
 
 TOKEN_RE = re.compile(r"[\w']+", re.UNICODE)
@@ -49,6 +49,7 @@ def main() -> int:
     parser.add_argument("--max-tokens", type=int, default=96)
     parser.add_argument("--max-frames", type=int, default=600)
     parser.add_argument("--input-mode", choices=MODEL_INPUT_MODES, default="multimodal")
+    parser.add_argument("--audio-encoder", choices=AUDIO_ENCODERS, default="temporal_cnn")
     parser.add_argument("--positive-weight", type=float, default=1.0)
     parser.add_argument("--critical-negative-weight", type=float, default=2.5)
     parser.add_argument(
@@ -90,6 +91,7 @@ def main() -> int:
         label_count=len(label_names),
         scalar_count=7,
         input_mode=args.input_mode,
+        audio_encoder=args.audio_encoder,
     ).to(device)
     optimizer = torch.optim.AdamW(model.parameters(), lr=args.learning_rate, weight_decay=0.01)
     response_loss = nn.BCEWithLogitsLoss(reduction="none")
@@ -169,6 +171,7 @@ def main() -> int:
                     "max_frames": args.max_frames,
                     "scalar_count": 7,
                     "input_mode": args.input_mode,
+                    "audio_encoder": args.audio_encoder,
                     "audio_feature_sources": audio_feature_sources(train_rows),
                     "positive_weight": args.positive_weight,
                     "critical_negative_weight": args.critical_negative_weight,

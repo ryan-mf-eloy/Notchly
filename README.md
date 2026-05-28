@@ -251,7 +251,7 @@ O plano final esta em `docs/MULTIQT_FINAL_CONSOLIDATION_PLAN.md`. O workspace ex
 
 - schema JSONL do dataset multilingual;
 - validador de manifesto;
-- modelo PyTorch audio+texto com fusao concat;
+- modelo PyTorch audio+texto com fusao concat e encoder acustico temporal convolucional;
 - avaliacao por precision/recall, negativos criticos e latencia;
 - manifest expandido com `qa_intent_gold.jsonl` + `copilot_intent_gold.jsonl`, incluindo `calculation`, `conversion`, `news`, `web`, `reminder` e `memory` mapeados para o schema MultiQT;
 - materializacao de features log-mel em `.npy` via `Tools/multiqt/materialize_audio_features.py`, para treinar de audio sintetico/publico/consentido sem reter waveform bruto;

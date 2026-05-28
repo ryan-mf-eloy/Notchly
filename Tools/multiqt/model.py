@@ -8,6 +8,7 @@ from torch import nn
 
 
 MODEL_INPUT_MODES = ("multimodal", "text_only", "audio_only", "text_audio", "scalar_only")
+AUDIO_ENCODERS = ("summary_stats", "temporal_cnn")
 
 
 class MultiQTConcatModel(nn.Module):
@@ -17,6 +18,7 @@ class MultiQTConcatModel(nn.Module):
         label_count: int,
         scalar_count: int,
         input_mode: str = "multimodal",
+        audio_encoder: str = "temporal_cnn",
         embedding_dim: int = 128,
         hidden_dim: int = 192,
         padding_idx: int = 0,
@@ -24,7 +26,10 @@ class MultiQTConcatModel(nn.Module):
         super().__init__()
         if input_mode not in MODEL_INPUT_MODES:
             raise ValueError(f"Unsupported input mode: {input_mode}")
+        if audio_encoder not in AUDIO_ENCODERS:
+            raise ValueError(f"Unsupported audio encoder: {audio_encoder}")
         self.input_mode = input_mode
+        self.audio_encoder_name = audio_encoder
         self.embedding = nn.Embedding(vocab_size, embedding_dim, padding_idx=padding_idx)
         self.text_encoder = nn.Sequential(
             nn.Conv1d(embedding_dim, hidden_dim, kernel_size=3, padding=1),
@@ -33,13 +38,24 @@ class MultiQTConcatModel(nn.Module):
             nn.GELU(),
             nn.AdaptiveMaxPool1d(1),
         )
-        self.audio_encoder = nn.Sequential(
-            nn.Linear(40 * 3, 128),
-            nn.LayerNorm(128),
-            nn.GELU(),
-            nn.Linear(128, 96),
-            nn.GELU(),
-        )
+        if audio_encoder == "summary_stats":
+            self.audio_encoder = nn.Sequential(
+                nn.Linear(40 * 3, 128),
+                nn.LayerNorm(128),
+                nn.GELU(),
+                nn.Linear(128, 96),
+                nn.GELU(),
+            )
+        else:
+            self.audio_encoder = nn.Sequential(
+                nn.Conv1d(40, 128, kernel_size=5, padding=2),
+                nn.GELU(),
+                nn.Conv1d(128, 128, kernel_size=5, padding=2, stride=2),
+                nn.GELU(),
+                nn.Conv1d(128, 96, kernel_size=3, padding=1),
+                nn.GELU(),
+                nn.AdaptiveMaxPool1d(1),
+            )
         fused_dim = hidden_dim + 96 + scalar_count
         self.fusion = nn.Sequential(
             nn.Linear(fused_dim, hidden_dim),
@@ -63,15 +79,18 @@ class MultiQTConcatModel(nn.Module):
         embedded = self.embedding(text_tokens.long()).transpose(1, 2)
         text_features = self.text_encoder(embedded).squeeze(-1)
         audio = audio_logmel.float()
-        audio_summary = torch.cat(
-            [
-                audio.mean(dim=2),
-                torch.amax(audio, dim=2),
-                torch.amin(audio, dim=2),
-            ],
-            dim=1,
-        )
-        audio_features = self.audio_encoder(audio_summary)
+        if self.audio_encoder_name == "summary_stats":
+            audio_summary = torch.cat(
+                [
+                    audio.mean(dim=2),
+                    torch.amax(audio, dim=2),
+                    torch.amin(audio, dim=2),
+                ],
+                dim=1,
+            )
+            audio_features = self.audio_encoder(audio_summary)
+        else:
+            audio_features = self.audio_encoder(audio).squeeze(-1)
         scalar_features = scalars.float()
         if self.input_mode in {"audio_only", "scalar_only"}:
             text_features = torch.zeros_like(text_features)

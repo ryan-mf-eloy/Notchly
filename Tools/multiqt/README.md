@@ -141,6 +141,7 @@ python3 Tools/multiqt/train.py \
   --hard-test Data/multiqt/hard_test.jsonl \
   --out Artifacts/multiqt \
   --input-mode multimodal \
+  --audio-encoder temporal_cnn \
   --max-frames 240
 ```
 
@@ -159,10 +160,11 @@ python3 Tools/multiqt/compare_baselines.py \
   --critical-negative-weight 2.5 \
   --min-threshold 0.50 \
   --device auto \
+  --audio-encoder temporal_cnn \
   --max-frames 240
 ```
 
-Supported `--input-mode`/baseline modes are `multimodal`, `text_only`, `audio_only`, `text_audio`, and `scalar_only`. The model keeps one architecture and masks unused modalities, so comparisons are reproducible and do not fork runtime behavior. Promotion is precision-first: multimodal must pass absolute precision/recall/latency/critical-FP gates and must improve precision or critical-FP behavior over text-only while preserving absolute recall gates.
+Supported `--input-mode`/baseline modes are `multimodal`, `text_only`, `audio_only`, `text_audio`, and `scalar_only`. The model keeps one architecture and masks unused modalities, so comparisons are reproducible and do not fork runtime behavior. `--audio-encoder temporal_cnn` is the default for new checkpoints and uses a separate temporal convolutional encoder over 40-band log-mel/proxy frames; `summary_stats` remains available only for loading/re-exporting older checkpoints. Promotion is precision-first: multimodal must pass absolute precision/recall/latency/critical-FP gates and must improve precision or critical-FP behavior over text-only while preserving absolute recall gates.
 
 ```sh
 python3 Tools/multiqt/predict.py \

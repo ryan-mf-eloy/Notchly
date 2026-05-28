@@ -43,6 +43,7 @@ def main() -> int:
         label_count=len(checkpoint["labels"]),
         scalar_count=int(config["scalar_count"]),
         input_mode=str(config.get("input_mode", "multimodal")),
+        audio_encoder=str(config.get("audio_encoder", "summary_stats")),
     )
     model.load_state_dict(checkpoint["model_state"])
     model.eval()
