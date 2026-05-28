@@ -254,6 +254,7 @@ O plano final esta em `docs/MULTIQT_FINAL_CONSOLIDATION_PLAN.md`. O workspace ex
 - modelo PyTorch audio+texto com fusao concat;
 - avaliacao por precision/recall, negativos criticos e latencia;
 - manifest expandido com `qa_intent_gold.jsonl` + `copilot_intent_gold.jsonl`, incluindo `calculation`, `conversion`, `news`, `web`, `reminder` e `memory` mapeados para o schema MultiQT;
+- materializacao de features log-mel em `.npy` via `Tools/multiqt/materialize_audio_features.py`, para treinar de audio sintetico/publico/consentido sem reter waveform bruto;
 - importacao de shadow logs redigidos via `Tools/multiqt/build_shadow_manifest.py`, com rejeicao de texto/audio bruto e treino por `signal_proxy`;
 - export para Core ML (`notchly-multiqt-v1.mlpackage`/`.mlmodelc`) com sidecar `notchly-multiqt-v1.metadata.json`.
 
@@ -644,7 +645,7 @@ Alguns defaults relevantes de `AppPreferences`:
 - Web search e parcialmente dependente do provedor escolhido e das flags de cloud.
 - RAG usa keyword search como fallback principal; embeddings locais/cloud ainda sao caminho de evolucao.
 - Transcricao realtime cloud esta focada em ElevenLabs.
-- O MultiQT treinado empacotado e um checkpoint hardened gerado com audio sintetico local e augmentations adversariais. Ele passa os gates locais e fica em `enforced` por padrao; ainda deve ser validado contra audio consentido de reunioes reais antes de ser tratado como modelo final de producao.
+- O MultiQT treinado empacotado e um checkpoint hardened gerado com texto gold + proxy acustico/temporal e augmentations adversariais. Ele passa os gates locais e fica em `enforced` por padrao; o caminho de log-mel materializado ja existe, mas a validacao final ainda exige audio consentido de reunioes reais antes de tratar o modelo como producao extrema.
 - Gemini e Claude account login dependem dos CLIs oficiais instalados e autenticados.
 - Perplexity account/OAuth esta indisponivel por design nesta versao.
 - Launch at login aparece nas preferencias, mas a integracao final pode exigir ajustes de signing/entitlements.

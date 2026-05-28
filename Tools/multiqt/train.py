@@ -16,6 +16,7 @@ from typing import Any
 from common import DEFAULT_LABELS_PATH, binary_metrics, load_labels, read_jsonl, safe_div, write_json, write_jsonl
 
 try:
+    import numpy as np
     import torch
     import torchaudio
     from torch import nn
@@ -273,7 +274,7 @@ def build_vocab(rows: list[dict[str, Any]], min_count: int, max_size: int) -> di
 
 def audio_cache_key(row: dict[str, Any], fallback: int) -> str:
     if row.get("audio_feature_source") != "signal_proxy":
-        return str(row.get("audio_feature_path") or row.get("audio_path") or fallback)
+        return str(row.get("audio_feature_source") or "logmel") + ":" + str(row.get("audio_feature_path") or row.get("audio_path") or fallback)
     fields = [
         "start_ms",
         "end_ms",
@@ -321,6 +322,9 @@ def load_logmel(
     if row.get("audio_feature_source") == "signal_proxy":
         return proxy_logmel(row, max_frames)
 
+    if row.get("audio_feature_path"):
+        return load_materialized_logmel(row, audio_root, max_frames)
+
     audio_path = Path(str(row["audio_path"]))
     if not audio_path.is_absolute():
         audio_path = audio_root / audio_path
@@ -337,6 +341,33 @@ def load_logmel(
     mean = features.mean()
     std = features.std().clamp_min(1e-4)
     return (features - mean) / std
+
+
+def load_materialized_logmel(row: dict[str, Any], audio_root: Path, max_frames: int) -> torch.Tensor:
+    feature_path = Path(str(row["audio_feature_path"]))
+    if not feature_path.is_absolute():
+        feature_path = audio_root / feature_path
+    if not feature_path.exists():
+        raise FileNotFoundError(f"audio feature file not found for {row.get('id')}: {feature_path}")
+    if feature_path.suffix == ".pt":
+        payload = torch.load(feature_path, map_location="cpu")
+        features = payload if isinstance(payload, torch.Tensor) else torch.tensor(payload, dtype=torch.float32)
+    else:
+        features = torch.from_numpy(np.load(feature_path)).float()
+    if features.ndim != 2:
+        raise ValueError(f"audio feature must be 2D for {row.get('id')}: {feature_path}")
+    if features.shape[0] != 40 and features.shape[1] == 40:
+        features = features.transpose(0, 1)
+    if features.shape[0] != 40:
+        raise ValueError(f"audio feature must have 40 bands for {row.get('id')}: {feature_path}")
+    if features.shape[1] > max_frames:
+        features = features[:, :max_frames]
+    elif features.shape[1] < max_frames:
+        pad = torch.zeros(features.shape[0], max_frames - features.shape[1], dtype=features.dtype)
+        features = torch.cat([features, pad], dim=1)
+    if not torch.isfinite(features).all():
+        raise ValueError(f"audio feature contains non-finite values for {row.get('id')}: {feature_path}")
+    return features.contiguous()
 
 
 def proxy_logmel(row: dict[str, Any], max_frames: int) -> torch.Tensor:

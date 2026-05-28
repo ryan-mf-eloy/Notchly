@@ -92,6 +92,12 @@ def main() -> int:
         help="Use signal_proxy to make the manifest trainable without persisted audio files.",
     )
     parser.add_argument("--max-rows", type=int, default=0)
+    parser.add_argument(
+        "--max-rows-per-label",
+        type=int,
+        default=0,
+        help="Keep at most N rows for each mapped label. Useful for balanced audio smoke datasets.",
+    )
     parser.add_argument("--sample-rate", type=int, default=16000)
     parser.add_argument("--jobs", type=int, default=1, help="Concurrent local `say` jobs for synthetic audio generation.")
     args = parser.parse_args()
@@ -101,7 +107,8 @@ def main() -> int:
     fixture_paths = args.fixtures or [DEFAULT_QA_FIXTURE]
     if args.include_copilot_fixture and DEFAULT_COPILOT_FIXTURE not in fixture_paths:
         fixture_paths.append(DEFAULT_COPILOT_FIXTURE)
-    source_rows = load_fixture_rows(fixture_paths, max_rows=args.max_rows)
+    source_rows = load_fixture_rows(fixture_paths)
+    source_rows = limit_fixture_rows(source_rows, max_rows=args.max_rows, max_rows_per_label=args.max_rows_per_label)
 
     manifests: dict[str, list[dict[str, Any]]] = {"train": [], "dev": [], "test": [], "hard_test": []}
     audio_dir = args.out_dir / "audio"
@@ -153,14 +160,32 @@ def main() -> int:
     return 0
 
 
-def load_fixture_rows(fixture_paths: list[Path], max_rows: int) -> list[tuple[Path, dict[str, Any]]]:
+def load_fixture_rows(fixture_paths: list[Path]) -> list[tuple[Path, dict[str, Any]]]:
     rows: list[tuple[Path, dict[str, Any]]] = []
     for fixture_path in fixture_paths:
         for source in read_jsonl(fixture_path):
             rows.append((fixture_path, source))
-            if max_rows > 0 and len(rows) >= max_rows:
-                return rows
     return rows
+
+
+def limit_fixture_rows(
+    rows: list[tuple[Path, dict[str, Any]]],
+    max_rows: int,
+    max_rows_per_label: int,
+) -> list[tuple[Path, dict[str, Any]]]:
+    if max_rows <= 0 and max_rows_per_label <= 0:
+        return rows
+    output: list[tuple[Path, dict[str, Any]]] = []
+    by_label: dict[str, int] = {}
+    for fixture_path, source in rows:
+        label = LABEL_MAP.get(str(source["label"]), str(source["label"]))
+        if max_rows_per_label > 0 and by_label.get(label, 0) >= max_rows_per_label:
+            continue
+        output.append((fixture_path, source))
+        by_label[label] = by_label.get(label, 0) + 1
+        if max_rows > 0 and len(output) >= max_rows:
+            break
+    return output
 
 
 def row_id_for(source: dict[str, Any], fixture_path: Path, prefix_ids: bool) -> str:

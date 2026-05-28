@@ -56,6 +56,8 @@ python3 Tools/multiqt/build_synthetic_manifest.py \
 
 The expanded path maps Copilot-only intents (`calculation`, `conversion`, `news`, `web`, `reminder`, `memory`) into the MultiQT answerability schema while preserving response-needed truth labels. `signal_proxy` rows are trainable from numeric acoustic/temporal fields and remain a bootstrap/CI path, not a substitute for consented real meeting audio.
 
+For quick audio smoke datasets, use `--max-rows-per-label N` instead of `--max-rows N` so positives and critical negatives stay represented across the small sample.
+
 ## Commands
 
 Install offline training dependencies on the training machine:
@@ -77,6 +79,25 @@ python3 Tools/multiqt/validate_manifest.py \
 ```
 
 Manifests may include `audio_feature_path` and `audio_feature_source` (`logmel`, `signal_proxy`, or `synthetic_logmel`). The production app never stores raw audio for this path. Runtime inference follows the exported `audio_feature_contract`: checkpoints trained on log-mel can consume an in-memory `QuestionAudioLogMelFeature` derived from the short-lived live PCM ring buffer, while `signal_proxy` checkpoints consume a redacted numeric proxy from RMS, peak, energy, noise, duration, pause, confidence, and stability signals.
+
+Materialize log-mel features from a synthetic/public/consented audio manifest so training no longer needs raw waveform access:
+
+```sh
+python3 Tools/multiqt/materialize_audio_features.py \
+  --input-dir Data/multiqt_synthetic \
+  --out-dir Data/multiqt_logmel \
+  --feature-source synthetic_logmel \
+  --redact-audio-path
+python3 Tools/multiqt/validate_manifest.py \
+  Data/multiqt_logmel/train.jsonl \
+  Data/multiqt_logmel/dev.jsonl \
+  Data/multiqt_logmel/test.jsonl \
+  Data/multiqt_logmel/hard_test.jsonl \
+  --audio-root Data/multiqt_logmel \
+  --check-audio
+```
+
+`synthetic_logmel` rows are fixed 40 x `max_frames` `.npy` tensors. They keep the same Core ML input contract as live `logmel`, but remain bootstrap evidence unless the source audio is consented real meeting audio or public/license-compatible speech.
 
 Harden a bootstrap manifest with deterministic ASR and intent stress cases:
 

@@ -192,6 +192,14 @@ def validate_row(
     if check_audio:
         if audio_feature_source == "signal_proxy":
             return
+        has_materialized_feature = isinstance(audio_feature_path, str) and audio_feature_path
+        if has_materialized_feature:
+            resolved = Path(audio_feature_path)
+            if not resolved.is_absolute():
+                resolved = audio_root / resolved
+            if not resolved.exists():
+                add_error(errors, max_errors, f"{location}: audio feature file not found")
+            return
         audio_path = row.get("audio_path")
         if isinstance(audio_path, str):
             resolved = Path(audio_path)
@@ -199,12 +207,6 @@ def validate_row(
                 resolved = audio_root / resolved
             if not resolved.exists():
                 add_error(errors, max_errors, f"{location}: audio file not found")
-        if isinstance(audio_feature_path, str):
-            resolved = Path(audio_feature_path)
-            if not resolved.is_absolute():
-                resolved = audio_root / resolved
-            if not resolved.exists():
-                add_error(errors, max_errors, f"{location}: audio feature file not found")
 
 
 def validate_optional_number(
