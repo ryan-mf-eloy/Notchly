@@ -1,0 +1,11 @@
+{
+  "provider": "mock",
+  "authMode": "mock",
+  "chatModel": "gpt-5-mini",
+  "realtimeModel": "gpt-realtime",
+  "transcriptionModel": "gpt-4o-mini-transcribe",
+  "cloudProcessingEnabled": false,
+  "legacyAPIKeyAccessEnabled": false,
+  "localOnlyMode": true,
+  "defaultLanguage": "en-US"
+}

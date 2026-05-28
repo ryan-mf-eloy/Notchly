@@ -1,0 +1,247 @@
+{
+  "version": 1,
+  "minimumInputCharacters": 3,
+  "thresholds": {
+    "highPrecision": {
+      "activation": 0.8,
+      "directedActivation": 0.7,
+      "wakeWordActivation": 0.7,
+      "partialActivation": 0.9,
+      "negativeBlock": 0.62,
+      "minimumSignals": 2,
+      "partialMinimumTokens": 4
+    },
+    "balanced": {
+      "activation": 0.74,
+      "directedActivation": 0.68,
+      "wakeWordActivation": 0.68,
+      "partialActivation": 0.84,
+      "negativeBlock": 0.66,
+      "minimumSignals": 2,
+      "partialMinimumTokens": 4
+    },
+    "highCoverage": {
+      "activation": 0.68,
+      "directedActivation": 0.64,
+      "wakeWordActivation": 0.64,
+      "partialActivation": 0.78,
+      "negativeBlock": 0.72,
+      "minimumSignals": 1,
+      "partialMinimumTokens": 3
+    }
+  },
+  "weights": {
+    "semantic": 0.52,
+    "syntax": 0.22,
+    "tool": 0.18,
+    "direction": 0.1,
+    "finality": 0.05,
+    "asrConfidence": 0.06,
+    "negative": 0.4,
+    "meaningfulContent": 0.08
+  },
+  "signals": {
+    "acceptedIntent": "accepted_intent",
+    "directedToCopilot": "directed_to_copilot",
+    "shortcut": "shortcut",
+    "typed": "typed",
+    "semanticIntent": "semantic_intent",
+    "questionSyntax": "question_syntax",
+    "questionPunctuation": "question_punctuation",
+    "meaningfulContent": "meaningful_content",
+    "toolIntent": "tool_intent",
+    "semanticPrefixCue": "semantic_prefix_cue",
+    "wakeWord": "wake_word",
+    "finalUtterance": "final_utterance"
+  },
+  "wakeWords": [],
+  "surfaceNegativeSignals": [
+    "small_talk",
+    "operational_check",
+    "reported_question",
+    "rhetorical",
+    "self_answered",
+    "fragment",
+    "noun_phrase_or_title",
+    "declarative_without_interrogative_syntax"
+  ],
+  "semanticOverrideSurfaceNegativeSignals": [
+    "declarative_without_interrogative_syntax"
+  ],
+  "partialIncompleteCues": [],
+  "stopWords": [],
+  "lowInformationWords": [],
+  "numberWords": [],
+  "operatorWords": [],
+  "semanticLabels": [
+    {
+      "label": "answerable_question",
+      "kind": "answerable_question",
+      "tool": "answer_synthesis",
+      "confidence": 0.82,
+      "weight": 1.0,
+      "cues": [],
+      "prefixCues": [],
+      "signals": [
+        "semantic_intent",
+        "answerable_question"
+      ]
+    },
+    {
+      "label": "action_request",
+      "kind": "action_request",
+      "tool": "answer_synthesis",
+      "confidence": 0.82,
+      "weight": 1.12,
+      "cues": [],
+      "prefixCues": [],
+      "signals": [
+        "semantic_intent",
+        "action_request"
+      ]
+    }
+  ],
+  "toolLabels": [
+    {
+      "label": "calculation",
+      "kind": "calculation",
+      "tool": "answer_synthesis",
+      "confidence": 0.91,
+      "weight": 1.0,
+      "requiresWeb": false,
+      "cues": [],
+      "signals": [
+        "tool_intent",
+        "calculation_request",
+        "numeric_expression"
+      ]
+    },
+    {
+      "label": "conversion",
+      "kind": "conversion",
+      "tool": "answer_synthesis",
+      "confidence": 0.88,
+      "weight": 0.92,
+      "requiresWeb": false,
+      "cues": [],
+      "signals": [
+        "tool_intent",
+        "conversion_request",
+        "numeric_expression"
+      ]
+    },
+    {
+      "label": "reminder",
+      "kind": "reminder",
+      "tool": "reminder",
+      "confidence": 0.9,
+      "weight": 1.0,
+      "requiresWeb": false,
+      "cues": [],
+      "signals": [
+        "tool_intent",
+        "reminder_request",
+        "action_request"
+      ]
+    },
+    {
+      "label": "news_search",
+      "kind": "news_search",
+      "tool": "web_search",
+      "confidence": 0.91,
+      "weight": 1.0,
+      "requiresWeb": true,
+      "cues": [],
+      "signals": [
+        "tool_intent",
+        "news_request",
+        "web_required"
+      ]
+    },
+    {
+      "label": "web_search",
+      "kind": "web_search",
+      "tool": "web_search",
+      "confidence": 0.89,
+      "weight": 0.96,
+      "requiresWeb": true,
+      "cues": [],
+      "signals": [
+        "tool_intent",
+        "search_request",
+        "web_required"
+      ]
+    },
+    {
+      "label": "memory_lookup",
+      "kind": "memory_lookup",
+      "tool": "local_memory",
+      "confidence": 0.86,
+      "weight": 0.92,
+      "requiresWeb": false,
+      "cues": [],
+      "signals": [
+        "tool_intent",
+        "memory_lookup",
+        "local_context"
+      ]
+    }
+  ],
+  "negativeLabels": [
+    {
+      "label": "small_talk",
+      "kind": "small_talk",
+      "tool": "unavailable",
+      "confidence": 0.86,
+      "weight": 1.0,
+      "cues": [],
+      "signals": [
+        "small_talk"
+      ]
+    },
+    {
+      "label": "operational_check",
+      "kind": "ambient_noise",
+      "tool": "unavailable",
+      "confidence": 0.88,
+      "weight": 1.0,
+      "cues": [],
+      "signals": [
+        "operational_check"
+      ]
+    },
+    {
+      "label": "reported_question",
+      "kind": "statement",
+      "tool": "unavailable",
+      "confidence": 0.84,
+      "weight": 0.92,
+      "cues": [],
+      "signals": [
+        "reported_question"
+      ]
+    },
+    {
+      "label": "rhetorical",
+      "kind": "ambient_noise",
+      "tool": "unavailable",
+      "confidence": 0.8,
+      "weight": 0.86,
+      "cues": [],
+      "signals": [
+        "rhetorical"
+      ]
+    },
+    {
+      "label": "title_or_note",
+      "kind": "statement",
+      "tool": "unavailable",
+      "confidence": 0.76,
+      "weight": 0.78,
+      "cues": [],
+      "signals": [
+        "noun_phrase_or_title"
+      ]
+    }
+  ]
+}

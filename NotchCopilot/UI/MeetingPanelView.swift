@@ -1,0 +1,2261 @@
+import AppKit
+import SwiftUI
+
+struct MeetingPanelView: View {
+    @ObservedObject var appState: AppState
+    @Environment(\.islandDesignMode) private var islandDesignMode
+    @State private var hoveredPresentationMode: QuestionAnswerPresentationMode?
+    @State private var pressedPresentationMode: QuestionAnswerPresentationMode?
+    private let primaryColor = Color.white.opacity(0.84)
+    private let presentationToggleWidth: CGFloat = 176
+    private let presentationToggleHeight: CGFloat = 26
+    private let presentationTopPadding: CGFloat = 2
+    private let presentationContentSpacing: CGFloat = 16
+    private var panelWidth: CGFloat { appState.expandedPanelContentWidth }
+    private var panelHeight: CGFloat { appState.expandedPanelContentHeight }
+
+    private var segments: [TranscriptSegment] {
+        appState.presentationTranscriptSegments
+    }
+
+    private var hasQuestionFlow: Bool {
+        appState.activeQuestion != nil ||
+            appState.suggestedAnswer != nil ||
+            !appState.streamingAnswerText.isEmpty ||
+            (appState.isShowingCopilotAnswerDetail && appState.activeCopilotInteraction != nil)
+    }
+
+    private var qaBodyHeight: CGFloat {
+        let chromeHeight = shouldShowPresentationToggle ? presentationToggleHeight + presentationTopPadding + presentationContentSpacing : 0
+        return max(150, panelHeight - chromeHeight)
+    }
+
+    private var readingColumnWidth: CGFloat {
+        max(1, min(panelWidth - 18, 620))
+    }
+
+    private var shouldShowPresentationToggle: Bool {
+        appState.currentMeeting != nil
+    }
+
+    private var shouldShowAmbientAnswerScreen: Bool {
+        appState.currentMeeting == nil &&
+            (appState.activeQuestion != nil ||
+                appState.suggestedAnswer != nil ||
+                !appState.streamingAnswerText.isEmpty ||
+                (appState.isShowingCopilotAnswerDetail && appState.activeCopilotInteraction != nil) ||
+                appState.answerStage.isInProgress)
+    }
+
+    var body: some View {
+        VStack(alignment: .center, spacing: 0) {
+            if appState.isShowingCopilotHistory {
+                CopilotTimelinePanelView(
+                    appState: appState,
+                    width: panelWidth,
+                    height: panelHeight,
+                    primaryColor: primaryColor
+                )
+            } else if appState.currentMeeting == nil {
+                if shouldShowAmbientAnswerScreen {
+                    CopilotIsolatedAnswerPanelView(
+                        appState: appState,
+                        width: panelWidth,
+                        height: panelHeight,
+                        primaryColor: primaryColor
+                    )
+                } else {
+                    CopilotTimelinePanelView(
+                        appState: appState,
+                        width: panelWidth,
+                        height: panelHeight,
+                        primaryColor: primaryColor
+                    )
+                }
+            } else if hasQuestionFlow {
+                answerDetail
+            } else {
+                transcriptStream(height: panelHeight)
+            }
+        }
+        .frame(width: panelWidth, height: panelHeight)
+        .animation(.easeInOut(duration: 0.14), value: appState.questionAnswerPresentationMode)
+        .animation(.easeInOut(duration: 0.14), value: appState.selectedQuestionId)
+        .animation(.easeOut(duration: 0.14), value: appState.streamingAnswerText)
+    }
+
+    private var presentationToggle: some View {
+        HStack(spacing: 2) {
+            ForEach(QuestionAnswerPresentationMode.allCases) { mode in
+                let isSelected = appState.questionAnswerPresentationMode == mode
+                Button {
+                    selectPresentationMode(mode)
+                } label: {
+                    Text(mode.title)
+                }
+                .buttonStyle(PresentationToggleButtonStyle(
+                    isSelected: isSelected,
+                    isHovering: hoveredPresentationMode == mode,
+                    isOverlayPressed: pressedPresentationMode == mode,
+                    primaryColor: primaryColor,
+                    designMode: islandDesignMode
+                ))
+                .contentShape(Rectangle())
+                .overlay {
+                    MouseDownActionOverlay(
+                        action: { selectPresentationMode(mode) },
+                        onHover: { hovering in
+                            hoveredPresentationMode = hovering ? mode : (hoveredPresentationMode == mode ? nil : hoveredPresentationMode)
+                        },
+                        onPress: { pressing in
+                            pressedPresentationMode = pressing ? mode : (pressedPresentationMode == mode ? nil : pressedPresentationMode)
+                        }
+                    )
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .contentShape(Rectangle())
+                }
+                .help(mode.title)
+            }
+        }
+        .padding(2)
+        .frame(width: min(readingColumnWidth, presentationToggleWidth), height: presentationToggleHeight)
+        .background(
+            IslandGlassFill(
+                shape: RoundedRectangle(cornerRadius: 7, style: .continuous),
+                mode: islandDesignMode,
+                solidOpacity: 0.026,
+                glassTintOpacity: 0.044,
+                glassFallbackOpacity: 0.030
+            )
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 7, style: .continuous)
+                .stroke(Color.white.opacity(islandDesignMode == .liquidGlass ? 0.075 : 0.042), lineWidth: 0.5)
+        )
+    }
+
+    private var answerDetail: some View {
+        VStack(alignment: .center, spacing: shouldShowPresentationToggle ? presentationContentSpacing : 0) {
+            if shouldShowPresentationToggle {
+                presentationToggle
+                    .frame(width: readingColumnWidth, height: presentationToggleHeight, alignment: .center)
+            }
+            if shouldShowPresentationToggle && appState.questionAnswerPresentationMode == .transcript {
+                transcriptStream(height: qaBodyHeight)
+            } else {
+                qaColumn
+                    .frame(width: readingColumnWidth, height: qaBodyHeight, alignment: .topLeading)
+            }
+        }
+        .padding(.top, shouldShowPresentationToggle ? presentationTopPadding : 0)
+        .frame(width: panelWidth, height: panelHeight, alignment: .top)
+    }
+
+    private var qaColumn: some View {
+        ScrollView(.vertical, showsIndicators: true) {
+            VStack(alignment: .leading, spacing: 18) {
+                questionTitleRow
+                    .layoutPriority(1)
+
+                RichAnswerRenderer(
+                    text: answerTextForDisplay,
+                    richAnswer: selectedRichAnswer,
+                    format: selectedAnswerFormat,
+                    sources: selectedSources,
+                    confidence: appState.suggestedAnswer?.confidence ?? appState.activeCopilotInteraction?.confidence,
+                    riskLevel: appState.suggestedAnswer?.riskLevel,
+                    tone: appState.suggestedAnswer?.suggestedTone,
+                    caveats: appState.suggestedAnswer?.caveats ?? [],
+                    allowRemoteLinkPreview: allowRemoteLinkPreview,
+                    leadStyle: .plain,
+                    onCopy: { appState.copySelectedAnswerToPasteboard() },
+                    onOpenSources: { appState.openSelectedAnswerSources() },
+                    onRegenerateWithWeb: { appState.regenerateSelectedCopilotAnswerWithWeb() }
+                )
+                    .frame(maxWidth: .infinity, alignment: .leading)
+
+                copilotQuickActions
+            }
+            .frame(maxWidth: .infinity, alignment: .topLeading)
+            .padding(.bottom, 10)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .protectedContentRegion(appState.preferences.stealthModeEnabled)
+    }
+
+    private var questionTitleText: String {
+        appState.activeQuestion?.rawText ??
+            appState.detectedQuestion ??
+            (appState.isShowingCopilotAnswerDetail ? appState.activeCopilotInteraction?.prompt : nil) ??
+            ""
+    }
+
+    private var questionTitleRow: some View {
+        HStack(alignment: .firstTextBaseline, spacing: 10) {
+            if appState.questionAnswerQueue.count > 1 {
+                questionNavigationTextButton("‹", help: "Previous question") {
+                    withAnimation(.interactiveSpring(response: 0.22, dampingFraction: 0.9)) {
+                        appState.selectPreviousQuestion()
+                    }
+                }
+            }
+
+            Text(questionTitleText)
+                .font(.system(size: 16.1, weight: .medium))
+                .foregroundStyle(primaryColor.opacity(0.9))
+                .multilineTextAlignment(.leading)
+                .lineSpacing(4.4)
+                .fixedSize(horizontal: false, vertical: true)
+                .frame(maxWidth: .infinity, alignment: .leading)
+
+            if appState.questionAnswerQueue.count > 1 {
+                questionNavigationTextButton("›", help: "Next question") {
+                    withAnimation(.interactiveSpring(response: 0.22, dampingFraction: 0.9)) {
+                        appState.selectNextQuestion()
+                    }
+                }
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private var answerTextForDisplay: String {
+        let text = appState.visibleAnswerText
+        if !text.isEmpty {
+            return text
+        }
+        if appState.isShowingCopilotAnswerDetail,
+           let response = appState.activeCopilotInteraction?.response.trimmingCharacters(in: .whitespacesAndNewlines),
+           !response.isEmpty {
+            return response
+        }
+        if appState.answerStage == .failed {
+            return appState.copilotFailureMessage ?? "Nao consegui concluir esta acao agora."
+        }
+        if appState.currentMeeting != nil, appState.copilotRuntimeState == .paused {
+            return "Notchly paused during recording"
+        }
+        return "\(appState.copilotRuntimeState.displayText)..."
+    }
+
+    private var copilotQuickActions: some View {
+        HStack(spacing: 8) {
+            IconButton(systemName: "doc.on.doc", help: "Copy", size: .compact) {
+                appState.copySelectedAnswerToPasteboard()
+            }
+            IconButton(systemName: "link", help: "Open sources", isDisabled: !hasSourceLink, size: .compact) {
+                appState.openSelectedAnswerSources()
+            }
+            IconButton(systemName: "hand.thumbsup", help: "Useful", size: .compact) {
+                appState.recordCopilotFeedback(.markedUseful, note: "Marked useful")
+            }
+            IconButton(systemName: "hand.thumbsdown", help: "Incorrect", size: .compact) {
+                appState.recordCopilotFeedback(.markedWrong, note: "Marked incorrect")
+            }
+            IconButton(systemName: "globe", help: "Regenerate with web", isDisabled: appState.currentMeeting != nil, size: .compact) {
+                appState.regenerateSelectedCopilotAnswerWithWeb()
+            }
+            Spacer(minLength: 0)
+            if appState.currentMeeting == nil {
+                IconButton(systemName: "pause", help: "Pause Notchly", size: .compact) {
+                    appState.pauseCopilot()
+                }
+                IconButton(systemName: "trash", help: "Clear Notchly history", role: .destructive, size: .compact) {
+                    appState.clearCopilotHistory()
+                }
+            }
+        }
+        .padding(.top, 2)
+        .opacity(appState.answerStage.isInProgress ? 0.54 : 1)
+    }
+
+    private var hasSourceLink: Bool {
+        selectedSources.contains { source in
+            guard let reference = source.reference?.trimmingCharacters(in: .whitespacesAndNewlines) else { return false }
+            return URL(string: reference) != nil
+        }
+    }
+
+    private var selectedSources: [AnswerSource] {
+        appState.suggestedAnswer?.usedSources ?? appState.activeCopilotInteraction?.sources ?? []
+    }
+
+    private var selectedRichAnswer: RichAnswerPayload? {
+        appState.suggestedAnswer?.richAnswer ?? appState.activeCopilotInteraction?.richAnswer
+    }
+
+    private var selectedAnswerFormat: CopilotAnswerFormat? {
+        appState.suggestedAnswer?.answerFormat ?? inferredFormat(tool: appState.activeCopilotInteraction?.tool, intent: appState.activeCopilotInteraction?.intent)
+    }
+
+    private var allowRemoteLinkPreview: Bool {
+        !appState.preferences.localOnlyMode
+    }
+
+    private func inferredFormat(tool: CopilotToolKind?, intent: CopilotIntentKind?) -> CopilotAnswerFormat? {
+        if intent == .newsSearch { return .newsWithSources }
+        switch tool {
+        case .calculator:
+            return .calculation
+        case .reminder:
+            return .reminderConfirmation
+        case .localMemory:
+            return .memoryResults
+        case .webSearch:
+            return .bullets
+        case .unavailable:
+            return .errorState
+        case .answerSynthesis, .none:
+            return nil
+        }
+    }
+
+    private func selectPresentationMode(_ mode: QuestionAnswerPresentationMode) {
+        guard appState.questionAnswerPresentationMode != mode else { return }
+
+        withAnimation(.interactiveSpring(response: 0.24, dampingFraction: 0.9)) {
+            appState.selectPresentationMode(mode)
+        }
+    }
+
+    private func questionNavigationTextButton(_ title: String, help: String, action: @escaping () -> Void) -> some View {
+        QuestionNavigationTextButton(title: title, help: help, primaryColor: primaryColor, action: action)
+    }
+
+    private func transcriptStream(height: CGFloat) -> some View {
+        ZStack(alignment: .bottom) {
+            if segments.isEmpty {
+                Color.clear
+                emptyStateView
+                    .transition(.opacity)
+            } else {
+                LiveTranscriptScrollView(
+                    segments: segments,
+                    showOriginalText: appState.preferences.showOriginalText,
+                    showTranslatedText: appState.preferences.showTranslatedText
+                )
+                .frame(width: panelWidth, height: height)
+                .protectedContentRegion(appState.preferences.stealthModeEnabled)
+                .transition(.opacity)
+
+                bottomScrollFade
+            }
+        }
+        .frame(height: height)
+        .clipped()
+        .overlay(alignment: .topTrailing) {
+            if appState.shouldShowTranscriptQuestionLoadingIndicator {
+                TranscriptQuestionLoadingIndicator(primaryColor: primaryColor, status: transcriptQuestionStatusText)
+                    .padding(.top, 8)
+                    .padding(.trailing, 10)
+                    .transition(.opacity.combined(with: .scale(scale: 0.92)))
+            }
+        }
+        .overlay(alignment: .topLeading) {
+            if let badgeText = transcriptDiagnosticsBadgeText, !segments.isEmpty {
+                Text(badgeText)
+                    .font(.system(size: 9.2, weight: .medium))
+                    .foregroundStyle(Color.white.opacity(0.46))
+                    .lineLimit(1)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 4)
+                    .background(
+                        Capsule(style: .continuous)
+                            .fill(Color.black.opacity(0.18))
+                    )
+                    .overlay(
+                        Capsule(style: .continuous)
+                            .stroke(Color.white.opacity(0.045), lineWidth: 0.5)
+                    )
+                    .padding(.top, 7)
+                    .padding(.leading, 9)
+                    .allowsHitTesting(false)
+            }
+        }
+        .animation(.easeOut(duration: 0.12), value: segments.isEmpty)
+        .animation(.easeOut(duration: 0.16), value: appState.shouldShowTranscriptQuestionLoadingIndicator)
+    }
+
+    private var transcriptDiagnosticsBadgeText: String? {
+        guard appState.currentMeeting != nil else { return nil }
+        let engine = segments.reversed().compactMap(\.transcriptionEngine).first ?? .appleSpeech
+        let vocabularyActive = appState.speechVocabularyTerms.contains { $0.enabled && !$0.isSystemSeed }
+        let suffix = vocabularyActive ? " + Vocabulary" : ""
+        switch engine {
+        case .speechAnalyzer:
+            return "SpeechAnalyzer\(suffix)"
+        case .dictationTranscriber:
+            return "DictationTranscriber\(suffix)"
+        case .appleSpeech:
+            return "Apple Speech\(suffix)"
+        case .elevenLabs:
+            return "ElevenLabs"
+        case .unavailable:
+            return vocabularyActive ? "Apple Speech + Vocabulary" : "Apple Speech"
+        }
+    }
+
+    private var transcriptQuestionStatusText: String {
+        if appState.currentMeeting != nil, appState.copilotRuntimeState == .paused {
+            return "Notchly paused during recording"
+        }
+        return appState.copilotRuntimeState.displayText
+    }
+
+    private var bottomScrollFade: some View {
+        VStack(spacing: 0) {
+            Spacer(minLength: 0)
+            ZStack {
+                VisualEffectBlur(material: .hudWindow, blendingMode: .withinWindow)
+                    .opacity(islandDesignMode == .liquidGlass ? 0.18 : 0.24)
+                    .mask(
+                        LinearGradient(
+                            stops: [
+                                .init(color: .clear, location: 0),
+                                .init(color: .black.opacity(0.45), location: 0.58),
+                                .init(color: .black, location: 1)
+                            ],
+                            startPoint: .top,
+                            endPoint: .bottom
+                        )
+                    )
+                LinearGradient(
+                    stops: [
+                        .init(color: .clear, location: 0),
+                        .init(color: Color.black.opacity(islandDesignMode == .liquidGlass ? 0.07 : 0.10), location: 0.55),
+                        .init(color: Color.black.opacity(islandDesignMode == .liquidGlass ? 0.20 : 0.28), location: 1)
+                    ],
+                    startPoint: .top,
+                    endPoint: .bottom
+                )
+            }
+            .frame(height: 22)
+            .allowsHitTesting(false)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .allowsHitTesting(false)
+    }
+
+    private var emptyStateText: String {
+        switch appState.currentMeeting?.status {
+        case .listening:
+            appState.meetingTranscriptionStatus == .idle ? "Loading transcript..." : appState.meetingTranscriptionStatus.displayText
+        case .paused:
+            "Paused"
+        case .summarizing:
+            "Summarizing..."
+        default:
+            "Ready to start"
+        }
+    }
+
+    private var shouldShowLoadingIndicator: Bool {
+        appState.currentMeeting?.status == .listening && segments.isEmpty
+    }
+
+    private var emptyStateView: some View {
+        HStack(spacing: 8) {
+            if shouldShowLoadingIndicator {
+                ProgressView()
+                    .controlSize(.small)
+                    .scaleEffect(0.58)
+                    .tint(primaryColor.opacity(0.58))
+            }
+            Text(emptyStateText)
+                .font(.system(size: 15.4, weight: .light))
+                .foregroundStyle(primaryColor.opacity(0.68))
+                .lineLimit(1)
+                .minimumScaleFactor(0.72)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
+    }
+}
+
+private struct CopilotIsolatedAnswerPanelView: View {
+    @ObservedObject var appState: AppState
+    var width: CGFloat
+    var height: CGFloat
+    var primaryColor: Color
+    @Environment(\.islandDesignMode) private var islandDesignMode
+
+    private var secondaryColor: Color { primaryColor.opacity(0.56) }
+    private var dividerColor: Color { Color.white.opacity(islandDesignMode == .liquidGlass ? 0.085 : 0.052) }
+    private var questionRowMaxWidth: CGFloat { max(220, min(width - 72, 660)) }
+    private var questionTextMaxWidth: CGFloat { max(160, questionRowMaxWidth) }
+
+    private var questionText: String {
+        let candidates = [
+            appState.activeQuestion?.rawText,
+            appState.detectedQuestion,
+            appState.copilotPushToTalkTranscript,
+            appState.activeCopilotInteraction?.prompt
+        ]
+        return candidates
+            .compactMap { $0?.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .first { !$0.isEmpty } ?? ""
+    }
+
+    private var answerText: String {
+        let visible = appState.visibleAnswerText.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !visible.isEmpty { return visible }
+        if appState.isShowingCopilotAnswerDetail,
+           let response = appState.activeCopilotInteraction?.response.trimmingCharacters(in: .whitespacesAndNewlines),
+           !response.isEmpty {
+            return response
+        }
+        if appState.answerStage == .failed {
+            return appState.copilotFailureMessage ?? appState.copilotPushToTalkErrorMessage ?? "Could not complete this request."
+        }
+        return ""
+    }
+
+    var body: some View {
+        ScrollView(.vertical, showsIndicators: true) {
+            VStack(alignment: .leading, spacing: 18) {
+                questionRow
+
+                Rectangle()
+                    .fill(dividerColor)
+                    .frame(height: 0.5)
+
+                answerSection
+            }
+            .frame(maxWidth: .infinity, alignment: .topLeading)
+            .padding(.bottom, 8)
+        }
+        .frame(width: width, height: height, alignment: .topLeading)
+        .protectedContentRegion(appState.preferences.stealthModeEnabled)
+        .animation(.easeOut(duration: 0.14), value: appState.answerStage)
+        .animation(.easeOut(duration: 0.14), value: answerText)
+    }
+
+    private var questionRow: some View {
+        Text(questionText)
+            .font(.system(size: 17, weight: .semibold))
+            .foregroundStyle(primaryColor.opacity(0.90))
+            .multilineTextAlignment(.leading)
+            .lineSpacing(4)
+            .fixedSize(horizontal: false, vertical: true)
+            .frame(maxWidth: questionTextMaxWidth, alignment: .leading)
+        .frame(maxWidth: questionRowMaxWidth, alignment: .leading)
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    @ViewBuilder
+    private var answerSection: some View {
+        if answerText.isEmpty && appState.answerStage.isInProgress {
+            HStack(spacing: 9) {
+                ProgressView()
+                    .controlSize(.small)
+                    .scaleEffect(0.64)
+                    .tint(secondaryColor)
+                Text(appState.currentMeeting != nil && appState.copilotRuntimeState == .paused ? "Notchly paused during recording" : appState.copilotRuntimeState.displayText)
+                    .font(.system(size: 13, weight: .medium))
+                    .foregroundStyle(secondaryColor)
+                    .lineLimit(1)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.top, 2)
+        } else {
+            RichAnswerRenderer(
+                text: answerText,
+                richAnswer: appState.suggestedAnswer?.richAnswer ?? appState.activeCopilotInteraction?.richAnswer,
+                format: appState.suggestedAnswer?.answerFormat ?? inferredFormat(tool: appState.activeCopilotInteraction?.tool, intent: appState.activeCopilotInteraction?.intent),
+                sources: appState.suggestedAnswer?.usedSources ?? appState.activeCopilotInteraction?.sources ?? [],
+                confidence: appState.suggestedAnswer?.confidence ?? appState.activeCopilotInteraction?.confidence,
+                riskLevel: appState.suggestedAnswer?.riskLevel,
+                tone: appState.suggestedAnswer?.suggestedTone,
+                caveats: appState.suggestedAnswer?.caveats ?? [],
+                allowRemoteLinkPreview: !appState.preferences.localOnlyMode,
+                leadStyle: .plain,
+                onCopy: { appState.copySelectedAnswerToPasteboard() },
+                onOpenSources: { appState.openSelectedAnswerSources() },
+                onRegenerateWithWeb: { appState.regenerateSelectedCopilotAnswerWithWeb() }
+            )
+                .frame(maxWidth: .infinity, alignment: .leading)
+        }
+    }
+
+    private func inferredFormat(tool: CopilotToolKind?, intent: CopilotIntentKind?) -> CopilotAnswerFormat? {
+        if intent == .newsSearch { return .newsWithSources }
+        switch tool {
+        case .calculator:
+            return .calculation
+        case .reminder:
+            return .reminderConfirmation
+        case .localMemory:
+            return .memoryResults
+        case .webSearch:
+            return .bullets
+        case .unavailable:
+            return .errorState
+        case .answerSynthesis, .none:
+            return nil
+        }
+    }
+}
+
+private struct CopilotTimelinePanelView: View {
+    @ObservedObject var appState: AppState
+    var width: CGFloat
+    var height: CGFloat
+    var primaryColor: Color
+    @Environment(\.islandDesignMode) private var islandDesignMode
+    @State private var selectedEntryID: String?
+
+    private var secondaryColor: Color { primaryColor.opacity(0.56) }
+    private var tertiaryColor: Color { primaryColor.opacity(0.34) }
+
+    private var entries: [CopilotTimelineEntry] {
+        var items = appState.copilotInteractions.map(CopilotTimelineEntry.persisted)
+
+        if let activeInteraction = appState.activeCopilotInteraction,
+           !items.contains(where: { $0.interaction?.id == activeInteraction.id }) {
+            items.insert(.persisted(activeInteraction), at: 0)
+        } else if let transient = CopilotTimelineEntry.transient(from: appState),
+                  !items.contains(where: { $0.questionId == transient.questionId }) {
+            items.insert(transient, at: 0)
+        }
+
+        return items.sorted { lhs, rhs in
+            if lhs.isLive != rhs.isLive { return lhs.isLive && !rhs.isLive }
+            return lhs.createdAt > rhs.createdAt
+        }
+    }
+
+    private var entryIDs: [String] {
+        entries.map(\.id)
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            if entries.isEmpty {
+                emptyTimeline
+                    .frame(width: width, height: height, alignment: .center)
+            } else {
+                timelineList
+                    .frame(width: width, height: height, alignment: .topLeading)
+            }
+        }
+        .frame(width: width, height: height, alignment: .topLeading)
+        .protectedContentRegion(appState.preferences.stealthModeEnabled)
+        .onAppear(perform: ensureSelection)
+        .onChange(of: entryIDs) {
+            ensureSelection()
+        }
+        .animation(.easeOut(duration: 0.14), value: selectedEntryID)
+        .animation(.easeOut(duration: 0.16), value: entryIDs)
+    }
+
+    private var timelineList: some View {
+        ScrollView(.vertical, showsIndicators: true) {
+            LazyVStack(alignment: .leading, spacing: 8) {
+                ForEach(Array(entries.enumerated()), id: \.element.id) { index, entry in
+                    let previous = index > 0 ? entries[index - 1] : nil
+                    if shouldShowDayDivider(for: entry, previous: previous) {
+                        dayDivider(entry.dayLabel)
+                            .padding(.top, index == 0 ? 0 : 4)
+                    }
+
+                    CopilotTimelineRow(
+                        entry: entry,
+                        isExpanded: isExpanded(entry, at: index),
+                        primaryColor: primaryColor,
+                        secondaryColor: secondaryColor,
+                        tertiaryColor: tertiaryColor,
+                        designMode: islandDesignMode,
+                        allowRemoteLinkPreview: !appState.preferences.localOnlyMode,
+                        onSelect: {
+                            select(entry)
+                        },
+                        onCopy: {
+                            copy(entry)
+                        },
+                        onOpenSources: {
+                            openSources(entry)
+                        },
+                        onOpenAnswer: {
+                            openAnswer(entry)
+                        },
+                        onUseful: {
+                            feedback(.markedUseful, for: entry)
+                        },
+                        onWrong: {
+                            feedback(.markedWrong, for: entry)
+                        },
+                        onRegenerateLocal: {
+                            regenerate(entry, forceWeb: false)
+                        },
+                        onRegenerateWeb: {
+                            regenerate(entry, forceWeb: true)
+                        }
+                    )
+                }
+            }
+            .padding(.top, 2)
+            .padding(.trailing, 4)
+            .padding(.bottom, 8)
+        }
+    }
+
+    private var emptyTimeline: some View {
+        VStack(spacing: 7) {
+            Image(systemName: "clock")
+                .font(.system(size: 14, weight: .medium))
+                .foregroundStyle(tertiaryColor)
+            Text("No interactions yet")
+                .font(.system(size: 12, weight: .medium))
+                .foregroundStyle(secondaryColor)
+                .lineLimit(1)
+        }
+    }
+
+    private func dayDivider(_ label: String) -> some View {
+        HStack(spacing: 8) {
+            Text(label)
+                .font(.system(size: 9.5, weight: .semibold))
+                .foregroundStyle(tertiaryColor)
+                .lineLimit(1)
+            Rectangle()
+                .fill(Color.white.opacity(islandDesignMode == .liquidGlass ? 0.085 : 0.052))
+                .frame(height: 0.5)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private func ensureSelection() {
+        guard let first = entries.first else {
+            selectedEntryID = nil
+            return
+        }
+        if let selectedEntryID, entries.contains(where: { $0.id == selectedEntryID }) {
+            return
+        }
+        selectedEntryID = first.id
+        if let interaction = first.interaction {
+            appState.selectCopilotInteraction(interaction)
+        }
+    }
+
+    private func isExpanded(_ entry: CopilotTimelineEntry, at index: Int) -> Bool {
+        selectedEntryID == entry.id || (selectedEntryID == nil && index == 0)
+    }
+
+    private func shouldShowDayDivider(for entry: CopilotTimelineEntry, previous: CopilotTimelineEntry?) -> Bool {
+        guard let previous else { return true }
+        return !Calendar.current.isDate(entry.createdAt, inSameDayAs: previous.createdAt)
+    }
+
+    private func select(_ entry: CopilotTimelineEntry) {
+        selectedEntryID = entry.id
+        if let interaction = entry.interaction {
+            appState.selectCopilotInteraction(interaction)
+        }
+    }
+
+    private func copy(_ entry: CopilotTimelineEntry) {
+        if let interaction = entry.interaction {
+            appState.copyCopilotInteractionToPasteboard(interaction)
+        } else {
+            appState.copySelectedAnswerToPasteboard()
+        }
+    }
+
+    private func openSources(_ entry: CopilotTimelineEntry) {
+        if let interaction = entry.interaction {
+            appState.openCopilotInteractionSources(interaction)
+        } else {
+            appState.openSelectedAnswerSources()
+        }
+    }
+
+    private func openAnswer(_ entry: CopilotTimelineEntry) {
+        select(entry)
+        if let interaction = entry.interaction {
+            appState.openCopilotInteractionAnswer(interaction)
+        } else {
+            appState.showSelectedCopilotAnswerPanel()
+        }
+    }
+
+    private func feedback(_ kind: QuestionAnswerFeedbackKind, for entry: CopilotTimelineEntry) {
+        guard let interaction = entry.interaction else {
+            appState.recordCopilotFeedback(kind, note: kind == .markedUseful ? "Marked useful" : "Marked incorrect")
+            return
+        }
+        appState.recordCopilotFeedback(kind, note: kind == .markedUseful ? "Marked useful" : "Marked incorrect", for: interaction)
+    }
+
+    private func regenerate(_ entry: CopilotTimelineEntry, forceWeb: Bool) {
+        if let interaction = entry.interaction {
+            appState.regenerateCopilotInteraction(interaction, forceWeb: forceWeb)
+        } else {
+            appState.analyzeCopilotPrompt(entry.prompt, forceWeb: forceWeb)
+        }
+    }
+}
+
+private struct CopilotTimelineRow: View {
+    var entry: CopilotTimelineEntry
+    var isExpanded: Bool
+    var primaryColor: Color
+    var secondaryColor: Color
+    var tertiaryColor: Color
+    var designMode: IslandDesignMode
+    var allowRemoteLinkPreview: Bool
+    var onSelect: () -> Void
+    var onCopy: () -> Void
+    var onOpenSources: () -> Void
+    var onOpenAnswer: () -> Void
+    var onUseful: () -> Void
+    var onWrong: () -> Void
+    var onRegenerateLocal: () -> Void
+    var onRegenerateWeb: () -> Void
+    @State private var isHovering = false
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 5) {
+            header
+            preview
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 8)
+        .frame(maxWidth: .infinity, alignment: .topLeading)
+        .background(
+            IslandGlassFill(
+                shape: RoundedRectangle(cornerRadius: 8, style: .continuous),
+                mode: designMode,
+                solidOpacity: isExpanded || isHovering ? 0.036 : 0.018,
+                glassTintOpacity: isExpanded || isHovering ? 0.052 : 0.030,
+                glassFallbackOpacity: isExpanded || isHovering ? 0.036 : 0.020
+            )
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .stroke(Color.white.opacity(isExpanded || isHovering ? 0.068 : 0.030), lineWidth: 0.5)
+        )
+        .contentShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+        .onHover { isHovering = $0 }
+        .onTapGesture(perform: handleTap)
+        .contextMenu {
+            Button("Open answer", action: onOpenAnswer)
+            Button("Copy", action: onCopy)
+            Button("Open sources", action: onOpenSources)
+                .disabled(!entry.hasSourceLink)
+            Button("Mark useful", action: onUseful)
+            Button("Mark incorrect", action: onWrong)
+            Divider()
+            Button("Analyze again", action: onRegenerateLocal)
+                .disabled(entry.prompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+            Button("Analyze with web", action: onRegenerateWeb)
+                .disabled(entry.prompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+        }
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("\(entry.prompt). \(entry.responsePreview)")
+    }
+
+    private var header: some View {
+        HStack(spacing: 7) {
+            Circle()
+                .fill(entry.statusColor(primary: primaryColor, secondary: secondaryColor))
+                .frame(width: 5, height: 5)
+
+            Text(entry.timeLabel)
+                .font(.system(size: 9.8, weight: .medium, design: .monospaced))
+                .foregroundStyle(tertiaryColor)
+                .lineLimit(1)
+
+            if entry.isLive {
+                ProgressView()
+                    .controlSize(.small)
+                    .scaleEffect(0.46)
+                    .tint(secondaryColor)
+                    .frame(width: 12, height: 12)
+                    .accessibilityLabel("Loading")
+            }
+
+            Spacer(minLength: 8)
+
+            Text(entry.metaLabel)
+                .font(.system(size: 9, weight: .semibold))
+                .foregroundStyle(tertiaryColor)
+                .lineLimit(1)
+                .minimumScaleFactor(0.75)
+        }
+    }
+
+    private var preview: some View {
+        VStack(alignment: .leading, spacing: 5) {
+            Text(entry.prompt)
+                .font(.system(size: 12.8, weight: .semibold))
+                .foregroundStyle(Color.white.opacity(0.88))
+                .lineLimit(1)
+                .fixedSize(horizontal: false, vertical: true)
+
+            if !entry.responsePreview.isEmpty {
+                Text(entry.responsePreview)
+                    .font(.system(size: 11.6, weight: .regular))
+                    .foregroundStyle(Color.white.opacity(0.52))
+                    .lineLimit(2)
+                    .lineSpacing(1.5)
+                    .fixedSize(horizontal: false, vertical: true)
+            } else if entry.isLive {
+                HStack(spacing: 7) {
+                    ProgressView()
+                        .controlSize(.small)
+                        .scaleEffect(0.48)
+                        .tint(secondaryColor)
+                    Text("Preparing")
+                        .font(.system(size: 11.5, weight: .medium))
+                        .foregroundStyle(secondaryColor)
+                }
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private func handleTap() {
+        if entry.isLive {
+            onSelect()
+        } else {
+            onOpenAnswer()
+        }
+    }
+
+    private var expandedContent: some View {
+        VStack(alignment: .leading, spacing: 9) {
+            if let richPreviewPayload {
+                RichAnswerRenderer(
+                    text: "",
+                    richAnswer: richPreviewPayload,
+                    format: entry.answerFormat,
+                    sources: entry.sources,
+                    confidence: entry.confidence,
+                    allowRemoteLinkPreview: allowRemoteLinkPreview,
+                    density: .detail,
+                    onCopy: onCopy,
+                    onOpenSources: onOpenSources,
+                    onRegenerateWithWeb: onRegenerateWeb
+                )
+            } else if let webSource = entry.primaryWebSource {
+                WebSourcePreviewView(
+                    source: webSource,
+                    primaryColor: primaryColor,
+                    secondaryColor: secondaryColor,
+                    tertiaryColor: tertiaryColor,
+                    designMode: designMode,
+                    allowRemoteLinkPreview: allowRemoteLinkPreview
+                )
+            } else if !entry.sources.isEmpty {
+                sourceStrip
+            }
+
+            actionStrip
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private var richPreviewPayload: RichAnswerPayload? {
+        let validator = RichAnswerValidator()
+        let validatedPayload = validator.validated(entry.richAnswer, sources: entry.sources)
+        let fallbackPayload = fallbackSourceCardsPayload()
+        guard let payload = validatedPayload ?? fallbackPayload else { return nil }
+
+        let compactBlockTypes: Set<String> = [
+            RichAnswerBlockKind.sourceCards.rawValue,
+            RichAnswerBlockKind.steps.rawValue,
+            RichAnswerBlockKind.checklist.rawValue,
+            RichAnswerBlockKind.comparison.rawValue,
+            RichAnswerBlockKind.metrics.rawValue,
+            RichAnswerBlockKind.code.rawValue,
+            RichAnswerBlockKind.timeline.rawValue,
+            RichAnswerBlockKind.memoryResults.rawValue,
+            RichAnswerBlockKind.clarification.rawValue,
+            RichAnswerBlockKind.warning.rawValue
+        ]
+        let blocks = payload.blocks.filter { compactBlockTypes.contains($0.type) }
+        guard !blocks.isEmpty else { return nil }
+        return validator.validated(RichAnswerPayload(version: payload.version, blocks: blocks), sources: entry.sources)
+    }
+
+    private func fallbackSourceCardsPayload() -> RichAnswerPayload? {
+        let sourceIndexes = entry.sources.indices.filter { index in
+            let source = entry.sources[index]
+            return source.type == .web && source.webURL != nil
+        }
+        guard !sourceIndexes.isEmpty else { return nil }
+        return RichAnswerPayload(blocks: [
+            RichAnswerBlockPayload(
+                type: RichAnswerBlockKind.sourceCards.rawValue,
+                title: "Sources",
+                sourceIndexes: Array(sourceIndexes.prefix(6))
+            )
+        ])
+    }
+
+    private var sourceStrip: some View {
+        VStack(alignment: .leading, spacing: 5) {
+            ForEach(Array(entry.sources.prefix(3).enumerated()), id: \.offset) { _, source in
+                HStack(spacing: 6) {
+                    Image(systemName: "link")
+                        .font(.system(size: 9, weight: .medium))
+                        .foregroundStyle(tertiaryColor)
+                    Text(source.title)
+                        .font(.system(size: 10.5, weight: .medium))
+                        .foregroundStyle(secondaryColor)
+                        .lineLimit(1)
+                    Spacer(minLength: 0)
+                }
+            }
+        }
+        .padding(.top, 1)
+    }
+
+    private var actionStrip: some View {
+        HStack(spacing: 4) {
+            IconButton(systemName: "arrow.up.forward.square", help: "Open answer", isDisabled: entry.prompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && entry.response.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty, size: .compact, action: onOpenAnswer)
+            IconButton(systemName: "doc.on.doc", help: "Copy", size: .compact, action: onCopy)
+            IconButton(systemName: "link", help: "Open sources", isDisabled: !entry.hasSourceLink, size: .compact, action: onOpenSources)
+            IconButton(systemName: "hand.thumbsup", help: "Useful", size: .compact, action: onUseful)
+            IconButton(systemName: "hand.thumbsdown", help: "Incorrect", size: .compact, action: onWrong)
+            Spacer(minLength: 0)
+            IconButton(systemName: "arrow.clockwise", help: "Analyze again", isDisabled: entry.prompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty, size: .compact, action: onRegenerateLocal)
+            IconButton(systemName: "globe", help: "Analyze with web", isDisabled: entry.prompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty, size: .compact, action: onRegenerateWeb)
+        }
+        .opacity(entry.isLive ? 0.45 : 1)
+    }
+}
+
+private struct WebSourcePreviewView: View {
+    var source: AnswerSource
+    var primaryColor: Color
+    var secondaryColor: Color
+    var tertiaryColor: Color
+    var designMode: IslandDesignMode
+    var allowRemoteLinkPreview: Bool
+    @State private var loadedPreview: WebLinkPreview?
+
+    private var preview: WebLinkPreview {
+        loadedPreview ?? WebLinkPreview.fallback(for: source)
+    }
+
+    var body: some View {
+        HStack(spacing: 10) {
+            thumbnail
+
+            VStack(alignment: .leading, spacing: 3) {
+                HStack(spacing: 5) {
+                    favicon
+                    Text(preview.domain)
+                        .font(.system(size: 9.5, weight: .medium))
+                        .foregroundStyle(tertiaryColor)
+                        .lineLimit(1)
+                }
+
+                Text(preview.title)
+                    .font(.system(size: 11.5, weight: .semibold))
+                    .foregroundStyle(primaryColor.opacity(0.86))
+                    .lineLimit(1)
+
+                if let description = preview.description, !description.isEmpty {
+                    Text(description)
+                        .font(.system(size: 10.2, weight: .regular))
+                        .foregroundStyle(secondaryColor)
+                        .lineLimit(2)
+                        .lineSpacing(1)
+                }
+            }
+
+            Spacer(minLength: 0)
+        }
+        .padding(8)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(
+            IslandGlassFill(
+                shape: RoundedRectangle(cornerRadius: 7, style: .continuous),
+                mode: designMode,
+                solidOpacity: 0.026,
+                glassTintOpacity: 0.038,
+                glassFallbackOpacity: 0.026
+            )
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 7, style: .continuous)
+                .stroke(Color.white.opacity(0.040), lineWidth: 0.5)
+        )
+        .contentShape(RoundedRectangle(cornerRadius: 7, style: .continuous))
+        .onTapGesture {
+            NSWorkspace.shared.open(preview.url)
+        }
+        .task(id: source.reference) {
+            loadedPreview = await WebLinkPreviewService.shared.preview(for: source, allowRemoteFetch: allowRemoteLinkPreview)
+        }
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("Web source \(preview.title), \(preview.domain)")
+    }
+
+    private var thumbnail: some View {
+        ZStack {
+            RoundedRectangle(cornerRadius: 6, style: .continuous)
+                .fill(Color.white.opacity(0.040))
+
+            if let imageURL = preview.imageURL {
+                AsyncImage(url: imageURL) { phase in
+                    switch phase {
+                    case .success(let image):
+                        image
+                            .resizable()
+                            .scaledToFill()
+                    case .empty:
+                        favicon
+                    case .failure:
+                        fallbackLinkIcon
+                    @unknown default:
+                        fallbackLinkIcon
+                    }
+                }
+            } else {
+                fallbackLinkIcon
+            }
+        }
+        .frame(width: 52, height: 52)
+        .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 6, style: .continuous)
+                .stroke(Color.white.opacity(0.038), lineWidth: 0.5)
+        )
+    }
+
+    private var favicon: some View {
+        ZStack {
+            if let faviconURL = preview.faviconURL {
+                AsyncImage(url: faviconURL) { phase in
+                    switch phase {
+                    case .success(let image):
+                        image
+                            .resizable()
+                            .scaledToFit()
+                    default:
+                        Image(systemName: "link")
+                            .font(.system(size: 8.5, weight: .medium))
+                            .foregroundStyle(tertiaryColor)
+                    }
+                }
+            } else {
+                Image(systemName: "link")
+                    .font(.system(size: 8.5, weight: .medium))
+                    .foregroundStyle(tertiaryColor)
+            }
+        }
+        .frame(width: 12, height: 12)
+    }
+
+    private var fallbackLinkIcon: some View {
+        Image(systemName: "link")
+            .font(.system(size: 15, weight: .medium))
+            .foregroundStyle(tertiaryColor)
+    }
+}
+
+private struct CopilotTimelineEntry: Identifiable, Hashable {
+    enum Status: Hashable {
+        case preparing
+        case ready
+        case failed
+    }
+
+    var id: String
+    var questionId: UUID?
+    var prompt: String
+    var response: String
+    var tool: CopilotToolKind
+    var intent: CopilotIntentKind
+    var sources: [AnswerSource]
+    var richAnswer: RichAnswerPayload?
+    var confidence: Double
+    var latencyMs: Int
+    var createdAt: Date
+    var status: Status
+    var interaction: CopilotInteraction?
+
+    var isLive: Bool {
+        status == .preparing
+    }
+
+    var hasSourceLink: Bool {
+        sources.contains { source in
+            guard let reference = source.reference?.trimmingCharacters(in: .whitespacesAndNewlines) else { return false }
+            return URL(string: reference)?.scheme?.hasPrefix("http") == true
+        }
+    }
+
+    var primaryWebSource: AnswerSource? {
+        sources.first { $0.webURL != nil }
+    }
+
+    var answerFormat: CopilotAnswerFormat? {
+        if intent == .newsSearch { return .newsWithSources }
+        switch tool {
+        case .calculator:
+            return .calculation
+        case .reminder:
+            return .reminderConfirmation
+        case .localMemory:
+            return .memoryResults
+        case .webSearch:
+            return .bullets
+        case .unavailable:
+            return .errorState
+        case .answerSynthesis:
+            return nil
+        }
+    }
+
+    var responsePreview: String {
+        CopilotTimelinePreviewBuilder.preview(
+            response: response,
+            richAnswer: richAnswer,
+            sources: sources,
+            limit: 128
+        )
+    }
+
+    var timeLabel: String {
+        DateFormatting.time.string(from: createdAt)
+    }
+
+    var dayLabel: String {
+        if Calendar.current.isDateInToday(createdAt) {
+            return "Today"
+        }
+        if Calendar.current.isDateInYesterday(createdAt) {
+            return "Yesterday"
+        }
+        return Self.dayFormatter.string(from: createdAt)
+    }
+
+    var metaLabel: String {
+        if isLive {
+            return "LIVE"
+        }
+        if sources.contains(where: { $0.type == .web }) {
+            return sources.count == 1 ? "WEB 1" : "WEB \(sources.count)"
+        }
+        if latencyMs > 0 {
+            return Self.formattedLatency(latencyMs)
+        }
+        return tool.shortLabel
+    }
+
+    private static func formattedLatency(_ milliseconds: Int) -> String {
+        guard milliseconds >= 1_000 else {
+            return "\(milliseconds) ms"
+        }
+
+        let seconds = Double(milliseconds) / 1_000
+        return String(format: "%.1f s", seconds)
+    }
+
+    var iconName: String {
+        switch status {
+        case .preparing:
+            return "circle.dotted"
+        case .failed:
+            return "exclamationmark.triangle"
+        case .ready:
+            return tool.iconName
+        }
+    }
+
+    static func persisted(_ interaction: CopilotInteraction) -> CopilotTimelineEntry {
+        CopilotTimelineEntry(
+            id: interaction.id.uuidString,
+            questionId: interaction.questionId,
+            prompt: interaction.prompt,
+            response: interaction.response,
+            tool: interaction.tool,
+            intent: interaction.intent,
+            sources: interaction.sources,
+            richAnswer: interaction.richAnswer,
+            confidence: interaction.confidence,
+            latencyMs: interaction.latencyMs,
+            createdAt: interaction.createdAt,
+            status: interaction.tool == .unavailable || interaction.intent == .ambiguous ? .failed : .ready,
+            interaction: interaction
+        )
+    }
+
+    @MainActor
+    static func transient(from appState: AppState) -> CopilotTimelineEntry? {
+        guard let question = appState.activeQuestion else { return nil }
+        let response = appState.visibleAnswerText.trimmingCharacters(in: .whitespacesAndNewlines)
+        let isFailed = appState.answerStage == .failed
+        let isReady = appState.answerStage == .ready || !response.isEmpty
+        let fallbackResponse: String
+        if !response.isEmpty {
+            fallbackResponse = response
+        } else if isFailed {
+            fallbackResponse = appState.copilotFailureMessage ?? "Could not finish this action."
+        } else {
+            fallbackResponse = ""
+        }
+
+        return CopilotTimelineEntry(
+            id: "live-\(question.id.uuidString)",
+            questionId: question.id,
+            prompt: question.rawText,
+            response: fallbackResponse,
+            tool: .answerSynthesis,
+            intent: .answerableQuestion,
+            sources: appState.suggestedAnswer?.usedSources ?? [],
+            richAnswer: appState.suggestedAnswer?.richAnswer,
+            confidence: appState.questionClassification?.confidence ?? 0,
+            latencyMs: appState.suggestedAnswer?.latencyMs ?? 0,
+            createdAt: question.detectedAt,
+            status: isFailed ? .failed : (isReady ? .ready : .preparing),
+            interaction: nil
+        )
+    }
+
+    func statusColor(primary: Color, secondary: Color) -> Color {
+        switch status {
+        case .preparing:
+            return secondary
+        case .failed:
+            return Color(red: 1.0, green: 0.56, blue: 0.46).opacity(0.84)
+        case .ready:
+            return primary.opacity(0.62)
+        }
+    }
+
+    private static let dayFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.dateStyle = .medium
+        formatter.timeStyle = .none
+        return formatter
+    }()
+}
+
+enum CopilotTimelinePreviewBuilder {
+    nonisolated static func preview(
+        response: String,
+        richAnswer: RichAnswerPayload?,
+        sources: [AnswerSource],
+        limit: Int = 128
+    ) -> String {
+        let rawText = richPreviewText(from: richAnswer)
+            ?? RichAnswerTextSanitizer.removingRenderedSourceURLs(from: response, sources: sources)
+        return trimmedPreview(from: plainPreviewText(rawText), limit: limit)
+    }
+
+    nonisolated private static func richPreviewText(from payload: RichAnswerPayload?) -> String? {
+        guard let payload else { return nil }
+
+        for block in payload.blocks {
+            switch RichAnswerBlockKind(rawValue: block.type) {
+            case .lead:
+                if let text = firstNonEmpty(block.text, block.subtitle, block.title) {
+                    return text
+                }
+            case .paragraph, .clarification, .warning:
+                if let text = firstNonEmpty(block.text, block.title) {
+                    return text
+                }
+            case .steps, .checklist, .timeline:
+                let items = block.items.prefix(2).enumerated().compactMap { index, item in
+                    item.text.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmptyRichAnswer.map { "\(index + 1). \($0)" }
+                }
+                if !items.isEmpty {
+                    return items.joined(separator: "  ")
+                }
+            case .comparison, .memoryResults:
+                let items = block.items.prefix(2).compactMap { item in
+                    firstNonEmpty(item.title, item.text)
+                }
+                if !items.isEmpty {
+                    return items.joined(separator: "  ")
+                }
+            case .metrics:
+                if let value = firstNonEmpty(block.value, block.text, block.label) {
+                    return [block.label, value]
+                        .compactMap { $0?.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmptyRichAnswer }
+                        .joined(separator: ": ")
+                }
+            case .code:
+                if let code = block.code,
+                   let firstLine = code.replacingOccurrences(of: "\r\n", with: "\n")
+                    .components(separatedBy: "\n")
+                    .map({ $0.trimmingCharacters(in: .whitespacesAndNewlines) })
+                    .first(where: { !$0.isEmpty }) {
+                    return "Code: \(firstLine)"
+                }
+            case .sourceCards, .actions, .none:
+                continue
+            }
+        }
+
+        return nil
+    }
+
+    nonisolated private static func plainPreviewText(_ text: String) -> String {
+        var output = text.replacingOccurrences(of: "\r\n", with: "\n")
+        output = output.replacingOccurrences(of: "```", with: " ")
+        for marker in ["**", "__", "`", "#", ">"] {
+            output = output.replacingOccurrences(of: marker, with: "")
+        }
+        return output
+            .components(separatedBy: .whitespacesAndNewlines)
+            .filter { !$0.isEmpty }
+            .joined(separator: " ")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    nonisolated private static func trimmedPreview(from text: String, limit: Int) -> String {
+        guard text.count > limit else { return text }
+
+        let candidate = String(text.prefix(limit))
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        let breakCharacters = CharacterSet.whitespacesAndNewlines.union(CharacterSet(charactersIn: ".,;:"))
+        if let breakIndex = candidate.rangeOfCharacter(from: breakCharacters, options: .backwards)?.lowerBound,
+           candidate.distance(from: candidate.startIndex, to: breakIndex) > max(40, limit / 2) {
+            return String(candidate[..<breakIndex]).trimmingCharacters(in: .whitespacesAndNewlines) + "..."
+        }
+        return candidate + "..."
+    }
+
+    nonisolated private static func firstNonEmpty(_ values: String?...) -> String? {
+        values
+            .compactMap { $0?.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmptyRichAnswer }
+            .first
+    }
+}
+
+private extension CopilotToolKind {
+    var shortLabel: String {
+        switch self {
+        case .answerSynthesis:
+            return "ANSWER"
+        case .calculator:
+            return "CALC"
+        case .reminder:
+            return "REMINDER"
+        case .localMemory:
+            return "MEMORY"
+        case .webSearch:
+            return "WEB"
+        case .unavailable:
+            return "ERROR"
+        }
+    }
+
+    var iconName: String {
+        switch self {
+        case .answerSynthesis:
+            return "sparkles"
+        case .calculator:
+            return "function"
+        case .reminder:
+            return "bell"
+        case .localMemory:
+            return "archivebox"
+        case .webSearch:
+            return "globe"
+        case .unavailable:
+            return "exclamationmark.triangle"
+        }
+    }
+}
+
+private struct TranscriptQuestionLoadingIndicator: View {
+    var primaryColor: Color
+    var status: String
+    @Environment(\.islandDesignMode) private var islandDesignMode
+
+    var body: some View {
+        HStack(spacing: 5) {
+            ProgressView()
+                .controlSize(.small)
+                .scaleEffect(0.52)
+                .tint(primaryColor.opacity(0.42))
+                .frame(width: 14, height: 14)
+            Text(status)
+                .font(.system(size: 9.4, weight: .medium))
+                .foregroundStyle(primaryColor.opacity(0.44))
+                .lineLimit(1)
+                .minimumScaleFactor(0.82)
+        }
+            .padding(.horizontal, 7)
+            .frame(height: 22)
+            .background(
+                IslandGlassFill(
+                    shape: Capsule(style: .continuous),
+                    mode: islandDesignMode,
+                    solidOpacity: 0.16,
+                    glassTintOpacity: 0.060,
+                    glassFallbackOpacity: 0.052
+                )
+            )
+            .overlay(
+                Capsule(style: .continuous)
+                    .stroke(Color.white.opacity(islandDesignMode == .liquidGlass ? 0.10 : 0.055), lineWidth: 0.5)
+            )
+            .shadow(color: .black.opacity(islandDesignMode == .liquidGlass ? 0.10 : 0.16), radius: 5, x: 0, y: 2)
+            .accessibilityLabel(status)
+    }
+}
+
+private struct PresentationToggleButtonStyle: ButtonStyle {
+    var isSelected: Bool
+    var isHovering: Bool
+    var isOverlayPressed: Bool
+    var primaryColor: Color
+    var designMode: IslandDesignMode
+
+    func makeBody(configuration: Configuration) -> some View {
+        let pressed = configuration.isPressed || isOverlayPressed
+        configuration.label
+            .font(.system(size: 10.5, weight: isSelected ? .medium : .regular))
+            .foregroundStyle(isSelected ? primaryColor.opacity(0.82) : primaryColor.opacity(pressed || isHovering ? 0.62 : 0.48))
+            .lineLimit(1)
+            .minimumScaleFactor(0.86)
+            .frame(maxWidth: .infinity)
+            .frame(height: 22)
+            .background(
+                IslandGlassFill(
+                    shape: RoundedRectangle(cornerRadius: 6, style: .continuous),
+                    mode: designMode,
+                    solidOpacity: backgroundOpacity(isPressed: pressed),
+                    glassTintOpacity: glassTintOpacity(isPressed: pressed),
+                    glassFallbackOpacity: glassFallbackOpacity(isPressed: pressed)
+                )
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 6, style: .continuous)
+                    .stroke(Color.white.opacity(strokeOpacity(isPressed: pressed)), lineWidth: 0.5)
+            )
+            .contentShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
+            .scaleEffect(pressed ? 0.985 : 1)
+            .animation(.easeOut(duration: 0.10), value: configuration.isPressed)
+            .animation(.easeOut(duration: 0.10), value: isOverlayPressed)
+            .animation(.easeOut(duration: 0.12), value: isHovering)
+    }
+
+    private func backgroundOpacity(isPressed: Bool) -> Double {
+        guard designMode == .solid else { return glassFallbackOpacity(isPressed: isPressed) }
+        if isSelected { return isPressed ? 0.115 : 0.072 }
+        if isPressed { return 0.075 }
+        if isHovering { return 0.036 }
+        return 0
+    }
+
+    private func strokeOpacity(isPressed: Bool) -> Double {
+        if designMode == .liquidGlass {
+            if isPressed { return 0.15 }
+            if isSelected || isHovering { return 0.095 }
+            return 0.035
+        }
+        if isPressed { return 0.12 }
+        if isSelected || isHovering { return 0.055 }
+        return 0
+    }
+
+    private func glassTintOpacity(isPressed: Bool) -> Double {
+        if isSelected { return isPressed ? 0.105 : 0.074 }
+        if isPressed { return 0.070 }
+        if isHovering { return 0.045 }
+        return 0.018
+    }
+
+    private func glassFallbackOpacity(isPressed: Bool) -> Double {
+        if isSelected { return isPressed ? 0.085 : 0.060 }
+        if isPressed { return 0.058 }
+        if isHovering { return 0.034 }
+        return 0.012
+    }
+}
+
+private struct QuestionNavigationTextButton: View {
+    var title: String
+    var help: String
+    var primaryColor: Color
+    var action: () -> Void
+    @Environment(\.islandDesignMode) private var islandDesignMode
+    @State private var isHovering = false
+    @State private var isOverlayPressed = false
+
+    var body: some View {
+        Button(action: action) {
+            Text(title)
+        }
+        .buttonStyle(QuestionNavigationTextButtonStyle(primaryColor: primaryColor, designMode: islandDesignMode, isHovering: isHovering, isOverlayPressed: isOverlayPressed))
+        .contentShape(Rectangle())
+        .overlay {
+            MouseDownActionOverlay(
+                action: action,
+                onHover: { hovering in
+                    isHovering = hovering
+                },
+                onPress: { pressing in
+                    isOverlayPressed = pressing
+                }
+            )
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .contentShape(Rectangle())
+        }
+        .help(help)
+        .accessibilityLabel(Text(help))
+    }
+}
+
+private struct QuestionNavigationTextButtonStyle: ButtonStyle {
+    var primaryColor: Color
+    var designMode: IslandDesignMode
+    var isHovering: Bool
+    var isOverlayPressed: Bool
+
+    func makeBody(configuration: Configuration) -> some View {
+        let pressed = configuration.isPressed || isOverlayPressed
+        configuration.label
+            .font(.system(size: 18, weight: .light))
+            .foregroundStyle(primaryColor.opacity(pressed ? 0.84 : (isHovering ? 0.72 : 0.58)))
+            .frame(width: 28, height: 30)
+            .background(
+                IslandGlassFill(
+                    shape: RoundedRectangle(cornerRadius: 8, style: .continuous),
+                    mode: designMode,
+                    solidOpacity: backgroundOpacity(isPressed: pressed),
+                    glassTintOpacity: glassTintOpacity(isPressed: pressed),
+                    glassFallbackOpacity: glassFallbackOpacity(isPressed: pressed)
+                )
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    .stroke(Color.white.opacity(strokeOpacity(isPressed: pressed)), lineWidth: 0.5)
+            )
+            .contentShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+            .scaleEffect(pressed ? 0.96 : (isHovering ? 1.025 : 1))
+            .animation(.easeOut(duration: 0.10), value: configuration.isPressed)
+            .animation(.easeOut(duration: 0.10), value: isOverlayPressed)
+            .animation(.easeOut(duration: 0.12), value: isHovering)
+    }
+
+    private func backgroundOpacity(isPressed: Bool) -> Double {
+        guard designMode == .solid else { return glassFallbackOpacity(isPressed: isPressed) }
+        if isPressed { return 0.11 }
+        if isHovering { return 0.058 }
+        return 0
+    }
+
+    private func strokeOpacity(isPressed: Bool) -> Double {
+        if designMode == .liquidGlass {
+            if isPressed { return 0.16 }
+            if isHovering { return 0.10 }
+            return 0.025
+        }
+        if isPressed { return 0.15 }
+        if isHovering { return 0.07 }
+        return 0
+    }
+
+    private func glassTintOpacity(isPressed: Bool) -> Double {
+        if isPressed { return 0.080 }
+        if isHovering { return 0.052 }
+        return 0.020
+    }
+
+    private func glassFallbackOpacity(isPressed: Bool) -> Double {
+        if isPressed { return 0.070 }
+        if isHovering { return 0.044 }
+        return 0.012
+    }
+}
+
+private struct LiveTranscriptScrollView: NSViewRepresentable {
+    var segments: [TranscriptSegment]
+    var showOriginalText: Bool
+    var showTranslatedText: Bool
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator()
+    }
+
+    func makeNSView(context: Context) -> TranscriptScrollView {
+        let scrollView = TranscriptScrollView()
+        scrollView.drawsBackground = false
+        scrollView.borderType = .noBorder
+        scrollView.hasVerticalScroller = true
+        scrollView.hasHorizontalScroller = false
+        scrollView.autohidesScrollers = true
+        scrollView.scrollerStyle = .overlay
+        scrollView.verticalScrollElasticity = .allowed
+        scrollView.usesPredominantAxisScrolling = true
+        scrollView.contentInsets = NSEdgeInsets(top: 0, left: 0, bottom: 0, right: 0)
+        scrollView.automaticallyAdjustsContentInsets = false
+        scrollView.documentView = FlippedTranscriptDocumentView()
+        let coordinator = context.coordinator
+        coordinator.bind(to: scrollView)
+        scrollView.onLayout = { [weak scrollView] in
+            guard let scrollView else { return }
+            coordinator.render(in: scrollView)
+        }
+        return scrollView
+    }
+
+    func updateNSView(_ scrollView: TranscriptScrollView, context: Context) {
+        context.coordinator.update(
+            segments: segments,
+            showOriginalText: showOriginalText,
+            showTranslatedText: showTranslatedText
+        )
+        context.coordinator.render(in: scrollView)
+        context.coordinator.scheduleRender(in: scrollView)
+    }
+
+    static func dismantleNSView(_ scrollView: TranscriptScrollView, coordinator: Coordinator) {
+        coordinator.unbind()
+    }
+
+    @MainActor
+    final class Coordinator {
+        private var segments: [TranscriptSegment] = []
+        private var showOriginalText = true
+        private var showTranslatedText = false
+        private var lastSignature: RenderSignature?
+        private var scheduledRender = false
+        private var isFollowingLiveEdge = true
+        private var isAdjustingScroll = false
+        private var boundsObserver: NSObjectProtocol?
+
+        func update(segments: [TranscriptSegment], showOriginalText: Bool, showTranslatedText: Bool) {
+            self.segments = segments
+            self.showOriginalText = showOriginalText
+            self.showTranslatedText = showTranslatedText
+        }
+
+        func bind(to scrollView: NSScrollView) {
+            unbind()
+            scrollView.contentView.postsBoundsChangedNotifications = true
+            boundsObserver = NotificationCenter.default.addObserver(
+                forName: NSView.boundsDidChangeNotification,
+                object: scrollView.contentView,
+                queue: .main
+            ) { [weak self, weak scrollView] _ in
+                guard let self, let scrollView else { return }
+                Task { @MainActor in
+                    self.handleScrollChanged(in: scrollView)
+                }
+            }
+        }
+
+        func unbind() {
+            if let boundsObserver {
+                NotificationCenter.default.removeObserver(boundsObserver)
+                self.boundsObserver = nil
+            }
+        }
+
+        func render(in scrollView: NSScrollView) {
+            guard let documentView = scrollView.documentView as? FlippedTranscriptDocumentView else { return }
+            let viewportSize = scrollView.contentView.bounds.size
+            guard viewportSize.width > 2, viewportSize.height > 2 else {
+                scheduleRender(in: scrollView)
+                return
+            }
+
+            let signature = RenderSignature(
+                viewportSize: CGSize(width: round(viewportSize.width), height: round(viewportSize.height)),
+                showOriginalText: showOriginalText,
+                showTranslatedText: showTranslatedText,
+                fingerprint: fingerprint(for: segments)
+            )
+
+            let shouldKeepFollowing = TranscriptLiveScrollPolicy.shouldFollowLiveEdge(
+                isFollowingLiveEdge: isFollowingLiveEdge,
+                scrollY: scrollView.contentView.bounds.origin.y,
+                documentHeight: documentView.bounds.height,
+                viewportHeight: scrollView.contentView.bounds.height
+            )
+            let previousScrollY = scrollView.contentView.bounds.origin.y
+
+            if signature != lastSignature {
+                let layout = TranscriptLayout.build(
+                    segments: segments,
+                    width: max(1, viewportSize.width),
+                    minHeight: max(1, viewportSize.height),
+                    showOriginalText: showOriginalText,
+                    showTranslatedText: showTranslatedText
+                )
+                documentView.replaceRows(layout.rows, documentHeight: layout.documentHeight, width: max(1, viewportSize.width))
+                lastSignature = signature
+                adjustScrollPosition(in: scrollView, shouldFollowLiveEdge: shouldKeepFollowing, previousScrollY: previousScrollY)
+            } else if shouldKeepFollowing {
+                scrollToLiveEdge(scrollView)
+            }
+        }
+
+        func scheduleRender(in scrollView: NSScrollView) {
+            guard !scheduledRender else { return }
+            scheduledRender = true
+            let delays: [UInt64] = [0, 50, 160]
+            for delay in delays {
+                Task { @MainActor [weak self, weak scrollView] in
+                    if delay > 0 {
+                        try? await Task.sleep(for: .milliseconds(Int(delay)))
+                    }
+                    guard let self, let scrollView else { return }
+                    self.render(in: scrollView)
+                    if delay == delays.last {
+                        self.scheduledRender = false
+                    }
+                }
+            }
+        }
+
+        private func handleScrollChanged(in scrollView: NSScrollView) {
+            guard !isAdjustingScroll else { return }
+            isFollowingLiveEdge = isNearLiveEdge(scrollView)
+        }
+
+        private func adjustScrollPosition(in scrollView: NSScrollView, shouldFollowLiveEdge: Bool, previousScrollY: CGFloat) {
+            if shouldFollowLiveEdge {
+                scrollToLiveEdge(scrollView)
+                isFollowingLiveEdge = true
+            } else {
+                scroll(to: previousScrollY, in: scrollView)
+                isFollowingLiveEdge = isNearLiveEdge(scrollView)
+            }
+        }
+
+        private func scrollToLiveEdge(_ scrollView: NSScrollView) {
+            guard let documentView = scrollView.documentView else { return }
+            let viewportHeight = scrollView.contentView.bounds.height
+            let targetY = documentView.bounds.height <= viewportHeight
+                ? 0
+                : max(0, documentView.bounds.height - viewportHeight)
+
+            scroll(to: targetY, in: scrollView)
+        }
+
+        private func scroll(to proposedY: CGFloat, in scrollView: NSScrollView) {
+            guard let documentView = scrollView.documentView else { return }
+            let targetY = TranscriptLiveScrollPolicy.clampedScrollY(
+                proposedY,
+                documentHeight: documentView.bounds.height,
+                viewportHeight: scrollView.contentView.bounds.height
+            )
+
+            isAdjustingScroll = true
+            NSAnimationContext.runAnimationGroup { context in
+                context.duration = 0
+                context.allowsImplicitAnimation = false
+                scrollView.contentView.scroll(to: NSPoint(x: 0, y: targetY))
+                scrollView.reflectScrolledClipView(scrollView.contentView)
+            }
+            isAdjustingScroll = false
+        }
+
+        private func isNearLiveEdge(_ scrollView: NSScrollView) -> Bool {
+            guard let documentView = scrollView.documentView else { return true }
+            return TranscriptLiveScrollPolicy.isNearLiveEdge(
+                scrollY: scrollView.contentView.bounds.origin.y,
+                documentHeight: documentView.bounds.height,
+                viewportHeight: scrollView.contentView.bounds.height
+            )
+        }
+
+        private func fingerprint(for segments: [TranscriptSegment]) -> Int {
+            var hasher = Hasher()
+            hasher.combine(segments.count)
+            for segment in segments {
+                hasher.combine(segment.id)
+                hasher.combine(segment.text)
+                hasher.combine(segment.draftTranslatedText)
+                hasher.combine(segment.translatedText)
+                hasher.combine(segment.translationState.rawValue)
+                hasher.combine(segment.isFinal)
+                hasher.combine(segment.transcriptionPhase?.rawValue)
+                hasher.combine(segment.revisionNumber)
+                hasher.combine(segment.audioSource.rawValue)
+            }
+            return hasher.finalize()
+        }
+    }
+
+    private struct RenderSignature: Equatable {
+        var viewportSize: CGSize
+        var showOriginalText: Bool
+        var showTranslatedText: Bool
+        var fingerprint: Int
+    }
+}
+
+struct TranscriptLiveScrollPolicy: Sendable, Equatable {
+    static let liveEdgeThreshold: CGFloat = 28
+
+    static func maxScrollY(documentHeight: CGFloat, viewportHeight: CGFloat) -> CGFloat {
+        max(0, documentHeight - viewportHeight)
+    }
+
+    static func clampedScrollY(_ proposedY: CGFloat, documentHeight: CGFloat, viewportHeight: CGFloat) -> CGFloat {
+        min(max(0, proposedY), maxScrollY(documentHeight: documentHeight, viewportHeight: viewportHeight))
+    }
+
+    static func shouldFollowLiveEdge(
+        isFollowingLiveEdge: Bool,
+        scrollY: CGFloat,
+        documentHeight: CGFloat,
+        viewportHeight: CGFloat,
+        threshold: CGFloat = liveEdgeThreshold
+    ) -> Bool {
+        isFollowingLiveEdge || isNearLiveEdge(
+            scrollY: scrollY,
+            documentHeight: documentHeight,
+            viewportHeight: viewportHeight,
+            threshold: threshold
+        )
+    }
+
+    static func isNearLiveEdge(
+        scrollY: CGFloat,
+        documentHeight: CGFloat,
+        viewportHeight: CGFloat,
+        threshold: CGFloat = liveEdgeThreshold
+    ) -> Bool {
+        let distanceToLiveEdge = maxScrollY(documentHeight: documentHeight, viewportHeight: viewportHeight)
+            - clampedScrollY(scrollY, documentHeight: documentHeight, viewportHeight: viewportHeight)
+        return distanceToLiveEdge <= threshold
+    }
+}
+
+private final class TranscriptScrollView: NSScrollView {
+    var onLayout: (() -> Void)?
+    private var lastLayoutSize: CGSize = .zero
+
+    override var acceptsFirstResponder: Bool { false }
+
+    override func becomeFirstResponder() -> Bool {
+        false
+    }
+
+    override func layout() {
+        super.layout()
+        let size = contentView.bounds.size
+        guard size != lastLayoutSize else { return }
+        lastLayoutSize = size
+        onLayout?()
+    }
+
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        Task { @MainActor [weak self] in
+            self?.onLayout?()
+        }
+    }
+}
+
+private final class FlippedTranscriptDocumentView: NSView {
+    override var isFlipped: Bool { true }
+
+    func replaceRows(_ rows: [TranscriptLayout.Row], documentHeight: CGFloat, width: CGFloat) {
+        subviews.forEach { $0.removeFromSuperview() }
+        frame = CGRect(x: 0, y: 0, width: width, height: documentHeight)
+
+        for row in rows {
+            let label = NSTextField(labelWithString: "")
+            label.attributedStringValue = row.text
+            label.isEditable = false
+            label.isSelectable = true
+            label.isBordered = false
+            label.drawsBackground = false
+            label.maximumNumberOfLines = 0
+            label.lineBreakMode = .byWordWrapping
+            label.frame = row.frame
+            addSubview(label)
+        }
+    }
+}
+
+struct TranscriptReadableChunker: Sendable, Equatable {
+    static let defaultTargetLength = 86
+    static let defaultMaxLength = 118
+
+    static func chunks(
+        for text: String,
+        targetLength: Int = defaultTargetLength,
+        maxLength: Int = defaultMaxLength
+    ) -> [String] {
+        let normalized = text
+            .components(separatedBy: .whitespacesAndNewlines)
+            .filter { !$0.isEmpty }
+            .joined(separator: " ")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !normalized.isEmpty else { return [] }
+        guard normalized.count > maxLength else { return [normalized] }
+
+        var chunks: [String] = []
+        var current: [String] = []
+        var currentLength = 0
+
+        for word in normalized.split(separator: " ", omittingEmptySubsequences: true).map(String.init) {
+            let proposedLength = currentLength + word.count + (current.isEmpty ? 0 : 1)
+            if !current.isEmpty, proposedLength > maxLength {
+                flush(&current, currentLength: &currentLength, into: &chunks)
+            }
+
+            current.append(word)
+            currentLength += word.count + (current.count == 1 ? 0 : 1)
+
+            if currentLength >= targetLength, isReadableBoundary(word) {
+                flush(&current, currentLength: &currentLength, into: &chunks)
+            }
+        }
+
+        flush(&current, currentLength: &currentLength, into: &chunks)
+        return chunks
+    }
+
+    static func pairedChunks(original: String, translation: String) -> [(original: String?, translation: String?)] {
+        let originalChunks = chunks(for: original)
+        let translationChunks = chunks(for: translation)
+        let count = max(originalChunks.count, translationChunks.count)
+        guard count > 0 else { return [] }
+
+        return (0..<count).map { index in
+            (
+                original: index < originalChunks.count ? originalChunks[index] : nil,
+                translation: index < translationChunks.count ? translationChunks[index] : nil
+            )
+        }
+    }
+
+    private static func flush(_ words: inout [String], currentLength: inout Int, into chunks: inout [String]) {
+        let chunk = words.joined(separator: " ").trimmingCharacters(in: .whitespacesAndNewlines)
+        if !chunk.isEmpty {
+            chunks.append(chunk)
+        }
+        words.removeAll(keepingCapacity: true)
+        currentLength = 0
+    }
+
+    private static func isReadableBoundary(_ word: String) -> Bool {
+        guard let last = word.unicodeScalars.last else { return false }
+        if CharacterSet(charactersIn: ".!?;:,").contains(last) {
+            return true
+        }
+
+        return [
+            "and", "but", "because", "then", "now", "so",
+            "e", "mas", "porque", "entao", "então", "agora"
+        ].contains(word.lowercased())
+    }
+}
+
+private enum TranscriptLayout {
+    private struct Block {
+        var text: NSAttributedString
+        var spacingAfter: CGFloat
+    }
+
+    struct Row {
+        var text: NSAttributedString
+        var frame: CGRect
+    }
+
+    static func build(
+        segments: [TranscriptSegment],
+        width: CGFloat,
+        minHeight: CGFloat,
+        showOriginalText: Bool,
+        showTranslatedText: Bool
+    ) -> (rows: [Row], documentHeight: CGFloat) {
+        let rowWidth = max(1, min(width - 24, showTranslatedText ? 492 : 520))
+        let rowX = max(0, (width - rowWidth) / 2)
+        let verticalPadding: CGFloat = 0
+        let blocks = segments.flatMap {
+            attributedBlocks(for: $0, showOriginalText: showOriginalText, showTranslatedText: showTranslatedText)
+        }
+        let heights = blocks.map { block -> CGFloat in
+            let rect = block.text.boundingRect(
+                with: CGSize(width: rowWidth, height: .greatestFiniteMagnitude),
+                options: [.usesLineFragmentOrigin, .usesFontLeading]
+            )
+            return ceil(rect.height) + 3
+        }
+        let contentHeight = zip(heights, blocks).reduce(CGFloat.zero) { partial, pair in
+            partial + pair.0 + pair.1.spacingAfter
+        } - (blocks.last?.spacingAfter ?? 0)
+        let documentHeight = max(minHeight, contentHeight + verticalPadding * 2)
+        var y = verticalPadding
+
+        let rows = zip(blocks, heights).map { block, height -> Row in
+            defer { y += height + block.spacingAfter }
+            return Row(
+                text: block.text,
+                frame: CGRect(x: rowX, y: y, width: rowWidth, height: height)
+            )
+        }
+
+        return (rows, documentHeight)
+    }
+
+    private static func attributedBlocks(
+        for segment: TranscriptSegment,
+        showOriginalText: Bool,
+        showTranslatedText: Bool
+    ) -> [Block] {
+        if showTranslatedText, let translationLine = translationLine(for: segment) {
+            if showOriginalText {
+                let pairs = TranscriptReadableChunker.pairedChunks(
+                    original: segment.text,
+                    translation: translationLine.text
+                )
+                return pairs.enumerated().map { index, pair in
+                    Block(
+                        text: attributedText(
+                            for: segment,
+                            originalText: pair.original,
+                            translatedText: pair.translation,
+                            showSourceLabel: index == 0,
+                            translationOnly: false
+                        ),
+                        spacingAfter: index == pairs.count - 1 ? 14 : 8
+                    )
+                }
+            }
+
+            let chunks = TranscriptReadableChunker.chunks(for: translationLine.text)
+            return chunks.enumerated().map { index, chunk in
+                Block(
+                    text: attributedText(
+                        for: segment,
+                        originalText: nil,
+                        translatedText: chunk,
+                        showSourceLabel: index == 0,
+                        translationOnly: true
+                    ),
+                    spacingAfter: index == chunks.count - 1 ? 14 : 8
+                )
+            }
+        }
+
+        let chunks = TranscriptReadableChunker.chunks(for: segment.text)
+        return chunks.enumerated().map { index, chunk in
+            Block(
+                text: attributedText(
+                    for: segment,
+                    originalText: chunk,
+                    translatedText: nil,
+                    showSourceLabel: index == 0,
+                    translationOnly: false
+                ),
+                spacingAfter: index == chunks.count - 1 ? 13 : 7
+            )
+        }
+    }
+
+    private static func attributedText(
+        for segment: TranscriptSegment,
+        originalText: String?,
+        translatedText: String?,
+        showSourceLabel: Bool,
+        translationOnly: Bool
+    ) -> NSAttributedString {
+        let result = NSMutableAttributedString()
+        let sourceColor = NSColor.white.withAlphaComponent(segment.audioSource.isUserSide ? 0.30 : 0.40)
+        let transcriptionColor = transcriptTextColor(for: segment)
+        let translatedColor = NSColor.white.withAlphaComponent(0.96)
+        let originalSecondaryColor = NSColor.white.withAlphaComponent(0.46)
+        let labelParagraph = NSMutableParagraphStyle()
+        labelParagraph.lineSpacing = 0
+        labelParagraph.paragraphSpacing = 4.2
+        let primaryParagraph = NSMutableParagraphStyle()
+        primaryParagraph.lineSpacing = 5.0
+        primaryParagraph.paragraphSpacing = translatedText == nil ? 1.2 : 4.8
+        let secondaryParagraph = NSMutableParagraphStyle()
+        secondaryParagraph.lineSpacing = 4.4
+        secondaryParagraph.paragraphSpacing = 1.2
+
+        if showSourceLabel {
+            result.append(NSAttributedString(
+                string: segment.audioSource.displayName.uppercased() + "\n",
+                attributes: [
+                    .font: NSFont.systemFont(ofSize: 9.4, weight: .medium),
+                    .foregroundColor: sourceColor,
+                    .paragraphStyle: labelParagraph
+                ]
+            ))
+        }
+
+        if let translatedText {
+            result.append(NSAttributedString(
+                string: translatedText,
+                attributes: [
+                    .font: NSFont.systemFont(ofSize: translationOnly ? 15.8 : 15.2, weight: .light),
+                    .foregroundColor: translatedColor,
+                    .paragraphStyle: primaryParagraph
+                ]
+            ))
+            if let originalText {
+                result.append(NSAttributedString(string: "\n"))
+                result.append(NSAttributedString(
+                    string: originalText,
+                    attributes: [
+                        .font: NSFont.systemFont(ofSize: 13.4, weight: .light),
+                        .foregroundColor: originalSecondaryColor,
+                        .paragraphStyle: secondaryParagraph
+                    ]
+                ))
+            }
+        } else if let originalText {
+            result.append(NSAttributedString(
+                string: originalText,
+                attributes: [
+                    .font: NSFont.systemFont(ofSize: segment.audioSource.isUserSide ? 15.2 : 15.8, weight: .light),
+                    .foregroundColor: transcriptionColor,
+                    .paragraphStyle: primaryParagraph
+                ]
+            ))
+        }
+
+        return result
+    }
+
+    private static func transcriptTextColor(for segment: TranscriptSegment) -> NSColor {
+        NSColor.white.withAlphaComponent(0.96)
+    }
+
+    private struct TranslationDisplayLine {
+        var text: String
+    }
+
+    private static func translationLine(for segment: TranscriptSegment) -> TranslationDisplayLine? {
+        if let translated = translatedDisplayText(for: segment) {
+            return TranslationDisplayLine(text: translated)
+        }
+
+        switch segment.translationState {
+        case .drafting:
+            return nil
+        case .pending, .refining:
+            return TranslationDisplayLine(text: "Translating...")
+        case .unavailable:
+            return TranslationDisplayLine(text: "Translation unavailable locally")
+        case .failed:
+            return TranslationDisplayLine(text: "Translation failed")
+        case .none, .draftTranslated, .translated, .preserved:
+            return nil
+        }
+    }
+
+    private static func translatedDisplayText(for segment: TranscriptSegment) -> String? {
+        if let translated = segment.translatedText?.trimmingCharacters(in: .whitespacesAndNewlines),
+           !translated.isEmpty {
+            return translated
+        }
+        if let draft = segment.draftTranslatedText?.trimmingCharacters(in: .whitespacesAndNewlines),
+           !draft.isEmpty {
+            return draft
+        }
+        return nil
+    }
+}

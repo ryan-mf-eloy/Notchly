@@ -1,0 +1,58 @@
+{
+  "version": 1,
+  "alternativeLimit": 6,
+  "repairLimit": 5,
+  "lowConfidenceRepairThreshold": 0.88,
+  "repairConfidenceFloor": 0.58,
+  "sourceWeights": {
+    "best": 1.0,
+    "alternative": 0.94,
+    "repair": 0.86,
+    "language_fanout": 0.92
+  },
+  "repairRules": [
+    {
+      "match": "cuanto is my days",
+      "replacement": "quantos dias",
+      "languages": ["pt-BR", "es-ES", "en-US"],
+      "confidence": 0.72,
+      "reason": "pt_en_es_date_duration_confusion"
+    },
+    {
+      "match": "quanto is my days",
+      "replacement": "quantos dias",
+      "languages": ["pt-BR", "en-US"],
+      "confidence": 0.74,
+      "reason": "pt_en_date_duration_confusion"
+    },
+    {
+      "match": "cuanto e",
+      "replacement": "quanto e",
+      "languages": ["pt-BR", "es-ES"],
+      "confidence": 0.82,
+      "reason": "pt_es_question_starter_confusion"
+    },
+    {
+      "match": "cuanto é",
+      "replacement": "quanto e",
+      "languages": ["pt-BR", "es-ES"],
+      "confidence": 0.82,
+      "reason": "pt_es_question_starter_confusion"
+    },
+    {
+      "match": "how many days",
+      "replacement": "quantos dias",
+      "languages": ["pt-BR", "en-US"],
+      "confidence": 0.78,
+      "reason": "date_duration_cross_language_candidate"
+    },
+    {
+      "match": "is my days",
+      "replacement": "quantos dias",
+      "languages": ["pt-BR", "en-US"],
+      "confidence": 0.66,
+      "reason": "low_confidence_duration_tail"
+    }
+  ],
+  "clarificationRules": []
+}

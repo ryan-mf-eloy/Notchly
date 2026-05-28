@@ -1,0 +1,121 @@
+{
+  "version": 1,
+  "alternativeLimit": 6,
+  "repairLimit": 5,
+  "lowConfidenceRepairThreshold": 0.88,
+  "repairConfidenceFloor": 0.58,
+  "sourceWeights": {
+    "best": 1.0,
+    "alternative": 0.94,
+    "repair": 0.86,
+    "language_fanout": 0.92
+  },
+  "repairRules": [
+    {
+      "match": "cuanto is my days",
+      "replacement": "quantos dias",
+      "languages": ["pt-BR", "es-ES", "en-US"],
+      "confidence": 0.72,
+      "reason": "pt_en_es_date_duration_confusion"
+    },
+    {
+      "match": "quanto is my days",
+      "replacement": "quantos dias",
+      "languages": ["pt-BR", "en-US"],
+      "confidence": 0.74,
+      "reason": "pt_en_date_duration_confusion"
+    },
+    {
+      "match": "cuanto e",
+      "replacement": "quanto e",
+      "languages": ["pt-BR", "es-ES"],
+      "confidence": 0.82,
+      "reason": "pt_es_question_starter_confusion"
+    },
+    {
+      "match": "cuanto é",
+      "replacement": "quanto e",
+      "languages": ["pt-BR", "es-ES"],
+      "confidence": 0.82,
+      "reason": "pt_es_question_starter_confusion"
+    },
+    {
+      "match": "how many days",
+      "replacement": "quantos dias",
+      "languages": ["pt-BR", "en-US"],
+      "confidence": 0.78,
+      "reason": "date_duration_cross_language_candidate"
+    },
+    {
+      "match": "is my days",
+      "replacement": "quantos dias",
+      "languages": ["pt-BR", "en-US"],
+      "confidence": 0.66,
+      "reason": "low_confidence_duration_tail"
+    },
+    {
+      "match": "swift ui",
+      "replacement": "SwiftUI",
+      "languages": ["pt-BR", "en-US", "es-ES"],
+      "confidence": 0.86,
+      "reason": "technical_term_swiftui_spacing"
+    },
+    {
+      "match": "open ai",
+      "replacement": "OpenAI",
+      "languages": ["pt-BR", "en-US", "es-ES"],
+      "confidence": 0.86,
+      "reason": "technical_term_openai_spacing"
+    },
+    {
+      "match": "chat g p t",
+      "replacement": "ChatGPT",
+      "languages": ["pt-BR", "en-US", "es-ES"],
+      "confidence": 0.84,
+      "reason": "technical_term_chatgpt_spelling"
+    },
+    {
+      "match": "deep loy",
+      "replacement": "deploy",
+      "languages": ["pt-BR", "en-US"],
+      "confidence": 0.78,
+      "reason": "pt_en_deploy_confusion"
+    },
+    {
+      "match": "de ploy",
+      "replacement": "deploy",
+      "languages": ["pt-BR", "en-US"],
+      "confidence": 0.78,
+      "reason": "pt_en_deploy_split_confusion"
+    },
+    {
+      "match": "pull requeste",
+      "replacement": "pull request",
+      "languages": ["pt-BR", "en-US"],
+      "confidence": 0.78,
+      "reason": "pt_en_pull_request_suffix"
+    },
+    {
+      "match": "rode map",
+      "replacement": "roadmap",
+      "languages": ["pt-BR", "en-US"],
+      "confidence": 0.76,
+      "reason": "pt_en_roadmap_confusion"
+    },
+    {
+      "match": "latencia",
+      "replacement": "latência",
+      "languages": ["pt-BR"],
+      "confidence": 0.82,
+      "reason": "pt_latency_diacritic"
+    },
+    {
+      "match": "qual e",
+      "replacement": "qual é",
+      "languages": ["pt-BR"],
+      "confidence": 0.80,
+      "reason": "pt_question_starter_diacritic"
+    }
+  ],
+  "clarificationRules": []
+}
