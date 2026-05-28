@@ -243,17 +243,27 @@ Ele combina:
 
 O objetivo do modo padrao e reduzir interrupcoes: alta precisao e preferida a cobertura agressiva.
 
-### MultiQT-lite local
+### MultiQT treinado e fallback local
 
-A versao atual inclui um "MultiQT-lite" local-first, sem clonar paper ou depender de audio bruto persistido. O app cria `QuestionMultimodalSignal` a partir do `TranscriptSegment`, qualidade de audio por fonte e energia disponivel. Os campos sao numericos/redigiveis: idioma, confidence ASR, final/partial, speaker/source, duracao, estabilidade entre parciais, pausa terminal, RMS/peak, clipping, silencio/tooQuiet, gaps, noise floor e `audioEnergy`.
+O objetivo final do Notchly e usar um modelo MultiQT-style treinado, multilingual e local-first para decidir se uma transcricao de reuniao contem uma pergunta real que precisa de resposta. O estado atual ainda nao deve ser confundido com esse modelo treinado: o app inclui um fallback "MultiQT-lite" deterministico enquanto o dataset de audio+texto, treino, avaliacao e export Core ML sao consolidados.
+
+O plano final esta em `docs/MULTIQT_FINAL_CONSOLIDATION_PLAN.md`. O workspace executavel de treino fica em `Tools/multiqt/` e define:
+
+- schema JSONL do dataset multilingual;
+- validador de manifesto;
+- modelo PyTorch audio+texto com fusao concat;
+- avaliacao por precision/recall, negativos criticos e latencia;
+- export para Core ML (`notchly-multiqt-v1.mlpackage`).
+
+Enquanto o artefato treinado nao passa os gates, o app cria `QuestionMultimodalSignal` a partir do `TranscriptSegment`, qualidade de audio por fonte e energia disponivel. Os campos sao numericos/redigiveis: idioma, confidence ASR, final/partial, speaker/source, duracao, estabilidade entre parciais, pausa terminal, RMS/peak, clipping, silencio/tooQuiet, gaps, noise floor e `audioEnergy`.
 
 `QuestionMultimodalScorer` combina o entendimento textual com boosts leves para segmento final, ASR confiavel, duracao plausivel, pausa terminal e energia consistente. Ele penaliza partial instavel, ASR baixo, clipping forte, silencio/tooQuiet e gaps. Negativos criticos continuam como hard-blocks locais: small talk, operational checks, retoricas, perguntas reportadas, auto-respondidas, fragmentos, titulos e ruido ASR.
 
 `QAMultimodalMode` fica em `AppPreferences`:
 
 - `off`: usa apenas os sinais textuais.
-- `shadow`: default atual; calcula scores multimodais para auditoria sem bloquear decisoes.
-- `enforced`: aplica o gate multimodal quando os benchmarks locais confirmam ganho ou nao-regressao.
+- `shadow`: default atual; calcula scores multimodais para auditoria sem bloquear decisoes. Este e o modo correto enquanto o modelo treinado ainda nao foi aprovado.
+- `enforced`: aplica o gate multimodal somente quando os benchmarks locais confirmam ganho real, zero FP em negativos criticos e latencia dentro dos limites.
 
 `QuestionClassification` registra `textualConfidence`, `multimodalConfidence`, `decisionScore`, `decisionSignals` e `suppressionSignals`, permitindo diagnostico sem gravar audio bruto. O fluxo respeita a regra dura:
 
@@ -262,6 +272,14 @@ responseNeeded && complete && !rhetorical && priority != .low
 ```
 
 Somente quando essa regra passa o provider e chamado. Perguntas urgentes podem cancelar geracoes anteriores; pergunta auto-respondida cancela/ignora a geracao; final estavel substitui partial via deduplicacao.
+
+Gates minimos para promover o modelo treinado:
+
+- precision geral >= 0.995;
+- recall geral >= 0.970;
+- zero falsos positivos em negativos criticos;
+- precision >= 0.990 e recall >= 0.950 em pt-BR, en-US, es-ES e ja-JP;
+- p95 local <= 60 ms e p99 local <= 100 ms em Mac alvo.
 
 ### Limpeza Da Pergunta
 
@@ -585,7 +603,7 @@ Alguns defaults relevantes de `AppPreferences`:
 | `saveAudioRecordings` | `false` | nao salvar audio bruto por padrao. |
 | `realtimeSuggestionsEnabled` | `true` | habilitar o fluxo central do copilot. |
 | `qaPrecisionMode` | `highPrecision` | reduzir falsos positivos. |
-| `qaMultimodalMode` | `shadow` | auditar MultiQT-lite sem bloquear decisoes ate os gates ficarem estaveis. |
+| `qaMultimodalMode` | `shadow` | auditar sinais multimodais e manter fallback enquanto o MultiQT treinado nao passa os gates. |
 | `allowLocalModelDownloads` | `true` | permitir caminhos locais quando configurados. |
 | `copilotHotkeyEnabled` | `true` | acesso rapido ao copilot. |
 | `copilotRetentionDays` | `7` | reduzir memoria local de curto prazo. |
@@ -598,7 +616,7 @@ Alguns defaults relevantes de `AppPreferences`:
 - Web search e parcialmente dependente do provedor escolhido e das flags de cloud.
 - RAG usa keyword search como fallback principal; embeddings locais/cloud ainda sao caminho de evolucao.
 - Transcricao realtime cloud esta focada em ElevenLabs.
-- MultiQT-lite usa score calibrado deterministico e sinais sinteticos nos testes; CoreML/on-device model fica como caminho futuro quando houver dataset suficiente.
+- MultiQT treinado ainda nao esta empacotado no app. O fallback atual usa score calibrado deterministico e sinais sinteticos nos testes; `Tools/multiqt/` contem o caminho de treino/export Core ML para substituir esse fallback quando houver dataset suficiente e gates aprovados.
 - Gemini e Claude account login dependem dos CLIs oficiais instalados e autenticados.
 - Perplexity account/OAuth esta indisponivel por design nesta versao.
 - Launch at login aparece nas preferencias, mas a integracao final pode exigir ajustes de signing/entitlements.
@@ -615,7 +633,7 @@ Alguns defaults relevantes de `AppPreferences`:
 - Expandir suporte de provedores realtime alem de OpenAI/ElevenLabs.
 - Tornar launch at login totalmente operacional.
 - Evoluir RAG para busca semantica local.
-- Promover `qaMultimodalMode` de `shadow` para `enforced` depois de mais dados reais e shadow logging redigido.
+- Treinar, exportar e aprovar `notchly-multiqt-v1` antes de promover `qaMultimodalMode` de `shadow` para `enforced`.
 - Publicar politica de contribuicao e licenca.
 
 ## Licenca

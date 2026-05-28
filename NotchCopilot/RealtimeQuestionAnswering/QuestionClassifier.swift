@@ -143,7 +143,7 @@ struct QuestionClassificationRulePack: Codable, Hashable, Sendable {
             QuestionTypeRule(type: .statusCheck, markers: ["status", "estado", "situacao", "situación", "api pronta", "progress", "progreso", "terminou", "finished", "ready", "pronto", "done", "está listo", "esta listo", "進捗", "状況", "状態", "終わりました"]),
             QuestionTypeRule(type: .riskAssessment, markers: ["risk", "risco", "blocker", "blockers", "bloqueio", "bloqueio", "break", "quebra", "rompe", "impacta", "afeta", "security", "seguranca", "production", "producao", "migration", "migracao", "migracion", "リスク", "影響", "壊れ", "セキュリティ", "移行"]),
             QuestionTypeRule(type: .technicalDecision, markers: ["approach", "abordagem", "arquitetura", "architecture", "faz mais sentido", "which option", "decision", "decisao", "decisión", "scale", "scalable", "highly available", "alta disponibilidade", "altamente disponivel", "escalaria", "escalar", "system design", "lidar com", "como vamos lidar", "handle authentication", "how should we handle", "how do we handle", "アプローチ", "設計", "判断"]),
-            QuestionTypeRule(type: .technicalExplanation, markers: ["explain", "explicar", "como funciona", "how does", "what is", "what's", "o que e", "que es", "hashid", "hash id", "python", "binary tree", "binary three", "binary dream", "arvore binaria", "invert a tree", "invert tree", "inverter uma arvore", "data structure", "algorithm", "algoritmo", "説明", "仕組み", "どう動く"]),
+            QuestionTypeRule(type: .technicalExplanation, markers: ["explain", "explicar", "como funciona", "how does", "what is", "what's", "o que e", "o que sao", "que es", "cuales son", "hashid", "hash id", "python", "binary tree", "binary three", "binary dream", "arvore binaria", "invert a tree", "invert tree", "inverter uma arvore", "data structure", "algorithm", "algoritmo", "説明", "仕組み", "どう動く"]),
             QuestionTypeRule(type: .deadlineOrEstimate, markers: ["sexta", "friday", "deadline", "prazo", "entregar", "ship", "timeline", "estimate", "estimativa", "fecha", "plazo", "quando entregamos", "when can we ship", "いつ", "期限", "金曜", "金曜日"]),
             QuestionTypeRule(type: .ownership, markers: ["quem vai", "quem fica", "responsavel", "responsável", "owner", "owns this", "who owns", "who will", "who is responsible", "quem cuida", "responsable", "quien se encarga", "quién se encarga", "誰が", "担当", "オーナー"]),
             QuestionTypeRule(type: .productScope, markers: ["scope", "escopo", "mvp", "roadmap", "alcance", "スコープ"]),
@@ -157,8 +157,8 @@ struct QuestionClassificationRulePack: Codable, Hashable, Sendable {
         directedToUserMarkers: ["can you", "could you", "do you know if", "voce pode", "consegue", "você consegue", "me diz", "me fala", "puedes", "podrias", "sabes si", "確認して", "レビューして", "見てもらえ"],
         directedToGroupMarkers: ["anyone", "alguem", "do we", "can we", "should we", "we ", "temos", "podemos", "alguien", "nosotros", "any blockers", "hay algun", "hay alguna", "チーム", "みんな", "誰か"],
         actionableMarkers: ["next", "proximo", "validate", "review", "confirm", "decide", "validar", "revisar", "confirmar", "me diz", "me fala", "確認", "レビュー", "決め"],
-        informationalMarkers: ["what", "what is", "what's", "how", "why", "which", "do you know if", "any blockers", "qual", "quanto", "quanto e", "quantos", "quantas", "o que", "como", "por que", "sabe se", "sera que", "que es", "cual", "cuanto", "cuanto es", "cuantos", "cuantas", "sabes si", "hay algun", "何", "どう", "なぜ", "capital", "hash", "python", "arvore", "tree", "system", "sistema", "scale", "escalar"],
-        technicalObjectMarkers: ["api", "backend", "frontend", "auth", "authentication", "autenticacao", "login", "oauth", "jwt", "database", "cache", "queue", "python", "swift", "kotlin", "javascript", "typescript", "react", "node", "hash", "hashid", "tree", "binary tree", "binary three", "binary dream", "algorithm", "algoritmo", "data structure", "service", "endpoint", "system", "sistema", "architecture", "arquitetura", "認証", "サービス"]
+        informationalMarkers: ["what", "what is", "what's", "how", "why", "which", "do you know if", "any blockers", "qual", "quais", "quais sao", "quanto", "quanto e", "quantos", "quantas", "o que", "o que sao", "como", "por que", "sabe se", "sera que", "que es", "cual", "cuales", "cuales son", "cuanto", "cuanto es", "cuantos", "cuantas", "sabes si", "hay algun", "何", "どう", "なぜ", "capital", "hash", "python", "arvore", "tree", "system", "sistema", "scale", "escalar"],
+        technicalObjectMarkers: ["api", "backend", "frontend", "auth", "authentication", "autenticacao", "login", "oauth", "jwt", "database", "cache", "queue", "python", "swift", "kotlin", "javascript", "typescript", "react", "node", "hash", "hashid", "code", "codigo", "código", "software", "programacao", "programming", "tree", "binary tree", "binary three", "binary dream", "algorithm", "algoritmo", "data structure", "service", "endpoint", "system", "sistema", "architecture", "arquitetura", "認証", "サービス"]
     )
 }
 
@@ -325,7 +325,7 @@ struct QuestionClassifier: QuestionClassifierProvider {
         }
 
         let filter = rhetoricalFilter.evaluation(for: candidate, context: context)
-        let type = questionType(for: candidate.normalizedText, profile: userProfile)
+        let type = questionType(for: candidate, profile: userProfile)
         let directedToUser = isDirectedToUser(candidate.normalizedText, speakerLabel: candidate.speakerLabel, profile: userProfile)
         let directedToGroup = !directedToUser && isDirectedToGroup(candidate.normalizedText)
         let actionable = isActionable(candidate.normalizedText, type: type)
@@ -416,7 +416,8 @@ struct QuestionClassifier: QuestionClassifierProvider {
         )
     }
 
-    private func questionType(for text: String, profile: UserMeetingProfile) -> QuestionType {
+    private func questionType(for candidate: QuestionCandidate, profile: UserMeetingProfile) -> QuestionType {
+        let text = candidate.normalizedText
         for rule in rulePack.typeRules where contains(text, rule.markers) {
             return rule.type
         }
@@ -426,8 +427,8 @@ struct QuestionClassifier: QuestionClassifierProvider {
             return .technicalDecision
         }
         if profile.meetingType == .engineering,
-           contains(text, rulePack.technicalObjectMarkers),
-           contains(text, ["what is", "what's", "how does", "how do", "como", "o que e", "que es", "どう", "説明"]) {
+           contains(text, rulePack.technicalObjectMarkers) || hasTechnicalIdentifierSignal(candidate.rawText),
+           contains(text, ["what is", "what's", "how does", "how do", "which", "qual", "quais", "quais sao", "como", "o que e", "o que sao", "que es", "cual", "cuales", "cuales son", "どう", "説明"]) {
             return .technicalExplanation
         }
         return .generalQuestion
@@ -503,6 +504,13 @@ struct QuestionClassifier: QuestionClassifierProvider {
         text.unicodeScalars.contains { scalar in
             (0x3040...0x30FF).contains(Int(scalar.value)) || (0x4E00...0x9FFF).contains(Int(scalar.value))
         }
+    }
+
+    private func hasTechnicalIdentifierSignal(_ text: String) -> Bool {
+        text.range(of: #"\b[A-Z][A-Z0-9_]{2,}\b"#, options: .regularExpression) != nil
+            || text.contains("_")
+            || text.contains("`")
+            || text.range(of: #"\b[A-Za-z]+[A-Z0-9][A-Za-z0-9]*\b"#, options: .regularExpression) != nil
     }
 }
 

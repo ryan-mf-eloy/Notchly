@@ -1,0 +1,72 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Notchly MultiQT Dataset Row",
+  "type": "object",
+  "required": [
+    "id",
+    "language",
+    "audio_path",
+    "sample_rate",
+    "transcript",
+    "asr_transcript",
+    "start_ms",
+    "end_ms",
+    "is_partial",
+    "label",
+    "response_needed",
+    "critical_negative",
+    "complete",
+    "question_span",
+    "source",
+    "split"
+  ],
+  "properties": {
+    "id": { "type": "string", "minLength": 1 },
+    "language": { "type": "string", "enum": ["pt-BR", "en-US", "es-ES", "ja-JP"] },
+    "audio_path": { "type": "string", "minLength": 1 },
+    "sample_rate": { "type": "integer", "minimum": 8000 },
+    "transcript": { "type": "string" },
+    "asr_transcript": { "type": "string" },
+    "start_ms": { "type": "integer", "minimum": 0 },
+    "end_ms": { "type": "integer", "minimum": 0 },
+    "is_partial": { "type": "boolean" },
+    "asr_confidence": { "type": ["number", "null"], "minimum": 0, "maximum": 1 },
+    "speaker_role": { "type": ["string", "null"] },
+    "label": {
+      "type": "string",
+      "enum": [
+        "answerable_question",
+        "action_request",
+        "status",
+        "risk",
+        "technical_decision",
+        "technical_explanation",
+        "deadline",
+        "ownership",
+        "follow_up",
+        "business",
+        "statement",
+        "small_talk",
+        "operational_check",
+        "rhetorical",
+        "reported_question",
+        "self_answered",
+        "fragment",
+        "title_noise"
+      ]
+    },
+    "response_needed": { "type": "boolean" },
+    "critical_negative": { "type": "boolean" },
+    "complete": { "type": "boolean" },
+    "question_span": {
+      "type": "array",
+      "items": { "type": "integer", "minimum": 0 },
+      "minItems": 2,
+      "maxItems": 2
+    },
+    "source": { "type": "string", "enum": ["manual", "synthetic", "shadow_redacted", "public"] },
+    "split": { "type": "string", "enum": ["train", "dev", "test", "hard_test"] }
+  },
+  "additionalProperties": false
+}
+

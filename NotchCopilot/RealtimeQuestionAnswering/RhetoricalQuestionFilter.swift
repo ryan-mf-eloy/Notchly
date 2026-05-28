@@ -27,12 +27,12 @@ struct QuestionIntentRulePack: Codable, Hashable, Sendable {
             "do we", "do you", "do we have", "can we", "can you", "could we", "could you", "should we",
             "would it", "does this", "will this", "is there", "are there", "any blockers", "main risk",
             "quick question", "one question", "do you know if", "do you know whether", "you know if",
-            "qual", "qual e", "qual a", "quando", "quem", "onde", "por que", "porque", "como", "quanto", "quanto e", "quantos", "quantas", "o que e",
+            "qual", "qual e", "qual a", "quais", "quais sao", "quais sao os", "quais sao as", "quando", "quem", "onde", "por que", "porque", "como", "quanto", "quanto e", "quantos", "quantas", "o que e", "o que sao",
             "voce acha", "voces acham", "alguem sabe se", "conseguimos", "consegue", "podemos", "pode",
             "sera que", "faz sentido", "existe", "temos", "tem como", "da pra", "da para", "sabe se",
             "voce sabe se", "voces sabem se", "me diz qual", "me diz se", "me fala qual", "me fala se",
             "isso quebra", "isso impacta", "isso afeta", "algum problema", "algum bloqueio", "algum risco", "alguma dependencia",
-            "que ", "cual", "cuando", "quien", "donde", "cuanto", "cuanto es", "cuantos", "cuantas", "podrias", "puedes", "tiene sentido", "hay algun",
+            "que ", "cual", "cuales", "cuales son", "cuando", "quien", "donde", "cuanto", "cuanto es", "cuantos", "cuantas", "podrias", "puedes", "tiene sentido", "hay algun",
             "hay alguna", "sabemos si", "sabes si", "saben si", "alguien sabe si", "esto rompe", "esto impacta",
             "どう", "何", "いつ", "誰", "誰が", "どこ", "なぜ", "できますか", "でしょうか", "ですか", "ますか", "ましたか", "ありますか",
             "終わりましたか", "知っていますか", "わかりますか", "必要ですか", "問題ありますか", "影響しますか", "リスク"
@@ -79,9 +79,9 @@ struct QuestionIntentRulePack: Codable, Hashable, Sendable {
         ],
         rhetoricalSuffixes: [" right", " right?", " ne", " ne?", " né", " né?"],
         fragmentPhrases: [
-            "como", "how", "what", "qual", "que", "cual", "cuando", "when", "why", "where", "who", "which",
+            "como", "how", "what", "qual", "quais", "quais sao", "que", "cual", "cuales", "cuales son", "cuando", "when", "why", "where", "who", "which",
             "quanto", "quanto e", "quantos", "quantas", "cuanto", "cuanto es", "cuantos", "cuantas",
-            "o que", "o que e", "what is", "what's", "qual e", "qual a",
+            "o que", "o que e", "o que sao", "what is", "what's", "qual e", "qual a",
             "mas e se", "e quando", "sera que", "but what if", "and when", "what if", "y si", "pero si",
             "もし", "それで", "何", "どう", "なぜ", "いつ", "誰", "どこ"
         ],
@@ -126,18 +126,18 @@ struct QuestionIntentRulePack: Codable, Hashable, Sendable {
             "but we already decided", "we already decided", "ja decidimos", "já decidimos", "ya decidimos"
         ],
         lowInformationWords: [
-            "what", "how", "why", "when", "where", "who", "which", "como", "qual", "que", "quando",
+            "what", "how", "why", "when", "where", "who", "which", "como", "qual", "quais", "que", "quando",
             "onde", "quem", "porque", "cual", "cuando", "donde", "quien", "isso", "this", "that", "eso",
-            "e", "ai", "aí", "it", "there", "何", "どう"
+            "e", "sao", "ai", "aí", "it", "there", "cuales", "son", "何", "どう"
         ],
         stopWords: [
             "a", "an", "the", "to", "of", "for", "in", "on", "at", "is", "are", "be", "we", "you", "i",
             "me", "my", "our", "this", "that", "it", "there", "can", "could", "should", "would", "do", "does",
             "o", "a", "os", "as", "um", "uma", "de", "da", "do", "das", "dos", "para", "em", "no", "na",
             "nos", "nas", "e", "ou", "eu", "voce", "voces", "nos", "isso", "aquilo", "esse", "essa", "este",
-            "esta", "ser", "estar", "vai", "vamos", "como", "qual", "que", "quando", "onde", "quem",
+            "esta", "ser", "estar", "sao", "vai", "vamos", "como", "qual", "quais", "que", "quando", "onde", "quem",
             "el", "la", "los", "las", "un", "una", "de", "del", "para", "en", "y", "o", "yo", "tu",
-            "usted", "nosotros", "eso", "esto", "como", "cual", "cuando", "donde", "quien"
+            "usted", "nosotros", "eso", "esto", "como", "cual", "cuales", "son", "cuando", "donde", "quien"
         ],
         contextualPronouns: [
             "this", "that", "it", "these", "those", "isso", "esse", "essa", "isto", "aquilo", "eso", "esto",
@@ -150,7 +150,8 @@ struct QuestionIntentRulePack: Codable, Hashable, Sendable {
             "python", "swift", "kotlin", "javascript", "typescript", "react", "node", "hash", "hashid",
             "tree", "binary tree", "binary three", "binary dream", "data structure", "algorithm",
             "system", "sistema", "availability", "disponibilidade", "scale", "escalar", "architecture",
-            "arquitetura", "サービス", "認証", "移行", "リスク", "デプロイ", "api"
+            "arquitetura", "programacao", "programming",
+            "サービス", "認証", "移行", "リスク", "デプロイ", "api"
         ],
         answerableScoreThreshold: 1.45,
         partialQuestionPenalty: 0.2

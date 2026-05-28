@@ -2016,3 +2016,6 @@
 {"id":"multiqt-pos-0006","text":"puedes revisar el riesgo antes del release","language":"es-ES","responseNeeded":true,"label":"action_request"}
 {"id":"multiqt-pos-0007","text":"本番への影響は何ですか","language":"ja-JP","responseNeeded":true,"label":"answerable_question"}
 {"id":"multiqt-pos-0008","text":"このフォローアップは誰が担当しますか","language":"ja-JP","responseNeeded":true,"label":"answerable_question"}
+{"id":"multiqt-neg-0011","text":"Quais","language":"pt-BR","responseNeeded":false,"label":"fragment"}
+{"id":"multiqt-neg-0012","text":"Quais são","language":"pt-BR","responseNeeded":false,"label":"fragment"}
+{"id":"multiqt-pos-0009","text":"Quais são os princípios SOLID de programação","language":"pt-BR","responseNeeded":true,"label":"technical_explanation"}

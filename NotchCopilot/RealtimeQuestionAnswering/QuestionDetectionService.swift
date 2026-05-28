@@ -324,8 +324,8 @@ struct QuestionSurfaceAnalyzer {
         }
         let starters = [
             "what", "what is", "what's", "when", "who", "where", "why", "how", "which", "which one",
-            "qual", "qual e", "qual a", "quando", "quem", "onde", "por que", "porque", "como", "quanto", "quantos", "quantas", "o que", "o que e",
-            "que es", "cual", "cuando", "quien", "donde", "por que", "como", "cuanto", "cuantos", "cuantas",
+            "qual", "qual e", "qual a", "quais", "quais sao", "quais sao os", "quais sao as", "quando", "quem", "onde", "por que", "porque", "como", "quanto", "quantos", "quantas", "o que", "o que e", "o que sao",
+            "que es", "cual", "cuales", "cuales son", "cuando", "quien", "donde", "por que", "como", "cuanto", "cuantos", "cuantas",
             "何", "どう", "いつ", "誰", "どこ", "なぜ"
         ]
         guard starters.contains(where: { starter in text == starter || text.hasPrefix("\(starter) ") || text.hasPrefix(starter) && containsCJK(starter) }) else {

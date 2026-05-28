@@ -1560,6 +1560,26 @@ final class NotchCopilotTests: XCTestCase {
         XCTAssertTrue(paragraph.contains("Tech News"))
     }
 
+    func testRichAnswerFallbackCanSuppressEvidenceBlocksForRealtimeQA() {
+        let sources = [
+            AnswerSource(
+                type: .transcript,
+                title: "Transcript",
+                snippet: "Ana mentioned the rollout risk.",
+                reference: nil
+            )
+        ]
+        let payload = RichAnswerFallbackBuilder.payload(
+            text: "Use a cautious answer.",
+            format: .paragraph,
+            sources: sources,
+            includeEvidence: false
+        )
+
+        XCTAssertFalse(payload.blocks.contains { $0.type == RichAnswerBlockKind.memoryResults.rawValue })
+        XCTAssertTrue(payload.blocks.contains { $0.type == RichAnswerBlockKind.paragraph.rawValue })
+    }
+
     func testRichAnswerFallbackKeepsCodeAndCalculationShapes() {
         let codePayload = RichAnswerFallbackBuilder.payload(
             text: "Use isto:\n```swift\nlet total = 42\n```",
@@ -7044,6 +7064,66 @@ final class NotchCopilotTests: XCTestCase {
         XCTAssertEqual(classification.decisionSignals?.contains("terminal_pause"), true)
     }
 
+    func testRealtimeQADetectsPortuguesePluralQuestionWithoutPunctuation() async throws {
+        let text = "Quais são os princípios SOLID de programação"
+        let meetingId = UUID()
+        let segment = TranscriptSegment(
+            meetingId: meetingId,
+            speakerLabel: "Speaker",
+            text: text,
+            originalLanguage: "pt-BR",
+            startTime: 0,
+            endTime: 2.4,
+            confidence: 0.96,
+            isFinal: true
+        )
+        let signal = QuestionMultimodalSignal(segment: segment)
+        let context = TranscriptContext(
+            recentTranscript: text,
+            mediumTranscript: text,
+            completeTranscript: text,
+            dominantLanguage: "pt-BR",
+            currentSegment: segment
+        )
+
+        let candidates = QuestionDetectionService().detectCandidates(from: segment, context: context, signal: signal)
+        let candidate = try XCTUnwrap(candidates.first)
+        let classification = try await QuestionClassifier(multimodalMode: .enforced)
+            .classifyQuestion(candidate: candidate, context: context, userProfile: makeProfile())
+
+        XCTAssertTrue(classification.isQuestion)
+        XCTAssertTrue(classification.responseNeeded)
+        XCTAssertTrue(classification.complete)
+        XCTAssertEqual(classification.questionType, .technicalExplanation)
+        XCTAssertEqual(classification.extractedQuestion, text)
+    }
+
+    func testRealtimeQAIgnoresPortuguesePluralQuestionFragments() async throws {
+        let detector = QuestionDetectionService()
+
+        for text in ["Quais", "Quais são"] {
+            let segment = TranscriptSegment(
+                meetingId: UUID(),
+                speakerLabel: "Speaker",
+                text: text,
+                originalLanguage: "pt-BR",
+                startTime: 0,
+                endTime: 0.4,
+                confidence: 0.96,
+                isFinal: true
+            )
+            let context = TranscriptContext(
+                recentTranscript: text,
+                mediumTranscript: text,
+                completeTranscript: text,
+                dominantLanguage: "pt-BR",
+                currentSegment: segment
+            )
+
+            XCTAssertTrue(detector.detectCandidates(from: segment, context: context).isEmpty, text)
+        }
+    }
+
     func testRealtimeQAEngineDoesNotSurfaceUnstablePartialBeforeFinal() async throws {
         let engine = TestRealtimeQuestionAnsweringEngine()
         var preferences = AppPreferences()
@@ -7176,6 +7256,49 @@ final class NotchCopilotTests: XCTestCase {
         XCTAssertTrue(event.1.responseNeeded)
         XCTAssertTrue(event.1.complete)
         XCTAssertEqual(event.1.extractedQuestion, "Quanto é 2 + 2")
+    }
+
+    func testRealtimeQAEngineSurfacesPortuguesePluralQuestionPartialAfterFallback() async throws {
+        let engine = TestRealtimeQuestionAnsweringEngine()
+        var preferences = AppPreferences()
+        preferences.qaMultimodalMode = .enforced
+        let meetingId = UUID()
+        let meeting = MeetingSession(id: meetingId, title: "Live Apple Speech", status: .listening)
+        let partial = TranscriptSegment(
+            meetingId: meetingId,
+            speakerLabel: "Speaker",
+            text: "Quais são os princípios SOLID de programação",
+            originalLanguage: "pt-BR",
+            startTime: 0,
+            endTime: 2.4,
+            confidence: 0.96,
+            isFinal: false
+        )
+
+        let eventTask = Task { () -> [RealtimeQuestionEvent] in
+            var events: [RealtimeQuestionEvent] = []
+            for await event in engine.eventBus.events {
+                events.append(event)
+                if case .questionDetected = event { break }
+            }
+            return events
+        }
+
+        await engine.ingest(segment: partial, meeting: meeting, preferences: preferences)
+        try await Task.sleep(for: .milliseconds(1_250))
+        engine.stop()
+
+        let events = await eventTask.value
+        let detected = events.compactMap { event -> (QuestionCandidate, QuestionClassification)? in
+            if case let .questionDetected(candidate, classification) = event {
+                return (candidate, classification)
+            }
+            return nil
+        }
+        let event = try XCTUnwrap(detected.first)
+        XCTAssertEqual(event.0.rawText, partial.text)
+        XCTAssertTrue(event.1.responseNeeded)
+        XCTAssertEqual(event.1.extractedQuestion, partial.text)
     }
 
     func testRealtimeQAGoldFixtureBenchmarkMeetsLatencyTargets() async throws {

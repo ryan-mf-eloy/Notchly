@@ -1,0 +1,32 @@
+{
+  "positive_labels": [
+    "answerable_question",
+    "action_request",
+    "status",
+    "risk",
+    "technical_decision",
+    "technical_explanation",
+    "deadline",
+    "ownership",
+    "follow_up",
+    "business"
+  ],
+  "critical_negative_labels": [
+    "small_talk",
+    "operational_check",
+    "rhetorical",
+    "reported_question",
+    "self_answered",
+    "fragment",
+    "title_noise"
+  ],
+  "noncritical_negative_labels": [
+    "statement"
+  ],
+  "languages": [
+    "pt-BR",
+    "en-US",
+    "es-ES",
+    "ja-JP"
+  ]
+}

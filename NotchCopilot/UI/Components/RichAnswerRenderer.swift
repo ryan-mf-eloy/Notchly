@@ -19,6 +19,7 @@ struct RichAnswerRenderer: View {
     var density: DynamicAnswerContentView.Density = .qa
     var leadStyle: RichAnswerLeadStyle = .card
     var showsMetadataBadges = false
+    var showsEvidenceBlocks = true
     var onCopy: (() -> Void)?
     var onOpenSources: (() -> Void)?
     var onRegenerateWithWeb: (() -> Void)?
@@ -34,7 +35,8 @@ struct RichAnswerRenderer: View {
                 confidence: confidence,
                 riskLevel: riskLevel,
                 tone: tone,
-                caveats: caveats
+                caveats: caveats,
+                includeEvidence: showsEvidenceBlocks
             )
     }
 
@@ -79,7 +81,11 @@ struct RichAnswerRenderer: View {
         case .timeline:
             StepsView(title: block.title, items: block.items, numbered: false)
         case .memoryResults:
-            MeetingEvidenceView(title: block.title ?? "Evidence", items: block.items, sources: sources)
+            if showsEvidenceBlocks {
+                MeetingEvidenceView(title: block.title ?? "Evidence", items: block.items, sources: sources)
+            } else {
+                EmptyView()
+            }
         case .clarification:
             ClarificationCard(block: block, actions: block.actions, onCopy: onCopy, onOpenSources: onOpenSources, onRegenerateWithWeb: onRegenerateWithWeb)
         case .warning:

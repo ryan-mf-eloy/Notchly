@@ -38,12 +38,6 @@ struct TranscriptLiveView: View {
     private func segmentRow(_ segment: TranscriptSegment) -> some View {
         VStack(alignment: .leading, spacing: 9) {
             HStack(spacing: 8) {
-                Image(systemName: segment.audioSource.isUserSide ? "mic.fill" : "speaker.wave.2.fill")
-                    .font(.system(size: 10.5, weight: .semibold))
-                    .foregroundStyle(MinimalTheme.historyAccent)
-                Text(segment.audioSource.displayName)
-                    .font(.system(size: 10.5, weight: .semibold))
-                    .foregroundStyle(MinimalTheme.historyMuted)
                 Text(DateFormatting.duration(segment.startTime))
                     .font(.system(size: 10, weight: .medium, design: .monospaced))
                     .foregroundStyle(MinimalTheme.historyFaint)

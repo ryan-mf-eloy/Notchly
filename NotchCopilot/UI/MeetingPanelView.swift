@@ -173,6 +173,7 @@ struct MeetingPanelView: View {
                     caveats: appState.suggestedAnswer?.caveats ?? [],
                     allowRemoteLinkPreview: allowRemoteLinkPreview,
                     leadStyle: .plain,
+                    showsEvidenceBlocks: showsAnswerEvidenceBlocks,
                     onCopy: { appState.copySelectedAnswerToPasteboard() },
                     onOpenSources: { appState.openSelectedAnswerSources() },
                     onRegenerateWithWeb: { appState.regenerateSelectedCopilotAnswerWithWeb() }
@@ -307,6 +308,12 @@ struct MeetingPanelView: View {
         appState.suggestedAnswer?.answerFormat ?? inferredFormat(tool: appState.activeCopilotInteraction?.tool, intent: appState.activeCopilotInteraction?.intent)
     }
 
+    private var showsAnswerEvidenceBlocks: Bool {
+        appState.suggestedAnswer == nil
+            && appState.activeQuestion == nil
+            && appState.activeCopilotInteraction?.questionId == nil
+    }
+
     private var allowRemoteLinkPreview: Bool {
         !appState.preferences.localOnlyMode
     }
@@ -370,49 +377,9 @@ struct MeetingPanelView: View {
                     .transition(.opacity.combined(with: .scale(scale: 0.92)))
             }
         }
-        .overlay(alignment: .topLeading) {
-            if let badgeText = transcriptDiagnosticsBadgeText, !segments.isEmpty {
-                Text(badgeText)
-                    .font(.system(size: 9.2, weight: .medium))
-                    .foregroundStyle(Color.white.opacity(0.46))
-                    .lineLimit(1)
-                    .padding(.horizontal, 8)
-                    .padding(.vertical, 4)
-                    .background(
-                        Capsule(style: .continuous)
-                            .fill(Color.black.opacity(0.18))
-                    )
-                    .overlay(
-                        Capsule(style: .continuous)
-                            .stroke(Color.white.opacity(0.045), lineWidth: 0.5)
-                    )
-                    .padding(.top, 7)
-                    .padding(.leading, 9)
-                    .allowsHitTesting(false)
-            }
-        }
         .animation(.easeOut(duration: 0.12), value: segments.isEmpty)
         .animation(.easeOut(duration: 0.16), value: appState.shouldShowTranscriptQuestionLoadingIndicator)
         .accessibilityIdentifier("qa-transcript-stream")
-    }
-
-    private var transcriptDiagnosticsBadgeText: String? {
-        guard appState.currentMeeting != nil else { return nil }
-        let engine = segments.reversed().compactMap(\.transcriptionEngine).first ?? .appleSpeech
-        let vocabularyActive = appState.speechVocabularyTerms.contains { $0.enabled && !$0.isSystemSeed }
-        let suffix = vocabularyActive ? " + Vocabulary" : ""
-        switch engine {
-        case .speechAnalyzer:
-            return "SpeechAnalyzer\(suffix)"
-        case .dictationTranscriber:
-            return "DictationTranscriber\(suffix)"
-        case .appleSpeech:
-            return "Apple Speech\(suffix)"
-        case .elevenLabs:
-            return "ElevenLabs"
-        case .unavailable:
-            return vocabularyActive ? "Apple Speech + Vocabulary" : "Apple Speech"
-        }
     }
 
     private var transcriptQuestionStatusText: String {
@@ -562,6 +529,12 @@ private struct CopilotIsolatedAnswerPanelView: View {
         .frame(maxWidth: .infinity, alignment: .leading)
     }
 
+    private var showsAnswerEvidenceBlocks: Bool {
+        appState.suggestedAnswer == nil
+            && appState.activeQuestion == nil
+            && appState.activeCopilotInteraction?.questionId == nil
+    }
+
     @ViewBuilder
     private var answerSection: some View {
         if answerText.isEmpty && appState.answerStage.isInProgress {
@@ -589,6 +562,7 @@ private struct CopilotIsolatedAnswerPanelView: View {
                 caveats: appState.suggestedAnswer?.caveats ?? [],
                 allowRemoteLinkPreview: !appState.preferences.localOnlyMode,
                 leadStyle: .plain,
+                showsEvidenceBlocks: showsAnswerEvidenceBlocks,
                 onCopy: { appState.copySelectedAnswerToPasteboard() },
                 onOpenSources: { appState.openSelectedAnswerSources() },
                 onRegenerateWithWeb: { appState.regenerateSelectedCopilotAnswerWithWeb() }
@@ -954,6 +928,7 @@ private struct CopilotTimelineRow: View {
                     confidence: entry.confidence,
                     allowRemoteLinkPreview: allowRemoteLinkPreview,
                     density: .detail,
+                    showsEvidenceBlocks: entry.questionId == nil,
                     onCopy: onCopy,
                     onOpenSources: onOpenSources,
                     onRegenerateWithWeb: onRegenerateWeb
@@ -2137,7 +2112,6 @@ private enum TranscriptLayout {
                             for: segment,
                             originalText: pair.original,
                             translatedText: pair.translation,
-                            showSourceLabel: index == 0,
                             translationOnly: false
                         ),
                         spacingAfter: index == pairs.count - 1 ? 14 : 8
@@ -2148,13 +2122,12 @@ private enum TranscriptLayout {
             let chunks = TranscriptReadableChunker.chunks(for: translationLine.text)
             return chunks.enumerated().map { index, chunk in
                 Block(
-                    text: attributedText(
-                        for: segment,
-                        originalText: nil,
-                        translatedText: chunk,
-                        showSourceLabel: index == 0,
-                        translationOnly: true
-                    ),
+                        text: attributedText(
+                            for: segment,
+                            originalText: nil,
+                            translatedText: chunk,
+                            translationOnly: true
+                        ),
                     spacingAfter: index == chunks.count - 1 ? 14 : 8
                 )
             }
@@ -2167,7 +2140,6 @@ private enum TranscriptLayout {
                     for: segment,
                     originalText: chunk,
                     translatedText: nil,
-                    showSourceLabel: index == 0,
                     translationOnly: false
                 ),
                 spacingAfter: index == chunks.count - 1 ? 13 : 7
@@ -2179,34 +2151,18 @@ private enum TranscriptLayout {
         for segment: TranscriptSegment,
         originalText: String?,
         translatedText: String?,
-        showSourceLabel: Bool,
         translationOnly: Bool
     ) -> NSAttributedString {
         let result = NSMutableAttributedString()
-        let sourceColor = NSColor.white.withAlphaComponent(segment.audioSource.isUserSide ? 0.30 : 0.40)
         let transcriptionColor = transcriptTextColor(for: segment)
         let translatedColor = NSColor.white.withAlphaComponent(0.96)
         let originalSecondaryColor = NSColor.white.withAlphaComponent(0.46)
-        let labelParagraph = NSMutableParagraphStyle()
-        labelParagraph.lineSpacing = 0
-        labelParagraph.paragraphSpacing = 4.2
         let primaryParagraph = NSMutableParagraphStyle()
         primaryParagraph.lineSpacing = 5.0
         primaryParagraph.paragraphSpacing = translatedText == nil ? 1.2 : 4.8
         let secondaryParagraph = NSMutableParagraphStyle()
         secondaryParagraph.lineSpacing = 4.4
         secondaryParagraph.paragraphSpacing = 1.2
-
-        if showSourceLabel {
-            result.append(NSAttributedString(
-                string: segment.audioSource.displayName.uppercased() + "\n",
-                attributes: [
-                    .font: NSFont.systemFont(ofSize: 9.4, weight: .medium),
-                    .foregroundColor: sourceColor,
-                    .paragraphStyle: labelParagraph
-                ]
-            ))
-        }
 
         if let translatedText {
             result.append(NSAttributedString(

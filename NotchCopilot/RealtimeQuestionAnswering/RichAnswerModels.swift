@@ -302,7 +302,8 @@ enum RichAnswerFallbackBuilder {
         confidence: Double? = nil,
         riskLevel: AnswerRiskLevel? = nil,
         tone: AnswerStyle? = nil,
-        caveats: [String] = []
+        caveats: [String] = [],
+        includeEvidence: Bool = true
     ) -> RichAnswerPayload {
         let format = format ?? .paragraph
         let text = RichAnswerTextSanitizer.removingRenderedSourceURLs(from: rawText, sources: sources)
@@ -343,7 +344,7 @@ enum RichAnswerFallbackBuilder {
             blocks.append(RichAnswerBlockPayload(type: RichAnswerBlockKind.paragraph.rawValue, text: text))
         }
 
-        let nonWebEvidence = evidenceItems(from: sources)
+        let nonWebEvidence = includeEvidence ? evidenceItems(from: sources) : []
         if !nonWebEvidence.isEmpty, format != .memoryResults {
             blocks.append(RichAnswerBlockPayload(type: RichAnswerBlockKind.memoryResults.rawValue, title: "Evidence", items: nonWebEvidence))
         }
