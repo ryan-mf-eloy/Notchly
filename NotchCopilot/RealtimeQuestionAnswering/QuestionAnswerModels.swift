@@ -72,6 +72,7 @@ struct QuestionMultimodalSignal: Codable, Hashable, Sendable {
     var gapCount: Int
     var noiseFloor: Double?
     var audioEnergy: Double?
+    var audioLogMel: QuestionAudioLogMelFeature?
     var createdAt: Date
 
     init(
@@ -93,6 +94,7 @@ struct QuestionMultimodalSignal: Codable, Hashable, Sendable {
         gapCount: Int = 0,
         noiseFloor: Double? = nil,
         audioEnergy: Double? = nil,
+        audioLogMel: QuestionAudioLogMelFeature? = nil,
         createdAt: Date = Date()
     ) {
         self.language = language
@@ -113,6 +115,7 @@ struct QuestionMultimodalSignal: Codable, Hashable, Sendable {
         self.gapCount = max(0, gapCount)
         self.noiseFloor = noiseFloor.map { min(max($0, 0), 1) }
         self.audioEnergy = audioEnergy.map { min(max($0, 0), 1) }
+        self.audioLogMel = audioLogMel
         self.createdAt = createdAt
     }
 
@@ -137,6 +140,7 @@ struct QuestionMultimodalSignal: Codable, Hashable, Sendable {
             gapCount: quality?.gapCount ?? 0,
             noiseFloor: quality.map { Double($0.noiseFloor) },
             audioEnergy: segment.audioEnergy,
+            audioLogMel: nil,
             createdAt: segment.createdAt
         )
     }
@@ -146,6 +150,79 @@ struct QuestionMultimodalSignal: Codable, Hashable, Sendable {
         copy.partialStability = min(max(stability, 0), 1)
         copy.partialRevisionCount = max(0, revisionCount)
         return copy
+    }
+}
+
+struct QuestionAudioLogMelFeature: Codable, Hashable, Sendable {
+    static let expectedBandCount = 40
+    static let maximumFrameCount = 600
+
+    var bands: Int
+    var frames: Int
+    var values: [Double]
+    var source: String
+
+    init(
+        bands: Int = Self.expectedBandCount,
+        frames: Int,
+        values: [Double],
+        source: String = "logmel"
+    ) {
+        let safeBands = min(max(bands, 1), Self.expectedBandCount)
+        let safeFrames = min(max(frames, 1), Self.maximumFrameCount)
+        let expectedCount = safeBands * safeFrames
+        var normalized = Array(values.prefix(expectedCount)).map { min(max($0, -8), 8) }
+        if normalized.count < expectedCount {
+            normalized += Array(repeating: 0, count: expectedCount - normalized.count)
+        }
+        self.bands = safeBands
+        self.frames = safeFrames
+        self.values = normalized
+        self.source = source
+    }
+
+    static func proxy(from signal: QuestionMultimodalSignal, targetFrames: Int) -> QuestionAudioLogMelFeature {
+        let frames = min(max(targetFrames, 1), maximumFrameCount)
+        let energy = min(max(signal.audioEnergy ?? signal.rms ?? 0.006, 0.0001), 1)
+        let peak = min(max(signal.peak ?? energy, 0.0001), 1)
+        let noise = min(max(signal.noiseFloor ?? 0.001, 0.00001), 1)
+        let durationScale = min(max(signal.duration / 8, 0.12), 1)
+        let confidence = min(max(signal.asrConfidence ?? 0.85, 0), 1)
+        let silencePenalty = (signal.isSilence || signal.isTooQuiet) ? 0.42 : 1
+        let clippingPenalty = signal.isClipping ? 0.82 : 1
+        let gapPenalty = signal.gapCount > 0 ? max(0.55, 1 - Double(signal.gapCount) * 0.08) : 1
+        let baseDb = log10(max(energy, 0.0001)) * 2.4
+        let peakLift = log10(max(peak, 0.0001) / max(energy, 0.0001)) * 0.25
+        let noiseLift = log10(max(noise, 0.00001)) * 0.18
+        var values: [Double] = []
+        values.reserveCapacity(expectedBandCount * frames)
+        for band in 0..<expectedBandCount {
+            let bandPosition = Double(band) / Double(max(expectedBandCount - 1, 1))
+            let speechEnvelope = exp(-pow((bandPosition - 0.38) / 0.28, 2))
+            let highBandRollOff = 1 - bandPosition * 0.42
+            for frame in 0..<frames {
+                let framePosition = Double(frame) / Double(max(frames - 1, 1))
+                let onset = 0.80 + 0.20 * sin(framePosition * .pi)
+                let terminalPause = signal.hasTerminalPause && framePosition > 0.88 ? 0.68 : 1
+                let partialPenalty = signal.isPartial ? min(max(signal.partialStability, 0.35), 1) : 1
+                let shaped = (baseDb + speechEnvelope * 1.35 + highBandRollOff * 0.35 + peakLift - noiseLift)
+                    * durationScale
+                    * silencePenalty
+                    * clippingPenalty
+                    * gapPenalty
+                    * onset
+                    * terminalPause
+                    * partialPenalty
+                    * (0.72 + confidence * 0.28)
+                values.append(min(max(shaped, -8), 8))
+            }
+        }
+        return QuestionAudioLogMelFeature(frames: frames, values: values, source: "signal_proxy")
+    }
+
+    func value(band: Int, frame: Int) -> Double {
+        guard band >= 0, band < bands, frame >= 0, frame < frames else { return 0 }
+        return values[(band * frames) + frame]
     }
 }
 
@@ -338,7 +415,7 @@ private struct QuestionMultiQTFeatureEncoder {
         signal: QuestionMultimodalSignal?
     ) throws -> MLFeatureProvider {
         let text = try textTokens(for: candidate.rawText)
-        let audio = try neutralAudioLogMel()
+        let audio = try audioLogMelTensor(for: signal)
         let scalars = try scalarTensor(for: signal, language: candidate.language)
         return try MLDictionaryFeatureProvider(dictionary: [
             "text_tokens": text,
@@ -366,14 +443,28 @@ private struct QuestionMultiQTFeatureEncoder {
         return output
     }
 
-    private func neutralAudioLogMel() throws -> MLMultiArray {
+    private func audioLogMelTensor(for signal: QuestionMultimodalSignal?) throws -> MLMultiArray {
         let maxFrames = max(1, metadata.config.maxFrames)
         let output = try MLMultiArray(
             shape: [NSNumber(value: 1), NSNumber(value: 40), NSNumber(value: maxFrames)],
             dataType: .float32
         )
-        for index in 0..<output.count {
-            output[index] = 0
+        let feature = signal?.audioLogMel ?? signal.map {
+            QuestionAudioLogMelFeature.proxy(from: $0, targetFrames: maxFrames)
+        }
+        guard let feature else {
+            for index in 0..<output.count {
+                output[index] = 0
+            }
+            return output
+        }
+        for band in 0..<QuestionAudioLogMelFeature.expectedBandCount {
+            for frame in 0..<maxFrames {
+                let sourceFrame = min(frame, max(feature.frames - 1, 0))
+                output[[NSNumber(value: 0), NSNumber(value: band), NSNumber(value: frame)]] = NSNumber(
+                    value: feature.value(band: min(band, feature.bands - 1), frame: sourceFrame)
+                )
+            }
         }
         return output
     }

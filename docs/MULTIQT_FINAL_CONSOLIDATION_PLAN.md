@@ -106,6 +106,7 @@ The model must predict more than a binary question flag:
    - Uses `MLModelConfiguration.computeUnits = .all` in normal mode, CPU-only benchmark mode for reproducibility.
    - Falls back to MultiQT-lite only when model is missing or explicitly disabled.
    - Current repo integration point: `CoreMLQuestionMultiQTModelRunner` feeds trained predictions into `QuestionClassifier` in shadow/enforced modes.
+   - Runtime audio contract: `QuestionAudioLogMelFeature` carries captured log-mel features when available; otherwise the runner uses a redacted numeric signal proxy derived from RMS, peak, energy, noise, duration, finality, partial stability, and gaps. The proxy is not sufficient for the final gate dataset, but it prevents a bundled model from becoming text-only when raw audio is unavailable.
 
 5. `MultiQTDecisionSmoother`
    - Requires confidence hysteresis.
@@ -281,6 +282,11 @@ Required metadata sidecar:
     "max_tokens": 96,
     "max_frames": 600,
     "scalar_count": 7
+  },
+  "audio_feature_contract": {
+    "bands": 40,
+    "raw_audio_persisted": false,
+    "runtime_fallback": "signal_proxy"
   }
 }
 ```

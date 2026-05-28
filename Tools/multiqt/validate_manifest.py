@@ -49,6 +49,7 @@ def main() -> int:
     )
     allowed_splits = {"train", "dev", "test", "hard_test"}
     allowed_sources = {"manual", "synthetic", "shadow_redacted", "public"}
+    allowed_audio_feature_sources = {"logmel", "signal_proxy", "synthetic_logmel"}
 
     errors: list[str] = []
     summary: dict[str, Any] = {
@@ -73,6 +74,7 @@ def main() -> int:
                 allowed_labels,
                 allowed_sources,
                 allowed_splits,
+                allowed_audio_feature_sources,
                 args.audio_root or manifest.parent,
                 args.check_audio,
                 errors,
@@ -105,6 +107,7 @@ def validate_row(
     allowed_labels: set[str],
     allowed_sources: set[str],
     allowed_splits: set[str],
+    allowed_audio_feature_sources: set[str],
     audio_root: Path,
     check_audio: bool,
     errors: list[str],
@@ -134,6 +137,18 @@ def validate_row(
         add_error(errors, max_errors, f"{location}: unsupported source {source}")
     if split not in allowed_splits:
         add_error(errors, max_errors, f"{location}: unsupported split {split}")
+
+    audio_feature_source = row.get("audio_feature_source")
+    if audio_feature_source is not None and audio_feature_source not in allowed_audio_feature_sources:
+        add_error(
+            errors,
+            max_errors,
+            f"{location}: unsupported audio_feature_source {audio_feature_source}",
+        )
+
+    audio_feature_path = row.get("audio_feature_path")
+    if audio_feature_path is not None and not isinstance(audio_feature_path, str):
+        add_error(errors, max_errors, f"{location}: audio_feature_path has invalid type")
 
     start_ms = row.get("start_ms", 0)
     end_ms = row.get("end_ms", 0)
@@ -169,6 +184,12 @@ def validate_row(
                 resolved = audio_root / resolved
             if not resolved.exists():
                 add_error(errors, max_errors, f"{location}: audio file not found")
+        if isinstance(audio_feature_path, str):
+            resolved = Path(audio_feature_path)
+            if not resolved.is_absolute():
+                resolved = audio_root / resolved
+            if not resolved.exists():
+                add_error(errors, max_errors, f"{location}: audio feature file not found")
 
 
 def add_error(errors: list[str], max_errors: int, message: str) -> None:

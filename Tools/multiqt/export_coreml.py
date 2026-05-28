@@ -77,6 +77,13 @@ def main() -> int:
                 "audio_logmel": [1, 40, max_frames],
                 "scalars": [1, scalar_count],
             },
+            "audio_feature_contract": {
+                "bands": 40,
+                "max_frames": max_frames,
+                "raw_audio_persisted": False,
+                "runtime_fallback": "signal_proxy",
+                "description": "Runtime uses captured log-mel features when attached to QuestionMultimodalSignal, otherwise a numeric proxy from RMS/peak/energy/noise/temporal features.",
+            },
             "outputs": ["response_logit", "label_logits", "complete_logit", "rhetorical_logit"],
         },
     )

@@ -255,7 +255,7 @@ O plano final esta em `docs/MULTIQT_FINAL_CONSOLIDATION_PLAN.md`. O workspace ex
 - avaliacao por precision/recall, negativos criticos e latencia;
 - export para Core ML (`notchly-multiqt-v1.mlpackage`) com sidecar `notchly-multiqt-v1.metadata.json`.
 
-No runtime, `CoreMLQuestionMultiQTModelRunner` procura `notchly-multiqt-v1.mlmodelc` e o metadata no bundle. Quando esses artefatos existem, `QuestionClassifier` usa a predicao treinada em `shadow`/`enforced`; quando nao existem, degrada para o fallback atual sem crash.
+No runtime, `CoreMLQuestionMultiQTModelRunner` procura `notchly-multiqt-v1.mlmodelc` e o metadata no bundle. Quando esses artefatos existem, `QuestionClassifier` usa a predicao treinada em `shadow`/`enforced`; quando nao existem, degrada para o fallback atual sem crash. A entrada acustica usa `QuestionAudioLogMelFeature` quando o app anexar log-mel capturado; enquanto isso, usa um proxy numerico de RMS/peak/energia/noise/duracao, sem persistir audio bruto.
 
 Enquanto o artefato treinado nao passa os gates, o app cria `QuestionMultimodalSignal` a partir do `TranscriptSegment`, qualidade de audio por fonte e energia disponivel. Os campos sao numericos/redigiveis: idioma, confidence ASR, final/partial, speaker/source, duracao, estabilidade entre parciais, pausa terminal, RMS/peak, clipping, silencio/tooQuiet, gaps, noise floor e `audioEnergy`.
 

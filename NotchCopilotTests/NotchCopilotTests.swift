@@ -6984,6 +6984,11 @@ final class NotchCopilotTests: XCTestCase {
     }
 
     func testQuestionMultimodalSignalCodableAndClampsUnsafeAudioValues() throws {
+        let audioLogMel = QuestionAudioLogMelFeature(
+            frames: 2,
+            values: Array(repeating: 12, count: 80),
+            source: "unit_test"
+        )
         let signal = QuestionMultimodalSignal(
             language: "en-US",
             asrConfidence: 0.91,
@@ -7002,7 +7007,8 @@ final class NotchCopilotTests: XCTestCase {
             isTooQuiet: false,
             gapCount: -1,
             noiseFloor: 0.004,
-            audioEnergy: 0.03
+            audioEnergy: 0.03,
+            audioLogMel: audioLogMel
         )
 
         let data = try JSONEncoder().encode(signal)
@@ -7013,6 +7019,38 @@ final class NotchCopilotTests: XCTestCase {
         XCTAssertEqual(decoded.peak ?? -1, 1, accuracy: 0.0001)
         XCTAssertEqual(decoded.gapCount, 0)
         XCTAssertEqual(decoded.audioSource, .microphone)
+        XCTAssertEqual(decoded.audioLogMel?.frames, 2)
+        XCTAssertEqual(decoded.audioLogMel?.bands, 40)
+        XCTAssertEqual(decoded.audioLogMel?.values.first, 8)
+    }
+
+    func testQuestionAudioLogMelProxyCarriesAcousticSignalWithoutRawAudio() throws {
+        let signal = QuestionMultimodalSignal(
+            language: "pt-BR",
+            asrConfidence: 0.88,
+            isFinal: true,
+            isPartial: false,
+            speakerLabel: "Speaker",
+            audioSource: .microphone,
+            duration: 2.4,
+            hasTerminalPause: true,
+            rms: 0.024,
+            peak: 0.08,
+            isClipping: false,
+            isSilence: false,
+            isTooQuiet: false,
+            gapCount: 0,
+            noiseFloor: 0.002,
+            audioEnergy: 0.026
+        )
+
+        let feature = QuestionAudioLogMelFeature.proxy(from: signal, targetFrames: 24)
+
+        XCTAssertEqual(feature.bands, 40)
+        XCTAssertEqual(feature.frames, 24)
+        XCTAssertEqual(feature.values.count, 960)
+        XCTAssertTrue(feature.values.contains { abs($0) > 0.0001 })
+        XCTAssertEqual(feature.source, "signal_proxy")
     }
 
     func testRealtimeQAMultimodalScorerBlocksUnstablePartialWhenEnforced() async throws {

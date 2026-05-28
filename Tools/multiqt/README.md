@@ -2,7 +2,7 @@
 
 This directory is the offline training/export workspace for the final trained MultiQT-style realtime question tracker.
 
-The app currently ships a deterministic MultiQT-lite fallback. The final target is a trained audio+text sequence model exported to Core ML as `notchly-multiqt-v1.mlmodelc`.
+The app currently ships a deterministic MultiQT-lite fallback plus an optional trained Core ML runtime. The final target is a trained audio+text sequence model exported to Core ML as `notchly-multiqt-v1.mlmodelc`.
 
 See the full execution plan:
 
@@ -62,6 +62,8 @@ python3 Tools/multiqt/validate_manifest.py \
   --audio-root Data/multiqt \
   --check-audio
 ```
+
+Manifests may include `audio_feature_path` and `audio_feature_source` (`logmel`, `signal_proxy`, or `synthetic_logmel`). The production app never stores raw audio for this path: runtime inference consumes an in-memory `QuestionAudioLogMelFeature` when available, otherwise it falls back to a redacted numeric proxy from RMS, peak, energy, noise, duration, pause, confidence, and stability signals.
 
 Smoke-test the toolchain without audio files:
 
