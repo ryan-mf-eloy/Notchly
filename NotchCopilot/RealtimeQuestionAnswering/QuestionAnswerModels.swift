@@ -677,10 +677,9 @@ final class CopilotActivationTraceStore {
         if let fileURL {
             self.fileURL = fileURL
         } else {
-            let baseURL = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first
-                ?? FileManager.default.temporaryDirectory
-            self.fileURL = baseURL
-                .appendingPathComponent("NotchCopilot", isDirectory: true)
+            let rootURL = (try? FileStorageService.applicationSupportDirectory())
+                ?? FileManager.default.temporaryDirectory.appendingPathComponent(FileStorageService.applicationSupportDirectoryName, isDirectory: true)
+            self.fileURL = rootURL
                 .appendingPathComponent("copilot_activation_traces.jsonl", isDirectory: false)
         }
     }

@@ -11,6 +11,9 @@ enum FileStorageError: LocalizedError {
 }
 
 struct FileStorageService {
+    static let applicationSupportDirectoryName = "Notchly"
+    static let legacyApplicationSupportDirectoryName = "Notch Copilot"
+
     let root: URL
     private let cryptor: LocalDataCryptor
     private let transcriptDirectoryName = "transcripts"
@@ -25,7 +28,12 @@ struct FileStorageService {
         guard let base = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first else {
             throw FileStorageError.missingApplicationSupport
         }
-        let directory = base.appending(path: "Notch Copilot", directoryHint: .isDirectory)
+        let directory = base.appending(path: applicationSupportDirectoryName, directoryHint: .isDirectory)
+        let legacyDirectory = base.appending(path: legacyApplicationSupportDirectoryName, directoryHint: .isDirectory)
+        if !FileManager.default.fileExists(atPath: directory.path),
+           FileManager.default.fileExists(atPath: legacyDirectory.path) {
+            try FileManager.default.moveItem(at: legacyDirectory, to: directory)
+        }
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         return directory
     }

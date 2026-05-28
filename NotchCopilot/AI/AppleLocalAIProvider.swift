@@ -121,10 +121,7 @@ struct LocalLLMModelManager {
     }
 
     private func modelsRoot() throws -> URL {
-        let base = fileManager.urls(for: .applicationSupportDirectory, in: .userDomainMask).first
-            ?? URL(fileURLWithPath: NSTemporaryDirectory())
-        let directory = base
-            .appendingPathComponent("Notch Copilot", isDirectory: true)
+        let directory = try FileStorageService.applicationSupportDirectory()
             .appendingPathComponent("models", isDirectory: true)
             .appendingPathComponent("mlx", isDirectory: true)
         try fileManager.createDirectory(at: directory, withIntermediateDirectories: true)

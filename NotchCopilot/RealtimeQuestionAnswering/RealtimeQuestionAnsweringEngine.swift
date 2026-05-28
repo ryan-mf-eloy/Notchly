@@ -48,10 +48,7 @@ struct QuestionShadowLogger {
     }
 
     private func logURL() throws -> URL {
-        let base = fileManager.urls(for: .applicationSupportDirectory, in: .userDomainMask).first
-            ?? URL(fileURLWithPath: NSTemporaryDirectory())
-        let directory = base
-            .appendingPathComponent("Notch Copilot", isDirectory: true)
+        let directory = try FileStorageService.applicationSupportDirectory()
             .appendingPathComponent("qa-shadow", isDirectory: true)
         try fileManager.createDirectory(at: directory, withIntermediateDirectories: true)
         return directory.appendingPathComponent("qa_decisions.jsonl")

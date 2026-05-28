@@ -2,7 +2,9 @@
 
 Notchly e um assistente nativo para reunioes no macOS. Ele fica em uma pequena ilha no topo da tela, inspirada na Dynamic Island, e acompanha reunioes com captura de audio, transcricao ao vivo, respostas sugeridas, historico, resumos, traducao e contexto local.
 
-O repositorio/pasta local pode aparecer como `CoMeet`, o target Xcode e o modulo Swift ainda se chamam `NotchCopilot`, e o produto exibido ao usuario se chama `Notchly`. Essa separacao reflete a evolucao do MVP: a base tecnica nasceu como `NotchCopilot`, enquanto o nome de produto atual e `Notchly`.
+Repositorio publico: <https://github.com/ryan-mf-eloy/Notchly>
+
+O nome publico do app, do repositorio e do produto gerado e `Notchly`. Alguns identificadores tecnicos internos ainda usam `NotchCopilot`, incluindo target, modulo Swift, scheme, pasta de fontes e alguns nomes de testes. Eles foram mantidos nesta fase para preservar estabilidade de build e evitar uma refatoracao ampla de projeto Xcode; nao sao marca de produto.
 
 ## Status
 
@@ -80,13 +82,13 @@ Essa decisao e importante: o app tenta reduzir exposicao acidental de conteudo e
 - macOS 26 ou superior para caminhos que usam Foundation Models, quando disponiveis.
 - Xcode 26.4.1 ou superior recomendado.
 - Swift 6.
-- XcodeGen opcional, apenas para regenerar `NotchCopilot.xcodeproj` a partir de `project.yml`.
+- XcodeGen opcional, apenas para regenerar o projeto Xcode a partir de `project.yml`.
 - Conta/credenciais de provedores sao opcionais. O app inicia em modo local.
 
 ## Como Rodar
 
 1. Abra `NotchCopilot.xcodeproj` no Xcode.
-2. Selecione o scheme `NotchCopilot`.
+2. Selecione o scheme tecnico `NotchCopilot`; o app gerado aparece como `Notchly.app`.
 3. Ajuste signing se o certificado local `Atlas Voice Dev` nao existir na sua maquina.
 4. Rode o app.
 5. Use o icone da menu bar ou a ilha no notch para iniciar uma reuniao, abrir settings ou executar o demo.
@@ -143,7 +145,7 @@ O arquivo fonte da configuracao de projeto e `project.yml`. Se voce alterar targ
 xcodegen generate
 ```
 
-O projeto gerado versionado e `NotchCopilot.xcodeproj`.
+O projeto gerado versionado ainda e `NotchCopilot.xcodeproj`; o produto final e `Notchly.app`.
 
 ## Permissoes
 
@@ -332,16 +334,16 @@ Campos criptografados incluem:
 Transcricoes internas sao gravadas como:
 
 ```text
-~/Library/Application Support/Notch Copilot/transcripts/<meeting-id>.json.ncenc
+~/Library/Application Support/Notchly/transcripts/<meeting-id>.json.ncenc
 ```
 
 O banco SwiftData fica em:
 
 ```text
-~/Library/Application Support/Notch Copilot/database.sqlite
+~/Library/Application Support/Notchly/database.sqlite
 ```
 
-Arquivos legacy plaintext de transcript (`.json`) sao migrados para `.json.ncenc` e removidos apos escrita atomica bem-sucedida do equivalente criptografado.
+Diretorios locais antigos em `~/Library/Application Support/Notch Copilot` sao migrados para `~/Library/Application Support/Notchly` quando o app inicializa. Arquivos legacy plaintext de transcript (`.json`) sao migrados para `.json.ncenc` e removidos apos escrita atomica bem-sucedida do equivalente criptografado.
 
 ### Excecoes deliberadas
 
