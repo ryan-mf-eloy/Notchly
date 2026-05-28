@@ -40,6 +40,8 @@ Baseline comparison from `Tools/multiqt/compare_baselines.py` with 16 epochs, se
 
 The multimodal checkpoint passes the absolute gates, beats audio-only, and beats text-only on the adversarial hard split (`promotion.promote_to_enforced = true`). Therefore `qaMultimodalMode` is `enforced` by default for the local hardened checkpoint, while the final production claim still requires a consented real-meeting dataset.
 
+The bundled metadata stores the detailed promotion audit. Current status: 63/63 gates pass, including per-language precision >= 0.990, per-language recall >= 0.950, p95 <= 60 ms, p99 <= 100 ms, and zero critical false positives by critical negative label.
+
 The bundled model uses text tokens, log-mel audio features, and scalar ASR/temporal/language features. The runtime now attaches captured in-memory log-mel from the live PCM ring buffer when enough recent audio is available, and still falls back safely to MultiQT-lite/proxy features if audio, model, or metadata cannot be loaded.
 
 Primary reference:

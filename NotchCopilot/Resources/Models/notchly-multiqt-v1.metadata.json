@@ -8,21 +8,69 @@
   },
   "baseline_comparison": {
     "gates": {
+      "hard_test_action_request_critical_fp_zero": true,
+      "hard_test_answerable_question_critical_fp_zero": true,
+      "hard_test_en-US_critical_fp_zero": true,
+      "hard_test_en-US_precision_gte_0_990": true,
+      "hard_test_en-US_recall_gte_0_950": true,
+      "hard_test_es-ES_critical_fp_zero": true,
+      "hard_test_es-ES_precision_gte_0_990": true,
+      "hard_test_es-ES_recall_gte_0_950": true,
+      "hard_test_fragment_critical_fp_zero": true,
+      "hard_test_ja-JP_critical_fp_zero": true,
+      "hard_test_ja-JP_precision_gte_0_990": true,
+      "hard_test_ja-JP_recall_gte_0_950": true,
       "hard_test_multimodal_critical_fp_zero": true,
+      "hard_test_multimodal_p95_lte_60ms": true,
+      "hard_test_multimodal_p99_lte_100ms": true,
       "hard_test_multimodal_precision_gte_0_995": true,
       "hard_test_multimodal_recall_gte_0_970": true,
       "hard_test_not_worse_than_audio_only_precision": true,
       "hard_test_not_worse_than_audio_only_recall": true,
       "hard_test_not_worse_than_text_only_precision": true,
       "hard_test_not_worse_than_text_only_recall": true,
+      "hard_test_operational_check_critical_fp_zero": true,
+      "hard_test_pt-BR_critical_fp_zero": true,
+      "hard_test_pt-BR_precision_gte_0_990": true,
+      "hard_test_pt-BR_recall_gte_0_950": true,
+      "hard_test_reported_question_critical_fp_zero": true,
+      "hard_test_rhetorical_critical_fp_zero": true,
+      "hard_test_self_answered_critical_fp_zero": true,
+      "hard_test_small_talk_critical_fp_zero": true,
+      "hard_test_statement_critical_fp_zero": true,
+      "hard_test_title_noise_critical_fp_zero": true,
       "multimodal_present": true,
+      "test_action_request_critical_fp_zero": true,
+      "test_answerable_question_critical_fp_zero": true,
+      "test_en-US_critical_fp_zero": true,
+      "test_en-US_precision_gte_0_990": true,
+      "test_en-US_recall_gte_0_950": true,
+      "test_es-ES_critical_fp_zero": true,
+      "test_es-ES_precision_gte_0_990": true,
+      "test_es-ES_recall_gte_0_950": true,
+      "test_fragment_critical_fp_zero": true,
+      "test_ja-JP_critical_fp_zero": true,
+      "test_ja-JP_precision_gte_0_990": true,
+      "test_ja-JP_recall_gte_0_950": true,
       "test_multimodal_critical_fp_zero": true,
+      "test_multimodal_p95_lte_60ms": true,
+      "test_multimodal_p99_lte_100ms": true,
       "test_multimodal_precision_gte_0_995": true,
       "test_multimodal_recall_gte_0_970": true,
       "test_not_worse_than_audio_only_precision": true,
       "test_not_worse_than_audio_only_recall": true,
       "test_not_worse_than_text_only_precision": true,
-      "test_not_worse_than_text_only_recall": true
+      "test_not_worse_than_text_only_recall": true,
+      "test_operational_check_critical_fp_zero": true,
+      "test_pt-BR_critical_fp_zero": true,
+      "test_pt-BR_precision_gte_0_990": true,
+      "test_pt-BR_recall_gte_0_950": true,
+      "test_reported_question_critical_fp_zero": true,
+      "test_rhetorical_critical_fp_zero": true,
+      "test_self_answered_critical_fp_zero": true,
+      "test_small_talk_critical_fp_zero": true,
+      "test_statement_critical_fp_zero": true,
+      "test_title_noise_critical_fp_zero": true
     },
     "modes": [
       "multimodal",
@@ -40,6 +88,136 @@
     "summaries": {
       "audio_only": {
         "hard_test": {
+          "by_label": {
+            "action_request": {
+              "critical_negative_false_positives": 0,
+              "fn": 9,
+              "fp": 0,
+              "precision": 1.0,
+              "recall": 0.47058823529411764,
+              "tn": 0,
+              "tp": 8
+            },
+            "answerable_question": {
+              "critical_negative_false_positives": 0,
+              "fn": 28,
+              "fp": 0,
+              "precision": 1.0,
+              "recall": 0.7358490566037735,
+              "tn": 0,
+              "tp": 78
+            },
+            "fragment": {
+              "critical_negative_false_positives": 29,
+              "fn": 0,
+              "fp": 29,
+              "precision": 0.0,
+              "recall": 0.0,
+              "tn": 48,
+              "tp": 0
+            },
+            "operational_check": {
+              "critical_negative_false_positives": 0,
+              "fn": 0,
+              "fp": 0,
+              "precision": 0.0,
+              "recall": 0.0,
+              "tn": 43,
+              "tp": 0
+            },
+            "reported_question": {
+              "critical_negative_false_positives": 29,
+              "fn": 0,
+              "fp": 29,
+              "precision": 0.0,
+              "recall": 0.0,
+              "tn": 46,
+              "tp": 0
+            },
+            "rhetorical": {
+              "critical_negative_false_positives": 0,
+              "fn": 0,
+              "fp": 0,
+              "precision": 0.0,
+              "recall": 0.0,
+              "tn": 9,
+              "tp": 0
+            },
+            "self_answered": {
+              "critical_negative_false_positives": 29,
+              "fn": 0,
+              "fp": 29,
+              "precision": 0.0,
+              "recall": 0.0,
+              "tn": 21,
+              "tp": 0
+            },
+            "small_talk": {
+              "critical_negative_false_positives": 0,
+              "fn": 0,
+              "fp": 0,
+              "precision": 0.0,
+              "recall": 0.0,
+              "tn": 19,
+              "tp": 0
+            },
+            "statement": {
+              "critical_negative_false_positives": 0,
+              "fn": 0,
+              "fp": 0,
+              "precision": 0.0,
+              "recall": 0.0,
+              "tn": 38,
+              "tp": 0
+            },
+            "title_noise": {
+              "critical_negative_false_positives": 0,
+              "fn": 0,
+              "fp": 0,
+              "precision": 0.0,
+              "recall": 0.0,
+              "tn": 10,
+              "tp": 0
+            }
+          },
+          "by_language": {
+            "en-US": {
+              "critical_negative_false_positives": 21,
+              "fn": 17,
+              "fp": 21,
+              "precision": 0.4878048780487805,
+              "recall": 0.5405405405405406,
+              "tn": 73,
+              "tp": 20
+            },
+            "es-ES": {
+              "critical_negative_false_positives": 39,
+              "fn": 0,
+              "fp": 39,
+              "precision": 0.5,
+              "recall": 1.0,
+              "tn": 28,
+              "tp": 39
+            },
+            "ja-JP": {
+              "critical_negative_false_positives": 0,
+              "fn": 16,
+              "fp": 0,
+              "precision": 0.0,
+              "recall": 0.0,
+              "tn": 55,
+              "tp": 0
+            },
+            "pt-BR": {
+              "critical_negative_false_positives": 27,
+              "fn": 4,
+              "fp": 27,
+              "precision": 0.5,
+              "recall": 0.8709677419354839,
+              "tn": 78,
+              "tp": 27
+            }
+          },
           "critical_negative_false_positives": 87,
           "fn": 37,
           "fp": 87,
@@ -55,6 +233,136 @@
         },
         "input_mode": "audio_only",
         "test": {
+          "by_label": {
+            "action_request": {
+              "critical_negative_false_positives": 0,
+              "fn": 10,
+              "fp": 0,
+              "precision": 1.0,
+              "recall": 0.782608695652174,
+              "tn": 0,
+              "tp": 36
+            },
+            "answerable_question": {
+              "critical_negative_false_positives": 0,
+              "fn": 36,
+              "fp": 0,
+              "precision": 1.0,
+              "recall": 0.75,
+              "tn": 0,
+              "tp": 108
+            },
+            "fragment": {
+              "critical_negative_false_positives": 3,
+              "fn": 0,
+              "fp": 3,
+              "precision": 0.0,
+              "recall": 0.0,
+              "tn": 79,
+              "tp": 0
+            },
+            "operational_check": {
+              "critical_negative_false_positives": 0,
+              "fn": 0,
+              "fp": 0,
+              "precision": 0.0,
+              "recall": 0.0,
+              "tn": 43,
+              "tp": 0
+            },
+            "reported_question": {
+              "critical_negative_false_positives": 0,
+              "fn": 0,
+              "fp": 0,
+              "precision": 0.0,
+              "recall": 0.0,
+              "tn": 27,
+              "tp": 0
+            },
+            "rhetorical": {
+              "critical_negative_false_positives": 0,
+              "fn": 0,
+              "fp": 0,
+              "precision": 0.0,
+              "recall": 0.0,
+              "tn": 42,
+              "tp": 0
+            },
+            "self_answered": {
+              "critical_negative_false_positives": 0,
+              "fn": 0,
+              "fp": 0,
+              "precision": 0.0,
+              "recall": 0.0,
+              "tn": 12,
+              "tp": 0
+            },
+            "small_talk": {
+              "critical_negative_false_positives": 0,
+              "fn": 0,
+              "fp": 0,
+              "precision": 0.0,
+              "recall": 0.0,
+              "tn": 46,
+              "tp": 0
+            },
+            "statement": {
+              "critical_negative_false_positives": 0,
+              "fn": 0,
+              "fp": 0,
+              "precision": 0.0,
+              "recall": 0.0,
+              "tn": 50,
+              "tp": 0
+            },
+            "title_noise": {
+              "critical_negative_false_positives": 0,
+              "fn": 0,
+              "fp": 0,
+              "precision": 0.0,
+              "recall": 0.0,
+              "tn": 24,
+              "tp": 0
+            }
+          },
+          "by_language": {
+            "en-US": {
+              "critical_negative_false_positives": 3,
+              "fn": 14,
+              "fp": 3,
+              "precision": 0.9166666666666666,
+              "recall": 0.7021276595744681,
+              "tn": 97,
+              "tp": 33
+            },
+            "es-ES": {
+              "critical_negative_false_positives": 0,
+              "fn": 3,
+              "fp": 0,
+              "precision": 1.0,
+              "recall": 0.9333333333333333,
+              "tn": 42,
+              "tp": 42
+            },
+            "ja-JP": {
+              "critical_negative_false_positives": 0,
+              "fn": 29,
+              "fp": 0,
+              "precision": 1.0,
+              "recall": 0.09375,
+              "tn": 62,
+              "tp": 3
+            },
+            "pt-BR": {
+              "critical_negative_false_positives": 0,
+              "fn": 0,
+              "fp": 0,
+              "precision": 1.0,
+              "recall": 1.0,
+              "tn": 122,
+              "tp": 66
+            }
+          },
           "critical_negative_false_positives": 3,
           "fn": 46,
           "fp": 3,
@@ -72,6 +380,136 @@
       },
       "multimodal": {
         "hard_test": {
+          "by_label": {
+            "action_request": {
+              "critical_negative_false_positives": 0,
+              "fn": 0,
+              "fp": 0,
+              "precision": 1.0,
+              "recall": 1.0,
+              "tn": 0,
+              "tp": 17
+            },
+            "answerable_question": {
+              "critical_negative_false_positives": 0,
+              "fn": 0,
+              "fp": 0,
+              "precision": 1.0,
+              "recall": 1.0,
+              "tn": 0,
+              "tp": 106
+            },
+            "fragment": {
+              "critical_negative_false_positives": 0,
+              "fn": 0,
+              "fp": 0,
+              "precision": 0.0,
+              "recall": 0.0,
+              "tn": 77,
+              "tp": 0
+            },
+            "operational_check": {
+              "critical_negative_false_positives": 0,
+              "fn": 0,
+              "fp": 0,
+              "precision": 0.0,
+              "recall": 0.0,
+              "tn": 43,
+              "tp": 0
+            },
+            "reported_question": {
+              "critical_negative_false_positives": 0,
+              "fn": 0,
+              "fp": 0,
+              "precision": 0.0,
+              "recall": 0.0,
+              "tn": 75,
+              "tp": 0
+            },
+            "rhetorical": {
+              "critical_negative_false_positives": 0,
+              "fn": 0,
+              "fp": 0,
+              "precision": 0.0,
+              "recall": 0.0,
+              "tn": 9,
+              "tp": 0
+            },
+            "self_answered": {
+              "critical_negative_false_positives": 0,
+              "fn": 0,
+              "fp": 0,
+              "precision": 0.0,
+              "recall": 0.0,
+              "tn": 50,
+              "tp": 0
+            },
+            "small_talk": {
+              "critical_negative_false_positives": 0,
+              "fn": 0,
+              "fp": 0,
+              "precision": 0.0,
+              "recall": 0.0,
+              "tn": 19,
+              "tp": 0
+            },
+            "statement": {
+              "critical_negative_false_positives": 0,
+              "fn": 0,
+              "fp": 0,
+              "precision": 0.0,
+              "recall": 0.0,
+              "tn": 38,
+              "tp": 0
+            },
+            "title_noise": {
+              "critical_negative_false_positives": 0,
+              "fn": 0,
+              "fp": 0,
+              "precision": 0.0,
+              "recall": 0.0,
+              "tn": 10,
+              "tp": 0
+            }
+          },
+          "by_language": {
+            "en-US": {
+              "critical_negative_false_positives": 0,
+              "fn": 0,
+              "fp": 0,
+              "precision": 1.0,
+              "recall": 1.0,
+              "tn": 94,
+              "tp": 37
+            },
+            "es-ES": {
+              "critical_negative_false_positives": 0,
+              "fn": 0,
+              "fp": 0,
+              "precision": 1.0,
+              "recall": 1.0,
+              "tn": 67,
+              "tp": 39
+            },
+            "ja-JP": {
+              "critical_negative_false_positives": 0,
+              "fn": 0,
+              "fp": 0,
+              "precision": 1.0,
+              "recall": 1.0,
+              "tn": 55,
+              "tp": 16
+            },
+            "pt-BR": {
+              "critical_negative_false_positives": 0,
+              "fn": 0,
+              "fp": 0,
+              "precision": 1.0,
+              "recall": 1.0,
+              "tn": 105,
+              "tp": 31
+            }
+          },
           "critical_negative_false_positives": 0,
           "fn": 0,
           "fp": 0,
@@ -87,6 +525,136 @@
         },
         "input_mode": "multimodal",
         "test": {
+          "by_label": {
+            "action_request": {
+              "critical_negative_false_positives": 0,
+              "fn": 0,
+              "fp": 0,
+              "precision": 1.0,
+              "recall": 1.0,
+              "tn": 0,
+              "tp": 46
+            },
+            "answerable_question": {
+              "critical_negative_false_positives": 0,
+              "fn": 0,
+              "fp": 0,
+              "precision": 1.0,
+              "recall": 1.0,
+              "tn": 0,
+              "tp": 144
+            },
+            "fragment": {
+              "critical_negative_false_positives": 0,
+              "fn": 0,
+              "fp": 0,
+              "precision": 0.0,
+              "recall": 0.0,
+              "tn": 82,
+              "tp": 0
+            },
+            "operational_check": {
+              "critical_negative_false_positives": 0,
+              "fn": 0,
+              "fp": 0,
+              "precision": 0.0,
+              "recall": 0.0,
+              "tn": 43,
+              "tp": 0
+            },
+            "reported_question": {
+              "critical_negative_false_positives": 0,
+              "fn": 0,
+              "fp": 0,
+              "precision": 0.0,
+              "recall": 0.0,
+              "tn": 27,
+              "tp": 0
+            },
+            "rhetorical": {
+              "critical_negative_false_positives": 0,
+              "fn": 0,
+              "fp": 0,
+              "precision": 0.0,
+              "recall": 0.0,
+              "tn": 42,
+              "tp": 0
+            },
+            "self_answered": {
+              "critical_negative_false_positives": 0,
+              "fn": 0,
+              "fp": 0,
+              "precision": 0.0,
+              "recall": 0.0,
+              "tn": 12,
+              "tp": 0
+            },
+            "small_talk": {
+              "critical_negative_false_positives": 0,
+              "fn": 0,
+              "fp": 0,
+              "precision": 0.0,
+              "recall": 0.0,
+              "tn": 46,
+              "tp": 0
+            },
+            "statement": {
+              "critical_negative_false_positives": 0,
+              "fn": 0,
+              "fp": 0,
+              "precision": 0.0,
+              "recall": 0.0,
+              "tn": 50,
+              "tp": 0
+            },
+            "title_noise": {
+              "critical_negative_false_positives": 0,
+              "fn": 0,
+              "fp": 0,
+              "precision": 0.0,
+              "recall": 0.0,
+              "tn": 24,
+              "tp": 0
+            }
+          },
+          "by_language": {
+            "en-US": {
+              "critical_negative_false_positives": 0,
+              "fn": 0,
+              "fp": 0,
+              "precision": 1.0,
+              "recall": 1.0,
+              "tn": 100,
+              "tp": 47
+            },
+            "es-ES": {
+              "critical_negative_false_positives": 0,
+              "fn": 0,
+              "fp": 0,
+              "precision": 1.0,
+              "recall": 1.0,
+              "tn": 42,
+              "tp": 45
+            },
+            "ja-JP": {
+              "critical_negative_false_positives": 0,
+              "fn": 0,
+              "fp": 0,
+              "precision": 1.0,
+              "recall": 1.0,
+              "tn": 62,
+              "tp": 32
+            },
+            "pt-BR": {
+              "critical_negative_false_positives": 0,
+              "fn": 0,
+              "fp": 0,
+              "precision": 1.0,
+              "recall": 1.0,
+              "tn": 122,
+              "tp": 66
+            }
+          },
           "critical_negative_false_positives": 0,
           "fn": 0,
           "fp": 0,
@@ -104,6 +672,136 @@
       },
       "text_only": {
         "hard_test": {
+          "by_label": {
+            "action_request": {
+              "critical_negative_false_positives": 0,
+              "fn": 0,
+              "fp": 0,
+              "precision": 1.0,
+              "recall": 1.0,
+              "tn": 0,
+              "tp": 17
+            },
+            "answerable_question": {
+              "critical_negative_false_positives": 0,
+              "fn": 0,
+              "fp": 0,
+              "precision": 1.0,
+              "recall": 1.0,
+              "tn": 0,
+              "tp": 106
+            },
+            "fragment": {
+              "critical_negative_false_positives": 0,
+              "fn": 0,
+              "fp": 0,
+              "precision": 0.0,
+              "recall": 0.0,
+              "tn": 77,
+              "tp": 0
+            },
+            "operational_check": {
+              "critical_negative_false_positives": 0,
+              "fn": 0,
+              "fp": 0,
+              "precision": 0.0,
+              "recall": 0.0,
+              "tn": 43,
+              "tp": 0
+            },
+            "reported_question": {
+              "critical_negative_false_positives": 0,
+              "fn": 0,
+              "fp": 0,
+              "precision": 0.0,
+              "recall": 0.0,
+              "tn": 75,
+              "tp": 0
+            },
+            "rhetorical": {
+              "critical_negative_false_positives": 0,
+              "fn": 0,
+              "fp": 0,
+              "precision": 0.0,
+              "recall": 0.0,
+              "tn": 9,
+              "tp": 0
+            },
+            "self_answered": {
+              "critical_negative_false_positives": 1,
+              "fn": 0,
+              "fp": 1,
+              "precision": 0.0,
+              "recall": 0.0,
+              "tn": 49,
+              "tp": 0
+            },
+            "small_talk": {
+              "critical_negative_false_positives": 0,
+              "fn": 0,
+              "fp": 0,
+              "precision": 0.0,
+              "recall": 0.0,
+              "tn": 19,
+              "tp": 0
+            },
+            "statement": {
+              "critical_negative_false_positives": 0,
+              "fn": 0,
+              "fp": 0,
+              "precision": 0.0,
+              "recall": 0.0,
+              "tn": 38,
+              "tp": 0
+            },
+            "title_noise": {
+              "critical_negative_false_positives": 0,
+              "fn": 0,
+              "fp": 0,
+              "precision": 0.0,
+              "recall": 0.0,
+              "tn": 10,
+              "tp": 0
+            }
+          },
+          "by_language": {
+            "en-US": {
+              "critical_negative_false_positives": 0,
+              "fn": 0,
+              "fp": 0,
+              "precision": 1.0,
+              "recall": 1.0,
+              "tn": 94,
+              "tp": 37
+            },
+            "es-ES": {
+              "critical_negative_false_positives": 1,
+              "fn": 0,
+              "fp": 1,
+              "precision": 0.975,
+              "recall": 1.0,
+              "tn": 66,
+              "tp": 39
+            },
+            "ja-JP": {
+              "critical_negative_false_positives": 0,
+              "fn": 0,
+              "fp": 0,
+              "precision": 1.0,
+              "recall": 1.0,
+              "tn": 55,
+              "tp": 16
+            },
+            "pt-BR": {
+              "critical_negative_false_positives": 0,
+              "fn": 0,
+              "fp": 0,
+              "precision": 1.0,
+              "recall": 1.0,
+              "tn": 105,
+              "tp": 31
+            }
+          },
           "critical_negative_false_positives": 1,
           "fn": 0,
           "fp": 1,
@@ -119,6 +817,136 @@
         },
         "input_mode": "text_only",
         "test": {
+          "by_label": {
+            "action_request": {
+              "critical_negative_false_positives": 0,
+              "fn": 0,
+              "fp": 0,
+              "precision": 1.0,
+              "recall": 1.0,
+              "tn": 0,
+              "tp": 46
+            },
+            "answerable_question": {
+              "critical_negative_false_positives": 0,
+              "fn": 0,
+              "fp": 0,
+              "precision": 1.0,
+              "recall": 1.0,
+              "tn": 0,
+              "tp": 144
+            },
+            "fragment": {
+              "critical_negative_false_positives": 0,
+              "fn": 0,
+              "fp": 0,
+              "precision": 0.0,
+              "recall": 0.0,
+              "tn": 82,
+              "tp": 0
+            },
+            "operational_check": {
+              "critical_negative_false_positives": 0,
+              "fn": 0,
+              "fp": 0,
+              "precision": 0.0,
+              "recall": 0.0,
+              "tn": 43,
+              "tp": 0
+            },
+            "reported_question": {
+              "critical_negative_false_positives": 0,
+              "fn": 0,
+              "fp": 0,
+              "precision": 0.0,
+              "recall": 0.0,
+              "tn": 27,
+              "tp": 0
+            },
+            "rhetorical": {
+              "critical_negative_false_positives": 0,
+              "fn": 0,
+              "fp": 0,
+              "precision": 0.0,
+              "recall": 0.0,
+              "tn": 42,
+              "tp": 0
+            },
+            "self_answered": {
+              "critical_negative_false_positives": 0,
+              "fn": 0,
+              "fp": 0,
+              "precision": 0.0,
+              "recall": 0.0,
+              "tn": 12,
+              "tp": 0
+            },
+            "small_talk": {
+              "critical_negative_false_positives": 0,
+              "fn": 0,
+              "fp": 0,
+              "precision": 0.0,
+              "recall": 0.0,
+              "tn": 46,
+              "tp": 0
+            },
+            "statement": {
+              "critical_negative_false_positives": 0,
+              "fn": 0,
+              "fp": 0,
+              "precision": 0.0,
+              "recall": 0.0,
+              "tn": 50,
+              "tp": 0
+            },
+            "title_noise": {
+              "critical_negative_false_positives": 0,
+              "fn": 0,
+              "fp": 0,
+              "precision": 0.0,
+              "recall": 0.0,
+              "tn": 24,
+              "tp": 0
+            }
+          },
+          "by_language": {
+            "en-US": {
+              "critical_negative_false_positives": 0,
+              "fn": 0,
+              "fp": 0,
+              "precision": 1.0,
+              "recall": 1.0,
+              "tn": 100,
+              "tp": 47
+            },
+            "es-ES": {
+              "critical_negative_false_positives": 0,
+              "fn": 0,
+              "fp": 0,
+              "precision": 1.0,
+              "recall": 1.0,
+              "tn": 42,
+              "tp": 45
+            },
+            "ja-JP": {
+              "critical_negative_false_positives": 0,
+              "fn": 0,
+              "fp": 0,
+              "precision": 1.0,
+              "recall": 1.0,
+              "tn": 62,
+              "tp": 32
+            },
+            "pt-BR": {
+              "critical_negative_false_positives": 0,
+              "fn": 0,
+              "fp": 0,
+              "precision": 1.0,
+              "recall": 1.0,
+              "tn": 122,
+              "tp": 66
+            }
+          },
           "critical_negative_false_positives": 0,
           "fn": 0,
           "fp": 0,

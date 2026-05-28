@@ -136,6 +136,8 @@ def compact_split_metrics(metrics: dict | None) -> dict | None:
         "recall": metrics.get("recall"),
         "critical_negative_false_positives": metrics.get("critical_negative_false_positives"),
         "latency_ms": metrics.get("latency_ms"),
+        "by_language": metrics.get("by_language"),
+        "by_label": metrics.get("by_label"),
     }
 
 

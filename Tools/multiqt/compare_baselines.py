@@ -154,6 +154,14 @@ def gate_results(summaries: dict[str, Any]) -> dict[str, bool]:
         gates[f"{split}_multimodal_precision_gte_0_995"] = float(multi_metrics["precision"]) >= 0.995
         gates[f"{split}_multimodal_recall_gte_0_970"] = float(multi_metrics["recall"]) >= 0.970
         gates[f"{split}_multimodal_critical_fp_zero"] = int(multi_metrics["critical_negative_false_positives"]) == 0
+        gates[f"{split}_multimodal_p95_lte_60ms"] = latency_at(multi_metrics, "p95") <= 60.0
+        gates[f"{split}_multimodal_p99_lte_100ms"] = latency_at(multi_metrics, "p99") <= 100.0
+        for language, language_metrics in multi_metrics.get("by_language", {}).items():
+            gates[f"{split}_{language}_precision_gte_0_990"] = float(language_metrics["precision"]) >= 0.990
+            gates[f"{split}_{language}_recall_gte_0_950"] = float(language_metrics["recall"]) >= 0.950
+            gates[f"{split}_{language}_critical_fp_zero"] = int(language_metrics["critical_negative_false_positives"]) == 0
+        for label, label_metrics in multi_metrics.get("by_label", {}).items():
+            gates[f"{split}_{label}_critical_fp_zero"] = int(label_metrics["critical_negative_false_positives"]) == 0
         for mode in baseline_modes:
             if split not in summaries[mode]:
                 continue
@@ -161,6 +169,11 @@ def gate_results(summaries: dict[str, Any]) -> dict[str, bool]:
             gates[f"{split}_not_worse_than_{mode}_precision"] = float(multi_metrics["precision"]) + 1e-9 >= float(baseline["precision"])
             gates[f"{split}_not_worse_than_{mode}_recall"] = float(multi_metrics["recall"]) + 1e-9 >= float(baseline["recall"])
     return gates
+
+
+def latency_at(metrics: dict[str, Any], key: str) -> float:
+    value = metrics.get("latency_ms", {}).get(key)
+    return float(value) if value is not None else float("inf")
 
 
 def promotion_results(summaries: dict[str, Any]) -> dict[str, bool]:

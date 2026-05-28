@@ -87,6 +87,8 @@ def binary_metrics(
 ) -> dict[str, Any]:
     tp = fp = fn = tn = critical_fp = missing = 0
     errors: list[dict[str, Any]] = []
+    by_language: dict[str, dict[str, Any]] = {}
+    by_label: dict[str, dict[str, Any]] = {}
 
     for row in rows:
         row_id = str(row.get("id", ""))
@@ -97,11 +99,17 @@ def binary_metrics(
         else:
             predicted = predictions[row_id]
 
+        language = str(row.get("language", "unknown"))
+        label = str(row.get("label", "unknown"))
+        critical_negative = is_critical_negative(row, labels)
+        update_confusion(by_language.setdefault(language, empty_confusion()), predicted, truth, critical_negative)
+        update_confusion(by_label.setdefault(label, empty_confusion()), predicted, truth, critical_negative)
+
         if predicted and truth:
             tp += 1
         elif predicted and not truth:
             fp += 1
-            if is_critical_negative(row, labels):
+            if critical_negative:
                 critical_fp += 1
             if len(errors) < 25:
                 errors.append(error_row(row, "FP"))
@@ -123,8 +131,45 @@ def binary_metrics(
         "precision": precision,
         "recall": recall,
         "critical_negative_false_positives": critical_fp,
+        "by_language": finalize_group_metrics(by_language),
+        "by_label": finalize_group_metrics(by_label),
         "error_examples": errors,
     }
+
+
+def empty_confusion() -> dict[str, Any]:
+    return {"tp": 0, "fp": 0, "fn": 0, "tn": 0, "critical_negative_false_positives": 0}
+
+
+def update_confusion(bucket: dict[str, Any], predicted: bool, truth: bool, critical_negative: bool) -> None:
+    if predicted and truth:
+        bucket["tp"] += 1
+    elif predicted and not truth:
+        bucket["fp"] += 1
+        if critical_negative:
+            bucket["critical_negative_false_positives"] += 1
+    elif not predicted and truth:
+        bucket["fn"] += 1
+    else:
+        bucket["tn"] += 1
+
+
+def finalize_group_metrics(groups: dict[str, dict[str, Any]]) -> dict[str, dict[str, Any]]:
+    output: dict[str, dict[str, Any]] = {}
+    for key, metrics in sorted(groups.items()):
+        tp = int(metrics["tp"])
+        fp = int(metrics["fp"])
+        fn = int(metrics["fn"])
+        output[key] = {
+            "tp": tp,
+            "fp": fp,
+            "fn": fn,
+            "tn": int(metrics["tn"]),
+            "precision": safe_div(tp, tp + fp),
+            "recall": safe_div(tp, tp + fn),
+            "critical_negative_false_positives": int(metrics["critical_negative_false_positives"]),
+        }
+    return output
 
 
 def error_row(row: dict[str, Any], kind: str) -> dict[str, Any]:

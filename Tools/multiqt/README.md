@@ -182,6 +182,8 @@ Baseline comparison, 16 epochs, seed 42:
 
 This checkpoint proves the runtime path and is safe to ship as a local-first hardened bootstrap in `enforced` (`promotion.promote_to_enforced = true`). It is not the final production evidence set; that still requires consented real meeting audio and shadow replay.
 
+The baseline report also stores detailed gates. Current bundled metadata has 63/63 gates passing: overall precision/recall, per-language precision/recall, p95/p99 latency, zero critical FP globally, and zero critical FP by negative label.
+
 ## Privacy
 
 Raw audio is never persisted by default in the app. Training manifests may reference audio only when the user opted into a local/manual dataset or when the source is public/synthetic and license-compatible. Shadow logs must remain redacted and must not contain raw snippets or raw audio.

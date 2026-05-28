@@ -276,6 +276,8 @@ Comparativo de baselines treinaveis (`Tools/multiqt/compare_baselines.py`, 16 ep
 
 O multimodal passa os gates absolutos, supera `audio_only` e vence `text_only` no hard_test adversarial (`promotion.promote_to_enforced = true`). Por isso o default de produto volta a ser `enforced`: o modelo Core ML treinado participa da decisao local, enquanto os hard-blocks textuais continuam protegendo negativos criticos.
 
+O metadata empacotado tambem registra gates detalhados: 63/63 gates passam, incluindo precision >= 0.990 e recall >= 0.950 por idioma (`pt-BR`, `en-US`, `es-ES`, `ja-JP`), p95 <= 60 ms, p99 <= 100 ms e zero FP critico por label negativo (`fragment`, `operational_check`, `reported_question`, `rhetorical`, `self_answered`, `small_talk`, `title_noise`).
+
 O app cria `QuestionMultimodalSignal` a partir do `TranscriptSegment`, qualidade de audio por fonte, energia disponivel e, quando o audio recente esta no ring buffer, `captured_logmel`. Os campos sao numericos/redigiveis: idioma, confidence ASR, final/partial, speaker/source, duracao, estabilidade entre parciais, pausa terminal, RMS/peak, clipping, silencio/tooQuiet, gaps, noise floor e `audioEnergy`.
 
 `QuestionMultimodalScorer` combina o entendimento textual com boosts leves para segmento final, ASR confiavel, duracao plausivel, pausa terminal e energia consistente. Ele penaliza partial instavel, ASR baixo, clipping forte, silencio/tooQuiet e gaps. Negativos criticos continuam como hard-blocks locais: small talk, operational checks, retoricas, perguntas reportadas, auto-respondidas, fragmentos, titulos e ruido ASR.
