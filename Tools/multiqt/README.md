@@ -170,6 +170,7 @@ The current bundled checkpoint was trained from the QA gold fixture converted in
 - threshold: 0.99
 - critical negative weight: 2.5
 - threshold calibration: selected by global, per-language, and critical-negative-label gates on dev
+- exported runtime policy: `label_policy` plus `language_thresholds`, so Core ML label predictions for critical negatives can hard-suppress candidates
 - test: TP 190, FP 0, FN 0, TN 326, precision 1.0000, recall 1.0000, p95 2.128 ms
 - hard_test: TP 123, FP 0, FN 0, TN 321, precision 1.0000, recall 1.0000, p95 1.580 ms
 
@@ -183,7 +184,7 @@ Baseline comparison, 16 epochs, seed 42:
 
 This checkpoint proves the runtime path and is safe to ship as a local-first hardened bootstrap in `enforced` (`promotion.promote_to_enforced = true`). It is not the final production evidence set; that still requires consented real meeting audio and shadow replay.
 
-The baseline report also stores detailed gates. Current bundled metadata has 63/63 gates passing: overall precision/recall, per-language precision/recall, p95/p99 latency, zero critical FP globally, and zero critical FP by negative label.
+The baseline report also stores detailed gates. Current bundled metadata has 63/63 gates passing: overall precision/recall, per-language precision/recall, p95/p99 latency, zero critical FP globally, and zero critical FP by negative label. Metadata also stores the critical-negative label list and per-language thresholds used by the Swift runtime.
 
 ## Privacy
 

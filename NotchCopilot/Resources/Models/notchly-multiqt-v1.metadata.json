@@ -1132,6 +1132,12 @@
       "recall": 1.0,
       "tn": 453,
       "tp": 278
+    },
+    "language_thresholds": {
+      "en-US": 0.99,
+      "es-ES": 0.99,
+      "ja-JP": 0.99,
+      "pt-BR": 0.99
     }
   },
   "config": {
@@ -1157,6 +1163,38 @@
       96
     ]
   },
+  "label_policy": {
+    "critical_negative_labels": [
+      "small_talk",
+      "operational_check",
+      "rhetorical",
+      "reported_question",
+      "self_answered",
+      "fragment",
+      "title_noise"
+    ],
+    "languages": [
+      "pt-BR",
+      "en-US",
+      "es-ES",
+      "ja-JP"
+    ],
+    "noncritical_negative_labels": [
+      "statement"
+    ],
+    "positive_labels": [
+      "answerable_question",
+      "action_request",
+      "status",
+      "risk",
+      "technical_decision",
+      "technical_explanation",
+      "deadline",
+      "ownership",
+      "follow_up",
+      "business"
+    ]
+  },
   "labels": [
     "answerable_question",
     "action_request",
@@ -1177,6 +1215,12 @@
     "title_noise",
     "statement"
   ],
+  "language_thresholds": {
+    "en-US": 0.99,
+    "es-ES": 0.99,
+    "ja-JP": 0.99,
+    "pt-BR": 0.99
+  },
   "model_resource_name": "notchly-multiqt-v1",
   "outputs": [
     "response_logit",

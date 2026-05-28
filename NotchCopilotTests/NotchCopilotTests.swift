@@ -7256,6 +7256,58 @@ final class NotchCopilotTests: XCTestCase {
         XCTAssertTrue(prediction?.decisionSignals.contains("trained_multiqt_coreml") == true)
     }
 
+    func testRealtimeQABundledTrainedMultiQTMetadataCarriesCriticalLabelPolicy() throws {
+        let metadataURL = try XCTUnwrap(
+            Bundle.main.url(forResource: "notchly-multiqt-v1.metadata", withExtension: "json", subdirectory: "Models")
+                ?? Bundle.main.url(forResource: "notchly-multiqt-v1.metadata", withExtension: "json")
+        )
+        let data = try Data(contentsOf: metadataURL)
+        let metadata = try JSONDecoder().decode(QuestionMultiQTModelMetadata.self, from: data)
+
+        XCTAssertEqual(metadata.threshold, 0.99, accuracy: 0.0001)
+        XCTAssertEqual(try XCTUnwrap(metadata.languageThresholds?["pt-BR"]), 0.99, accuracy: 0.0001)
+        XCTAssertTrue(metadata.labelPolicy?.criticalNegativeLabels?.contains("operational_check") == true)
+        XCTAssertTrue(metadata.labelPolicy?.criticalNegativeLabels?.contains("reported_question") == true)
+        XCTAssertTrue(metadata.labelPolicy?.positiveLabels?.contains("technical_explanation") == true)
+    }
+
+    func testRealtimeQABundledTrainedMultiQTSuppressesCriticalNegativeCandidate() async throws {
+        let signal = QuestionMultimodalSignal(
+            language: "en-US",
+            asrConfidence: 0.96,
+            isFinal: true,
+            isPartial: false,
+            speakerLabel: "Speaker",
+            audioSource: .microphone,
+            duration: 1.1,
+            hasTerminalPause: true,
+            partialStability: 1,
+            rms: 0.026,
+            peak: 0.12,
+            isClipping: false,
+            isSilence: false,
+            isTooQuiet: false,
+            gapCount: 0,
+            noiseFloor: 0.002,
+            audioEnergy: 0.024
+        )
+        let candidate = makeQuestion("Can you hear me?", multimodalSignal: signal)
+
+        let prediction = await CoreMLQuestionMultiQTModelRunner().prediction(
+            for: candidate,
+            signal: signal
+        )
+
+        XCTAssertNotNil(prediction)
+        XCTAssertFalse(prediction?.shouldAllow ?? true)
+        XCTAssertTrue(
+            prediction?.suppressionSignals.contains { signal in
+                signal.hasPrefix("trained_critical_negative_label:")
+                    || signal == "trained_below_threshold"
+            } == true
+        )
+    }
+
     func testRealtimeQACleansExtractedQuestionWithoutDroppingIntent() async throws {
         let text = "Ryan, quick question can we ship the endpoint by Friday?"
         let signal = QuestionMultimodalSignal(

@@ -23,7 +23,7 @@ The repo now includes a first trained Core ML checkpoint:
 
 This checkpoint is a hardened bootstrap model, not the final production-quality endpoint. It was trained from `qa_intent_gold.jsonl` converted into a synthetic MultiQT manifest with macOS `say` audio, then expanded with deterministic adversarial ASR/intent augmentations. It proves the complete path: dataset validation, audio+text training, threshold calibration, baseline comparison, Core ML export, app bundling, runtime load, and Swift inference. It does not replace the required consented real-meeting dataset.
 
-The current bundled threshold is `0.99`. It is calibrated against global precision/recall, per-language precision/recall, and zero-FP gates for critical negative labels, so the final threshold is not selected from global accuracy alone.
+The current bundled threshold is `0.99`. It is calibrated against global precision/recall, per-language precision/recall, and zero-FP gates for critical negative labels, so the final threshold is not selected from global accuracy alone. The sidecar metadata also exports `label_policy` and `language_thresholds`; the Swift Core ML runner uses them to suppress candidates when the trained label head predicts a critical negative class.
 
 Validation on the hardened held-out splits:
 
@@ -138,6 +138,7 @@ The model must predict more than a binary question flag:
    - Uses `MLModelConfiguration.computeUnits = .all` in normal mode, CPU-only benchmark mode for reproducibility.
    - Falls back to MultiQT-lite only when model is missing or explicitly disabled.
    - Current repo integration point: `CoreMLQuestionMultiQTModelRunner` feeds trained predictions into `QuestionClassifier` in shadow/enforced modes.
+   - Treats trained critical-negative labels as hard suppressions and resolves per-language thresholds from metadata, using the global threshold as a floor.
    - Runtime audio contract: `QuestionAudioLogMelRingBuffer` keeps short-lived PCM only in memory, derives `QuestionAudioLogMelFeature` with 40 bands and 240 frames via FFT/vDSP, and aligns it by `sourceFrameRange` or segment timestamps. Otherwise the runner uses a redacted numeric signal proxy derived from RMS, peak, energy, noise, duration, finality, partial stability, and gaps. The proxy is not sufficient for the final gate dataset, but it prevents a bundled model from becoming text-only when raw audio is unavailable.
 
 5. `MultiQTDecisionSmoother`

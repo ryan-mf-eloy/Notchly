@@ -114,6 +114,13 @@ def main() -> int:
 
         dev_predictions = predict(model, dev_data, args.batch_size)
         threshold, dev_metrics, dev_gates = tune_threshold(dev_rows, dev_predictions, labels_config)
+        language_thresholds = tune_thresholds_by_group(
+            dev_rows,
+            dev_predictions,
+            labels_config,
+            key="language",
+            expected_values=labels_config.get("languages", []),
+        )
         score = calibration_score(dev_metrics, dev_gates, threshold)
         print(
             json.dumps(
@@ -121,6 +128,7 @@ def main() -> int:
                     "epoch": epoch,
                     "loss": safe_div(total_loss, max(1, len(loader))),
                     "threshold": threshold,
+                    "language_thresholds": language_thresholds,
                     "dev": dev_metrics,
                     "dev_gates": dev_gates,
                 },
@@ -133,7 +141,14 @@ def main() -> int:
                 "model_state": model.state_dict(),
                 "vocab": vocab,
                 "labels": label_names,
+                "label_policy": {
+                    "positive_labels": labels_config.get("positive_labels", []),
+                    "critical_negative_labels": labels_config.get("critical_negative_labels", []),
+                    "noncritical_negative_labels": labels_config.get("noncritical_negative_labels", []),
+                    "languages": labels_config.get("languages", []),
+                },
                 "threshold": threshold,
+                "language_thresholds": language_thresholds,
                 "dev_metrics": dev_metrics,
                 "dev_gates": dev_gates,
                 "config": {
@@ -171,6 +186,7 @@ def main() -> int:
         args.out / "calibration.json",
         {
             "response_threshold": best_state["threshold"],
+            "language_thresholds": best_state.get("language_thresholds"),
             "dev": best_state.get("dev_metrics"),
             "dev_gates": best_state.get("dev_gates"),
         },
@@ -369,6 +385,26 @@ def tune_threshold(
             best_metrics = metrics
             best_gates = gates
     return best_threshold, best_metrics, best_gates
+
+
+def tune_thresholds_by_group(
+    manifest_rows: list[dict[str, Any]],
+    predictions: list[dict[str, float | bool]],
+    labels_config: dict[str, Any],
+    key: str,
+    expected_values: list[str],
+) -> dict[str, float]:
+    thresholds: dict[str, float] = {}
+    paired = list(zip(manifest_rows, predictions))
+    for value in expected_values:
+        group_pairs = [(row, prediction) for row, prediction in paired if str(row.get(key, "")) == value]
+        if not group_pairs:
+            continue
+        group_rows = [row for row, _ in group_pairs]
+        group_predictions = [prediction for _, prediction in group_pairs]
+        threshold, _, _ = tune_threshold(group_rows, group_predictions, labels_config)
+        thresholds[value] = threshold
+    return thresholds
 
 
 def compute_metrics(

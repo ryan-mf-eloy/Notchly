@@ -17,18 +17,20 @@ except ImportError as error:  # pragma: no cover - executed only on export machi
     ) from error
 
 from model import MultiQTConcatModel
-from common import write_json
+from common import DEFAULT_LABELS_PATH, load_labels, write_json
 
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--checkpoint", required=True, type=Path)
     parser.add_argument("--out", required=True, type=Path)
+    parser.add_argument("--labels", type=Path, default=DEFAULT_LABELS_PATH)
     parser.add_argument("--training-report", type=Path, default=None)
     parser.add_argument("--baseline-comparison", type=Path, default=None)
     args = parser.parse_args()
 
     checkpoint = torch.load(args.checkpoint, map_location="cpu")
+    label_policy = checkpoint.get("label_policy") or load_labels(args.labels)
     config = checkpoint["config"]
     model = MultiQTConcatModel(
         vocab_size=len(checkpoint["vocab"]),
@@ -67,17 +69,25 @@ def main() -> int:
     args.out.parent.mkdir(parents=True, exist_ok=True)
     mlmodel.save(str(args.out))
     metadata_out = args.out.with_name(f"{args.out.stem}.metadata.json")
+    threshold = checkpoint.get("threshold", 0.5)
+    language_thresholds = checkpoint.get("language_thresholds") or {
+        language: threshold
+        for language in label_policy.get("languages", [])
+    }
     write_json(
         metadata_out,
         {
             "model_resource_name": args.out.stem,
             "labels": checkpoint["labels"],
+            "label_policy": label_policy,
             "vocab": checkpoint["vocab"],
-            "threshold": checkpoint.get("threshold", 0.5),
+            "threshold": threshold,
+            "language_thresholds": language_thresholds,
             "config": checkpoint["config"],
             "calibration": {
                 "dev_metrics": checkpoint.get("dev_metrics"),
                 "dev_gates": checkpoint.get("dev_gates"),
+                "language_thresholds": language_thresholds,
             },
             "inputs": {
                 "text_tokens": [1, max_tokens],

@@ -263,6 +263,7 @@ Checkpoint atual:
 - treino: manifest sintético + `Tools/multiqt/augment_manifest.py`, com ASR sem pontuação, fillers, parciais truncadas, perguntas reportadas e auto-respondidas;
 - modelo: audio log-mel + texto + scalars, exportado para Core ML, threshold `0.99`, `critical_negative_weight = 2.5`;
 - calibracao: o threshold e escolhido por gates de precision/recall globais, por idioma e por label negativa critica, nao apenas pelo score global;
+- contrato de runtime: a metadata inclui `label_policy` e `language_thresholds`; se a cabeca treinada `label_logits` prever uma label negativa critica, o runner Core ML suprime o candidato mesmo antes do provider;
 - test split hardened: TP 190, FP 0, FN 0, TN 326, precision 1.0000, recall 1.0000, p95 2.128 ms;
 - hard_test split hardened: TP 123, FP 0, FN 0, TN 321, precision 1.0000, recall 1.0000, p95 1.580 ms;
 - zero FP em negativos criticos nos splits avaliados.
@@ -277,7 +278,7 @@ Comparativo de baselines treinaveis (`Tools/multiqt/compare_baselines.py`, 16 ep
 
 O multimodal passa os gates absolutos, supera `audio_only` e vence `text_only` no hard_test adversarial (`promotion.promote_to_enforced = true`). Por isso o default de produto volta a ser `enforced`: o modelo Core ML treinado participa da decisao local, enquanto os hard-blocks textuais continuam protegendo negativos criticos.
 
-O metadata empacotado tambem registra gates detalhados: 63/63 gates passam, incluindo precision >= 0.990 e recall >= 0.950 por idioma (`pt-BR`, `en-US`, `es-ES`, `ja-JP`), p95 <= 60 ms, p99 <= 100 ms e zero FP critico por label negativo (`fragment`, `operational_check`, `reported_question`, `rhetorical`, `self_answered`, `small_talk`, `title_noise`).
+O metadata empacotado tambem registra gates detalhados: 63/63 gates passam, incluindo precision >= 0.990 e recall >= 0.950 por idioma (`pt-BR`, `en-US`, `es-ES`, `ja-JP`), p95 <= 60 ms, p99 <= 100 ms e zero FP critico por label negativo (`fragment`, `operational_check`, `reported_question`, `rhetorical`, `self_answered`, `small_talk`, `title_noise`). A mesma metadata agora carrega os thresholds por idioma, permitindo subir thresholds por bucket sem alterar o binario do app quando uma proxima rodada de calibracao exigir mais conservadorismo.
 
 O app cria `QuestionMultimodalSignal` a partir do `TranscriptSegment`, qualidade de audio por fonte, energia disponivel e, quando o audio recente esta no ring buffer, `captured_logmel`. Os campos sao numericos/redigiveis: idioma, confidence ASR, final/partial, speaker/source, duracao, estabilidade entre parciais, pausa terminal, RMS/peak, clipping, silencio/tooQuiet, gaps, noise floor e `audioEnergy`.
 

@@ -579,17 +579,35 @@ struct QuestionMultiQTModelMetadata: Codable, Hashable, Sendable {
         }
     }
 
+    struct LabelPolicy: Codable, Hashable, Sendable {
+        var positiveLabels: [String]?
+        var criticalNegativeLabels: [String]?
+        var noncriticalNegativeLabels: [String]?
+        var languages: [String]?
+
+        enum CodingKeys: String, CodingKey {
+            case positiveLabels = "positive_labels"
+            case criticalNegativeLabels = "critical_negative_labels"
+            case noncriticalNegativeLabels = "noncritical_negative_labels"
+            case languages
+        }
+    }
+
     var modelResourceName: String?
     var labels: [String]
+    var labelPolicy: LabelPolicy?
     var vocab: [String: Int]
     var threshold: Double
+    var languageThresholds: [String: Double]?
     var config: Config
 
     enum CodingKeys: String, CodingKey {
         case modelResourceName = "model_resource_name"
         case labels
+        case labelPolicy = "label_policy"
         case vocab
         case threshold
+        case languageThresholds = "language_thresholds"
         case config
     }
 }
@@ -625,6 +643,7 @@ final class CoreMLQuestionMultiQTModelRunner: QuestionTrainedMultimodalModelRunn
             let complete = scalarOutput(named: "complete_logit", from: output).map(sigmoid)
             let rhetorical = scalarOutput(named: "rhetorical_logit", from: output).map(sigmoid)
             let score = sigmoid(responseLogit)
+            let resolvedThreshold = threshold(for: candidate, signal: signal, metadata: metadata)
             var suppression: [String] = []
             if let complete, complete < 0.5 {
                 suppression.append("trained_incomplete")
@@ -632,7 +651,10 @@ final class CoreMLQuestionMultiQTModelRunner: QuestionTrainedMultimodalModelRunn
             if let rhetorical, rhetorical >= 0.5 {
                 suppression.append("trained_rhetorical")
             }
-            if score < metadata.threshold {
+            if let label, criticalNegativeLabels(metadata: metadata).contains(label) {
+                suppression.append("trained_critical_negative_label:\(label)")
+            }
+            if score < resolvedThreshold {
                 suppression.append("trained_below_threshold")
             }
             return QuestionTrainedMultimodalPrediction(
@@ -640,9 +662,11 @@ final class CoreMLQuestionMultiQTModelRunner: QuestionTrainedMultimodalModelRunn
                 label: label,
                 completeScore: complete,
                 rhetoricalScore: rhetorical,
-                threshold: metadata.threshold,
+                threshold: resolvedThreshold,
                 decisionLatencyMs: elapsedMs,
-                decisionSignals: ["trained_multiqt_coreml"] + (label.map { ["trained_label:\($0)"] } ?? []),
+                decisionSignals: ["trained_multiqt_coreml"]
+                    + (label.map { ["trained_label:\($0)"] } ?? [])
+                    + thresholdSignals(global: metadata.threshold, resolved: resolvedThreshold, candidate: candidate, signal: signal),
                 suppressionSignals: suppression
             )
         } catch {
@@ -719,6 +743,44 @@ final class CoreMLQuestionMultiQTModelRunner: QuestionTrainedMultimodalModelRunn
         }
         guard labels.indices.contains(bestIndex) else { return nil }
         return labels[bestIndex]
+    }
+
+    private func threshold(
+        for candidate: QuestionCandidate,
+        signal: QuestionMultimodalSignal?,
+        metadata: QuestionMultiQTModelMetadata
+    ) -> Double {
+        let language = signal?.language ?? candidate.language
+        guard let language,
+              let languageThreshold = metadata.languageThresholds?[language],
+              languageThreshold.isFinite else {
+            return metadata.threshold
+        }
+        return min(max(max(metadata.threshold, languageThreshold), 0), 1)
+    }
+
+    private func thresholdSignals(
+        global: Double,
+        resolved: Double,
+        candidate: QuestionCandidate,
+        signal: QuestionMultimodalSignal?
+    ) -> [String] {
+        guard abs(global - resolved) > 0.0001 else { return [] }
+        let language = signal?.language ?? candidate.language ?? "unknown"
+        return ["trained_language_threshold:\(language):\(String(format: "%.3f", resolved))"]
+    }
+
+    private func criticalNegativeLabels(metadata: QuestionMultiQTModelMetadata) -> Set<String> {
+        let fallback = [
+            "small_talk",
+            "operational_check",
+            "rhetorical",
+            "reported_question",
+            "self_answered",
+            "fragment",
+            "title_noise"
+        ]
+        return Set(metadata.labelPolicy?.criticalNegativeLabels ?? fallback)
     }
 
     private func sigmoid(_ value: Double) -> Double {
