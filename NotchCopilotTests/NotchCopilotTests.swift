@@ -2972,10 +2972,12 @@ final class NotchCopilotTests: XCTestCase {
         XCTAssertEqual(result.buffer.pcmBuffer?.format.channelCount, 2)
     }
 
-    func testMicrophoneCaptureUsesAdaptiveVoiceProcessingByDefault() {
-        XCTAssertEqual(AppleMicrophoneCaptureService.defaultVoiceProcessingPolicy, .adaptive)
+    func testMicrophoneCaptureKeepsVoiceProcessingOptInByDefault() {
+        XCTAssertEqual(AppleMicrophoneCaptureService.defaultVoiceProcessingPolicy, .disabled)
+        XCTAssertFalse(MicrophoneVoiceProcessingSelector.decision(policy: .disabled, deviceName: "Built-in Microphone").shouldEnable)
         XCTAssertTrue(MicrophoneVoiceProcessingSelector.decision(policy: .adaptive, deviceName: "Built-in Microphone").shouldEnable)
         XCTAssertFalse(MicrophoneVoiceProcessingSelector.decision(policy: .adaptive, deviceName: "USB Headset").shouldEnable)
+        XCTAssertTrue(MicrophoneVoiceProcessingSelector.decision(policy: .enabled, deviceName: "USB Headset").shouldEnable)
     }
 
     func testSpeechRecognitionWatchdogRestartsOnlyForRecentAudioWithoutSegments() {
@@ -3163,6 +3165,226 @@ final class NotchCopilotTests: XCTestCase {
         guard case .append = MeetingTranscriptLedger().decision(for: later, in: [existing]) else {
             return XCTFail("Text prefix alone must not replace an older meeting segment.")
         }
+    }
+
+    func testMeetingTranscriptLedgerAppendsSequentialDraftsWithSameID() {
+        let meetingId = UUID()
+        let id = UUID()
+        let firstDraft = TranscriptSegment(
+            id: id,
+            meetingId: meetingId,
+            speakerLabel: "You",
+            audioSource: .microphone,
+            text: "Primeira frase capturada",
+            transcriptionPhase: .draft,
+            transcriptionEngine: .appleSpeech,
+            sourceFrameRange: AudioSourceFrameRange(start: 0, end: 20_000),
+            startTime: 0,
+            endTime: 1.25,
+            isFinal: false
+        )
+        let nextDraft = TranscriptSegment(
+            id: id,
+            meetingId: meetingId,
+            speakerLabel: "You",
+            audioSource: .microphone,
+            text: "Segunda frase acumulada",
+            transcriptionPhase: .draft,
+            transcriptionEngine: .appleSpeech,
+            sourceFrameRange: AudioSourceFrameRange(start: 28_000, end: 44_000),
+            startTime: 1.75,
+            endTime: 2.75,
+            isFinal: false
+        )
+
+        let decision = MeetingTranscriptLedger().decision(for: nextDraft, in: [firstDraft])
+
+        guard case let .append(appended) = decision else {
+            return XCTFail("A later draft with the same ASR id should append as a new utterance instead of replacing the previous line.")
+        }
+        XCTAssertEqual(appended.text, nextDraft.text)
+        XCTAssertNotEqual(appended.id, firstDraft.id)
+    }
+
+    func testMeetingTranscriptLedgerStillReplacesSameUtteranceDraftRevision() {
+        let meetingId = UUID()
+        let id = UUID()
+        let firstDraft = TranscriptSegment(
+            id: id,
+            meetingId: meetingId,
+            speakerLabel: "You",
+            audioSource: .microphone,
+            text: "Vamos revisar",
+            transcriptionPhase: .draft,
+            transcriptionEngine: .appleSpeech,
+            sourceFrameRange: AudioSourceFrameRange(start: 0, end: 16_000),
+            startTime: 0,
+            endTime: 1,
+            isFinal: false
+        )
+        let revision = TranscriptSegment(
+            id: id,
+            meetingId: meetingId,
+            speakerLabel: "You",
+            audioSource: .microphone,
+            text: "Vamos revisar o plano",
+            transcriptionPhase: .draft,
+            transcriptionEngine: .appleSpeech,
+            sourceFrameRange: AudioSourceFrameRange(start: 0, end: 24_000),
+            startTime: 0,
+            endTime: 1.5,
+            isFinal: false
+        )
+
+        let decision = MeetingTranscriptLedger().decision(for: revision, in: [firstDraft])
+
+        guard case let .replace(index, replacement, tail) = decision else {
+            return XCTFail("A same-window partial extension should remain a replacement, not a new transcript line.")
+        }
+        XCTAssertEqual(index, 0)
+        XCTAssertEqual(replacement.id, firstDraft.id)
+        XCTAssertEqual(replacement.text, revision.text)
+        XCTAssertNil(tail)
+    }
+
+    func testMeetingTranscriptLedgerReplacesIncrementalDraftsEvenWhenFrameRangeAdvances() {
+        let meetingId = UUID()
+        let id = UUID()
+        let firstDraft = TranscriptSegment(
+            id: id,
+            meetingId: meetingId,
+            speakerLabel: "You",
+            audioSource: .microphone,
+            text: "Qual é",
+            transcriptionPhase: .draft,
+            transcriptionEngine: .appleSpeech,
+            sourceFrameRange: AudioSourceFrameRange(start: 0, end: 8_000),
+            startTime: 0,
+            endTime: 0.5,
+            isFinal: false
+        )
+        let revision = TranscriptSegment(
+            id: id,
+            meetingId: meetingId,
+            speakerLabel: "You",
+            audioSource: .microphone,
+            text: "Qual é a capital",
+            transcriptionPhase: .draft,
+            transcriptionEngine: .appleSpeech,
+            sourceFrameRange: AudioSourceFrameRange(start: 16_000, end: 28_000),
+            startTime: 1,
+            endTime: 1.75,
+            isFinal: false
+        )
+
+        let decision = MeetingTranscriptLedger().decision(for: revision, in: [firstDraft])
+
+        guard case let .replace(index, replacement, tail) = decision else {
+            return XCTFail("Incremental partials from the same utterance must revise one visible line, not append a transcript ladder.")
+        }
+        XCTAssertEqual(index, 0)
+        XCTAssertEqual(replacement.id, firstDraft.id)
+        XCTAssertEqual(replacement.text, revision.text)
+        XCTAssertEqual(replacement.sourceFrameRange, AudioSourceFrameRange(start: 0, end: 28_000))
+        XCTAssertNil(tail)
+    }
+
+    func testMeetingTranscriptLedgerDoesNotAppendShortDraftAfterEquivalentFinalWithSameID() {
+        let meetingId = UUID()
+        let id = UUID()
+        let committed = TranscriptSegment(
+            id: id,
+            meetingId: meetingId,
+            speakerLabel: "You",
+            audioSource: .microphone,
+            text: "Qual a capital do Brasil",
+            transcriptionPhase: .final,
+            transcriptionEngine: .appleSpeech,
+            sourceFrameRange: AudioSourceFrameRange(start: 0, end: 20_000),
+            startTime: 0,
+            endTime: 1.25,
+            isFinal: true
+        )
+        let shortDraft = TranscriptSegment(
+            id: id,
+            meetingId: meetingId,
+            speakerLabel: "You",
+            audioSource: .microphone,
+            text: "Qual é",
+            transcriptionPhase: .draft,
+            transcriptionEngine: .appleSpeech,
+            sourceFrameRange: AudioSourceFrameRange(start: 28_000, end: 36_000),
+            startTime: 1.75,
+            endTime: 2.25,
+            isFinal: false
+        )
+
+        let decision = MeetingTranscriptLedger().decision(for: shortDraft, in: [committed])
+
+        if case .append = decision {
+            XCTFail("A short same-utterance draft after an equivalent final must not create a duplicate transcript line.")
+        }
+    }
+
+    func testMeetingTranscriptLedgerRevisesFreshlyAppendedUtteranceWithOriginalASRID() {
+        let meetingId = UUID()
+        let originalASRID = UUID()
+        let firstDraft = TranscriptSegment(
+            id: originalASRID,
+            meetingId: meetingId,
+            speakerLabel: "You",
+            audioSource: .microphone,
+            text: "Primeira frase capturada",
+            transcriptionPhase: .draft,
+            transcriptionEngine: .appleSpeech,
+            sourceFrameRange: AudioSourceFrameRange(start: 0, end: 20_000),
+            startTime: 0,
+            endTime: 1.25,
+            isFinal: false
+        )
+        let nextDraft = TranscriptSegment(
+            id: originalASRID,
+            meetingId: meetingId,
+            speakerLabel: "You",
+            audioSource: .microphone,
+            text: "Segunda frase",
+            transcriptionPhase: .draft,
+            transcriptionEngine: .appleSpeech,
+            sourceFrameRange: AudioSourceFrameRange(start: 28_000, end: 36_000),
+            startTime: 1.75,
+            endTime: 2.25,
+            isFinal: false
+        )
+
+        let firstDecision = MeetingTranscriptLedger().decision(for: nextDraft, in: [firstDraft])
+        guard case let .append(appendedSecondDraft) = firstDecision else {
+            return XCTFail("The second utterance should still append when it is not a revision of the first.")
+        }
+
+        let expandedSecondDraft = TranscriptSegment(
+            id: originalASRID,
+            meetingId: meetingId,
+            speakerLabel: "You",
+            audioSource: .microphone,
+            text: "Segunda frase acumulada",
+            transcriptionPhase: .draft,
+            transcriptionEngine: .appleSpeech,
+            sourceFrameRange: AudioSourceFrameRange(start: 36_000, end: 52_000),
+            startTime: 2.25,
+            endTime: 3.25,
+            isFinal: false
+        )
+
+        let secondDecision = MeetingTranscriptLedger().decision(for: expandedSecondDraft, in: [firstDraft, appendedSecondDraft])
+
+        guard case let .replace(index, replacement, tail) = secondDecision else {
+            return XCTFail("Follow-up partials for the freshly appended utterance should revise that new line instead of appending duplicates.")
+        }
+        XCTAssertEqual(index, 1)
+        XCTAssertEqual(replacement.id, appendedSecondDraft.id)
+        XCTAssertNotEqual(replacement.id, originalASRID)
+        XCTAssertEqual(replacement.text, expandedSecondDraft.text)
+        XCTAssertNil(tail)
     }
 
     func testSpeechVocabularyStoreEncryptsSensitiveFieldsAndImportsCSV() throws {

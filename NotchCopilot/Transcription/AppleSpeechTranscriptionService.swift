@@ -492,6 +492,7 @@ final class SpeechAnalyzerTranscriptionService: TranscriptionService {
             while !Task.isCancelled {
                 try? await Task.sleep(for: .seconds(1))
                 guard let self, !Task.isCancelled else { return }
+                guard self.fallbackService == nil, self.fallbackActivationTask == nil else { continue }
                 let now = Date()
                 if self.watchdogPolicy.shouldRestart(
                     now: now,
@@ -545,6 +546,8 @@ final class SpeechAnalyzerTranscriptionService: TranscriptionService {
                 self.analyzer = nil
                 self.transcriber = nil
                 self.dictationTranscriber = nil
+                self.watchdogTask?.cancel()
+                self.watchdogTask = nil
                 AppLog.audio.info("SpeechAnalyzer switched to SFSpeech fallback: \(reason, privacy: .public)")
             } catch {
                 AppLog.audio.error("SpeechAnalyzer SFSpeech fallback failed: \(error.localizedDescription, privacy: .public)")

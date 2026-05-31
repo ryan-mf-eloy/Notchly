@@ -65,6 +65,9 @@ struct SpeechContextRanker: Sendable, Hashable {
 }
 
 struct MeetingTranscriptLedger: Sendable, Hashable {
+    private static let sequentialDraftAppendGap: TimeInterval = 0.30
+    private static let sequentialDraftAppendFrameGap: Int64 = 4_800
+
     enum Decision: Sendable, Equatable {
         case ignore
         case append(TranscriptSegment)
@@ -72,7 +75,13 @@ struct MeetingTranscriptLedger: Sendable, Hashable {
     }
 
     func decision(for incoming: TranscriptSegment, in segments: [TranscriptSegment]) -> Decision {
-        if let idIndex = segments.firstIndex(where: { $0.id == incoming.id && $0.audioSource == incoming.audioSource }) {
+        if let revisionIndex = segments.indices.reversed().first(where: {
+            shouldRevise(existing: segments[$0], incoming: incoming)
+        }) {
+            return merge(existing: segments[revisionIndex], incoming: incoming, at: revisionIndex)
+        }
+
+        if let idIndex = segments.indices.reversed().first(where: { segments[$0].id == incoming.id && segments[$0].audioSource == incoming.audioSource }) {
             let existing = segments[idIndex]
             if shouldAppendDespiteSameID(existing: existing, incoming: incoming) {
                 return .append(freshSegmentIDIfNeeded(incoming, in: segments))
@@ -116,9 +125,19 @@ struct MeetingTranscriptLedger: Sendable, Hashable {
 
         var replacement = incoming
         replacement.id = existing.id
+        replacement.createdAt = existing.createdAt
         replacement.revisionNumber = max(existing.revisionNumber, incoming.revisionNumber) + (replacement.text == existing.text ? 0 : 1)
+        replacement.startTime = min(existing.startTime, incoming.startTime)
+        replacement.endTime = max(existing.endTime, incoming.endTime)
+        replacement.sourceFrameRange = mergedRange(existing.sourceFrameRange, incoming.sourceFrameRange)
         replacement = preservingTranslationIfEquivalent(existing: existing, replacement: replacement)
         return .replace(index: index, segment: replacement, tail: nil)
+    }
+
+    private func shouldRevise(existing: TranscriptSegment, incoming: TranscriptSegment) -> Bool {
+        guard existing.audioSource == incoming.audioSource else { return false }
+        guard isSameUtteranceRevision(existing: existing, incoming: incoming) else { return false }
+        return existing.id == incoming.id || isNearEnoughForTextualRevision(existing: existing, incoming: incoming)
     }
 
     private func isCompatible(existing: TranscriptSegment, incoming: TranscriptSegment) -> Bool {
@@ -133,11 +152,75 @@ struct MeetingTranscriptLedger: Sendable, Hashable {
     }
 
     private func shouldAppendDespiteSameID(existing: TranscriptSegment, incoming: TranscriptSegment) -> Bool {
+        if isSameUtteranceRevision(existing: existing, incoming: incoming) {
+            return false
+        }
+
+        if !existing.isFinal, !incoming.isFinal {
+            if let existingRange = existing.sourceFrameRange, let incomingRange = incoming.sourceFrameRange {
+                let frameGap = incomingRange.start - existingRange.end
+                if frameGap >= Self.sequentialDraftAppendFrameGap {
+                    return true
+                }
+            }
+            return incoming.startTime >= existing.endTime + Self.sequentialDraftAppendGap
+        }
+
         guard existing.isFinal else { return false }
         if let existingRange = existing.sourceFrameRange, let incomingRange = incoming.sourceFrameRange {
             return incomingRange.start >= existingRange.end
         }
         return incoming.startTime >= existing.endTime + 0.05
+    }
+
+    private func isSameUtteranceRevision(existing: TranscriptSegment, incoming: TranscriptSegment) -> Bool {
+        let existingText = normalized(existing.text)
+        let incomingText = normalized(incoming.text)
+        guard !existingText.isEmpty, !incomingText.isEmpty else { return false }
+        if existingText == incomingText { return true }
+        if existingText.hasPrefix(incomingText) || incomingText.hasPrefix(existingText) {
+            return true
+        }
+
+        let existingTokens = tokens(in: existingText)
+        let incomingTokens = tokens(in: incomingText)
+        guard !existingTokens.isEmpty, !incomingTokens.isEmpty else { return false }
+        if isTokenPrefix(existingTokens, of: incomingTokens) || isTokenPrefix(incomingTokens, of: existingTokens) {
+            return true
+        }
+
+        let shorterCount = min(existingTokens.count, incomingTokens.count)
+        let orderedCoverage = orderedTokenCoverage(existingTokens, incomingTokens)
+        if shorterCount >= 3, orderedCoverage >= 0.82 {
+            return true
+        }
+        if shorterCount >= 3,
+           existingTokens.first == incomingTokens.first,
+           orderedCoverage >= 0.74 {
+            return true
+        }
+        if !incoming.isFinal,
+           incomingTokens.count <= 3,
+           existingTokens.first == incomingTokens.first {
+            return true
+        }
+        return false
+    }
+
+    private func isNearEnoughForTextualRevision(existing: TranscriptSegment, incoming: TranscriptSegment) -> Bool {
+        if rangeOverlap(existing.sourceFrameRange, incoming.sourceFrameRange) > 0 {
+            return true
+        }
+        if temporalOverlap(existing: existing, incoming: incoming) > 0 {
+            return true
+        }
+        if let existingRange = existing.sourceFrameRange, let incomingRange = incoming.sourceFrameRange {
+            let frameGap = max(existingRange.start, incomingRange.start) - min(existingRange.end, incomingRange.end)
+            if frameGap <= 24_000 {
+                return true
+            }
+        }
+        return temporalGap(existing: existing, incoming: incoming) <= 1.50
     }
 
     private func isMeaningfullyShorter(_ candidate: String, than reference: String) -> Bool {
@@ -208,12 +291,55 @@ struct MeetingTranscriptLedger: Sendable, Hashable {
             .joined(separator: " ")
     }
 
+    private func tokens(in normalizedText: String) -> [String] {
+        normalizedText.split { !$0.isLetter && !$0.isNumber }.map(String.init)
+    }
+
+    private func isTokenPrefix(_ prefix: [String], of full: [String]) -> Bool {
+        guard !prefix.isEmpty, prefix.count <= full.count else { return false }
+        return zip(prefix, full).allSatisfy { $0.0 == $0.1 }
+    }
+
+    private func orderedTokenCoverage(_ lhs: [String], _ rhs: [String]) -> Double {
+        let shorterCount = min(lhs.count, rhs.count)
+        guard shorterCount > 0 else { return 0 }
+        return Double(longestCommonSubsequenceLength(lhs, rhs)) / Double(shorterCount)
+    }
+
+    private func longestCommonSubsequenceLength(_ lhs: [String], _ rhs: [String]) -> Int {
+        guard !lhs.isEmpty, !rhs.isEmpty else { return 0 }
+        var previous = Array(repeating: 0, count: rhs.count + 1)
+        var current = previous
+        for left in lhs {
+            current[0] = 0
+            for (index, right) in rhs.enumerated() {
+                if left == right {
+                    current[index + 1] = previous[index] + 1
+                } else {
+                    current[index + 1] = max(previous[index + 1], current[index])
+                }
+            }
+            swap(&previous, &current)
+        }
+        return previous[rhs.count]
+    }
+
     private func temporalOverlap(existing: TranscriptSegment, incoming: TranscriptSegment) -> Double {
         let overlapStart = max(existing.startTime, incoming.startTime)
         let overlapEnd = min(existing.endTime, incoming.endTime)
         let overlap = max(0, overlapEnd - overlapStart)
         let shortest = max(0.001, min(existing.endTime - existing.startTime, incoming.endTime - incoming.startTime))
         return overlap / shortest
+    }
+
+    private func temporalGap(existing: TranscriptSegment, incoming: TranscriptSegment) -> TimeInterval {
+        if existing.endTime < incoming.startTime {
+            return incoming.startTime - existing.endTime
+        }
+        if incoming.endTime < existing.startTime {
+            return existing.startTime - incoming.endTime
+        }
+        return 0
     }
 
     private func rangeOverlap(_ lhs: AudioSourceFrameRange?, _ rhs: AudioSourceFrameRange?) -> Double {

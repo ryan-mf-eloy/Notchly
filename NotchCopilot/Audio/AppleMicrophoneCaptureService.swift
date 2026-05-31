@@ -49,7 +49,7 @@ enum MicrophoneVoiceProcessingSelector {
 }
 
 final class AppleMicrophoneCaptureService: MicrophoneCaptureServicing, @unchecked Sendable {
-    static let defaultVoiceProcessingPolicy: MicrophoneVoiceProcessingPolicy = .adaptive
+    static let defaultVoiceProcessingPolicy: MicrophoneVoiceProcessingPolicy = .disabled
 
     private let engine = AVAudioEngine()
     private let analyzer = AppleAccelerateAudioAnalyzer()
