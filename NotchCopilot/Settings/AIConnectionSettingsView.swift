@@ -128,7 +128,6 @@ struct AIConnectionSettingsView: View {
                 value: provider.kind,
                 title: provider.title,
                 subtitle: providerMenuSubtitle(provider),
-                systemImage: provider.kind == .appleLocal ? "apple.logo" : nil,
                 assetName: provider.logoAssetName
             )
         }
@@ -140,7 +139,7 @@ struct AIConnectionSettingsView: View {
                 value: provider,
                 title: provider.displayName,
                 subtitle: "Realtime transcription",
-                monogram: provider == .elevenLabs ? "11" : nil
+                assetName: provider == .elevenLabs ? "ProviderElevenLabs" : nil
             )
         }
     }

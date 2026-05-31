@@ -67,7 +67,7 @@ enum ProviderRegistry {
             kind: .appleLocal,
             title: "Apple Local",
             subtitle: "On-device Apple Speech, Translation and Foundation Models when available.",
-            logoAssetName: nil,
+            logoAssetName: "ProviderApple",
             supportedAuthKinds: [.local],
             accountAuthMode: nil,
             apiKeyAuthMode: nil,

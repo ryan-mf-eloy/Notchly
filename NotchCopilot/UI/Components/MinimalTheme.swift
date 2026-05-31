@@ -118,6 +118,10 @@ enum SettingsLayout {
     static let controlWidth: CGFloat = 286
     static let compactControlWidth: CGFloat = 258
     static let dividerInset: CGFloat = labelWidth + rowGap
+    static let providerLogoFrame: CGFloat = 24
+    static let providerLogoSize: CGFloat = 17
+    static let compactProviderLogoFrame: CGFloat = 18
+    static let compactProviderLogoSize: CGFloat = 15
 }
 
 struct SettingsMenuOption<Value: Hashable>: Identifiable {
@@ -175,7 +179,7 @@ struct SettingsMenuSelector<Value: Hashable>: View {
                         }
                     } label: {
                         HStack(spacing: 8) {
-                            SettingsOptionIcon(option: option, size: 18)
+                            SettingsOptionIcon(option: option, size: SettingsLayout.providerLogoSize)
                             Text(option.title)
                             if option.value == selection {
                                 Spacer()
@@ -188,7 +192,7 @@ struct SettingsMenuSelector<Value: Hashable>: View {
         } label: {
             HStack(spacing: 9) {
                 if let selectedOption {
-                    SettingsOptionIcon(option: selectedOption, size: 18)
+                    SettingsOptionIcon(option: selectedOption, size: SettingsLayout.providerLogoSize)
                     VStack(alignment: .leading, spacing: 1) {
                         Text(selectedOption.title)
                             .font(.system(size: 12.5, weight: .semibold))
@@ -250,7 +254,7 @@ struct SettingsSegmentedSelector<Value: Hashable>: View {
                 } label: {
                     HStack(spacing: 6) {
                         if option.systemImage != nil || option.assetName != nil || option.monogram != nil {
-                            SettingsOptionIcon(option: option, size: 15, framed: false)
+                            SettingsOptionIcon(option: option, size: SettingsLayout.compactProviderLogoSize, framed: false)
                         }
                         Text(option.title)
                             .font(.system(size: 11.5, weight: .semibold))
@@ -358,7 +362,10 @@ private struct SettingsOptionIcon<Value: Hashable>: View {
             iconContent
                 .frame(width: size, height: size)
         }
-        .frame(width: framed ? 24 : size, height: framed ? 24 : size)
+        .frame(
+            width: framed ? SettingsLayout.providerLogoFrame : SettingsLayout.compactProviderLogoFrame,
+            height: framed ? SettingsLayout.providerLogoFrame : SettingsLayout.compactProviderLogoFrame
+        )
         .opacity(option.isUnavailable ? 0.54 : 1)
         .accessibilityHidden(true)
     }
@@ -367,10 +374,11 @@ private struct SettingsOptionIcon<Value: Hashable>: View {
     private var iconContent: some View {
         if let assetName = option.assetName {
             Image(assetName)
-                .renderingMode(.template)
+                .renderingMode(.original)
                 .resizable()
-                .scaledToFit()
-                .foregroundStyle(MinimalTheme.primary)
+                .aspectRatio(contentMode: .fit)
+                .frame(width: size, height: size)
+                .clipped()
         } else if let systemImage = option.systemImage {
             Image(systemName: systemImage)
                 .font(.system(size: size * 0.72, weight: .semibold))
