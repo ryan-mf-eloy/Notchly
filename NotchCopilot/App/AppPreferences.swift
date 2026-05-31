@@ -579,9 +579,9 @@ struct AppPreferences: Codable, Hashable {
             captureSystemAudio = true
         }
 
+        aiConfig.webSearchEnabled = false
         if localOnlyMode {
             aiConfig.cloudProcessingEnabled = false
-            aiConfig.webSearchEnabled = false
             transcriptionEngineMode = .appleSpeech
             transcriptionFeatureFlags.cloudFallbackEnabled = false
         }

@@ -139,7 +139,7 @@ struct ProviderRouter {
     }
 
     func aiProvider(preferences: AppPreferences) -> any AIProvider {
-        if preferences.localOnlyMode {
+        if preferences.localOnlyMode || preferences.aiConfig.provider == .appleLocal || preferences.aiConfig.provider == .appleFoundationModels {
             if #available(macOS 26.0, *), capabilityChecker.supportsFoundationModels() {
                 return AppleLocalAIProvider()
             }
@@ -195,7 +195,7 @@ struct ProviderRouter {
     }
 
     func meetingAnswerProvider(preferences: AppPreferences) -> any MeetingAnswerProvider {
-        if preferences.localOnlyMode {
+        if preferences.localOnlyMode || preferences.aiConfig.provider == .appleLocal || preferences.aiConfig.provider == .appleFoundationModels {
             if #available(macOS 26.0, *), capabilityChecker.supportsFoundationModels() {
                 return AnswerGenerationService(provider: AppleLocalAIProvider())
             }

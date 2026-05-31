@@ -66,6 +66,65 @@ final class NotchCopilotTests: XCTestCase {
         XCTAssertEqual(explicitNormalized.selectedOutputDeviceUID, "output-studio-display")
     }
 
+    func testAppPreferencesNormalizationRetiresGlobalWebSearchToggle() {
+        var preferences = AppPreferences()
+        preferences.aiConfig.webSearchEnabled = true
+
+        let normalized = preferences.normalizedForPersistence()
+
+        XCTAssertFalse(normalized.aiConfig.webSearchEnabled)
+    }
+
+    func testAppStateTranscriptionSettingsUseActiveMeetingBeforeGlobalDefaults() {
+        var preferences = AppPreferences()
+        preferences.defaultLanguage = SupportedLanguage.englishUS.rawValue
+        preferences.defaultMeetingType = .engineering
+        let appState = AppState(preferences: preferences)
+        appState.currentMeeting = MeetingSession(
+            title: "Live interview",
+            status: .paused,
+            primaryLanguage: SupportedLanguage.englishUS.rawValue,
+            meetingType: .general
+        )
+
+        appState.updateTranscriptionLanguage(SupportedLanguage.portugueseBR.rawValue)
+        appState.updateTranscriptionMeetingType(.interview)
+
+        XCTAssertEqual(appState.currentMeeting?.primaryLanguage, SupportedLanguage.portugueseBR.rawValue)
+        XCTAssertEqual(appState.currentMeeting?.meetingType, .interview)
+        XCTAssertEqual(appState.preferences.defaultLanguage, SupportedLanguage.englishUS.rawValue)
+        XCTAssertEqual(appState.preferences.defaultMeetingType, .engineering)
+    }
+
+    func testAppStateSelectsOnlyCatalogCompatibleAIChatModels() {
+        var preferences = AppPreferences()
+        preferences.aiConfig.model = "old-model"
+        let appState = AppState(preferences: preferences)
+        appState.aiModelCatalog = AIModelCatalog(
+            chatModels: [
+                AIModelOption(id: "model-a", displayName: "Model A", capabilities: [.chat]),
+                AIModelOption(id: "model-b", displayName: "Model B", capabilities: [.chat, .translation])
+            ],
+            realtimeModels: [],
+            transcriptionModels: [],
+            embeddingModels: [
+                AIModelOption(id: "embedding-only", displayName: "Embedding Only", capabilities: [.embedding])
+            ],
+            source: "Test catalog",
+            isDynamic: true
+        )
+
+        appState.selectAIChatModel("model-b")
+
+        XCTAssertEqual(appState.preferences.aiConfig.model, "model-b")
+        XCTAssertEqual(appState.settingsStatus, "Using Model B")
+
+        appState.selectAIChatModel("embedding-only")
+
+        XCTAssertEqual(appState.preferences.aiConfig.model, "model-b")
+        XCTAssertEqual(appState.settingsStatus, "Model is not available for the selected provider.")
+    }
+
     func testAudioDeviceManagerReflectsDefaultChangesHotplugAndReconnection() async {
         let builtInMic = AudioDevice(uid: "input-built-in", name: "MacBook Microphone", direction: .input, isDefault: true)
         let airPodsMic = AudioDevice(uid: "input-airpods", name: "AirPods Pro", direction: .input, isDefault: false)
@@ -8714,7 +8773,7 @@ final class NotchCopilotTests: XCTestCase {
         XCTAssertTrue(context.completeTranscript.contains("Current question"))
     }
 
-    func testRealtimeQAContextRetrieverUsesRAGCompleteTranscriptAndWebQuery() async throws {
+    func testRealtimeQAContextRetrieverUsesAutomaticWebQueryWithoutGlobalToggle() async throws {
         let container = try DatabaseFactory.makeContainer(inMemory: true)
         let store = LocalKnowledgeStore(container: container, workspaceId: "alpha", cryptor: try testCryptor())
         try store.addDocument(name: "Alpha.md", content: "authentication migration rollback risk alpha", workspaceId: "alpha")
@@ -8728,7 +8787,7 @@ final class NotchCopilotTests: XCTestCase {
         preferences.localOnlyMode = false
         preferences.workspaceId = "alpha"
         preferences.aiConfig.ragEnabled = true
-        preferences.aiConfig.webSearchEnabled = true
+        preferences.aiConfig.webSearchEnabled = false
         preferences.aiConfig.cloudProcessingEnabled = true
         let question = makeQuestion("What’s the risk if we skip the migration?")
         let classification = try await QuestionClassifier().classifyQuestion(candidate: question, context: makeContext(question.rawText), userProfile: makeProfile())
@@ -8936,7 +8995,7 @@ final class NotchCopilotTests: XCTestCase {
             XCTFail("Expected unsupported OAuth flow")
         } catch let error as AuthError {
             XCTAssertEqual(error, .unsupportedOAuthFlow)
-            XCTAssertEqual(error.localizedDescription, "OpenAI OAuth subscription access is not currently available for this desktop integration. Use Local Mode or configure an officially supported provider.")
+            XCTAssertEqual(error.localizedDescription, "OpenAI OAuth subscription access is not currently available for this desktop integration. Use Apple Local or configure an officially supported provider.")
         }
     }
 
@@ -9902,7 +9961,6 @@ final class NotchCopilotTests: XCTestCase {
         preferences.aiConfig.provider = .openAI
         preferences.aiConfig.authMode = .openAIAccountOAuth
         preferences.aiConfig.cloudProcessingEnabled = true
-        preferences.aiConfig.webSearchEnabled = true
         let auth = TestAuthProvider(session: AuthSession(
             provider: .openAIAccountOAuth,
             accessToken: "oauth-token",

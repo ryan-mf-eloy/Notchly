@@ -21,6 +21,8 @@ struct AIConnectionSettingsView: View {
                 AIDivider()
                 providerStatusRow
                 AIDivider()
+                modelSelectionRow
+                AIDivider()
                 providerControls
                 if !appState.settingsStatus.isEmpty {
                     AIDivider()
@@ -29,25 +31,14 @@ struct AIConnectionSettingsView: View {
             }
 
             AISection(title: "Processing") {
-                aiToggleRow("Local Only Mode", isOn: $appState.preferences.localOnlyMode)
-                    .onChange(of: appState.preferences.localOnlyMode) {
-                        if appState.preferences.localOnlyMode {
-                            appState.preferences.aiConfig.cloudProcessingEnabled = false
-                            appState.preferences.aiConfig.webSearchEnabled = false
-                            appState.preferences.transcriptionEngineMode = .appleSpeech
-                        }
-                        appState.savePreferences()
-                    }
-                AIDivider()
                 aiToggleRow("Cloud processing", isOn: $appState.preferences.aiConfig.cloudProcessingEnabled)
                     .onChange(of: appState.preferences.aiConfig.cloudProcessingEnabled) {
                         if appState.preferences.aiConfig.cloudProcessingEnabled {
                             appState.preferences.localOnlyMode = false
                         }
+                        appState.preferences.aiConfig.webSearchEnabled = false
                         appState.savePreferences()
                     }
-                AIDivider()
-                aiToggleRow("Web search", isOn: $appState.preferences.aiConfig.webSearchEnabled)
                 AIDivider()
                 aiToggleRow("Realtime suggestions", isOn: $appState.preferences.realtimeSuggestionsEnabled)
             }
@@ -85,6 +76,7 @@ struct AIConnectionSettingsView: View {
         .onAppear {
             syncSelectionFromPreferences()
             appState.refreshProviderConnectionStatuses()
+            appState.refreshAIModelCatalog()
         }
         .onChange(of: appState.preferences.aiConfig.provider) {
             syncSelectionFromPreferences()
@@ -102,9 +94,12 @@ struct AIConnectionSettingsView: View {
                 if descriptor.kind == .appleLocal {
                     appState.preferences.localOnlyMode = true
                     appState.preferences.aiConfig.cloudProcessingEnabled = false
-                    appState.preferences.aiConfig.webSearchEnabled = false
+                } else {
+                    appState.preferences.localOnlyMode = false
                 }
+                appState.preferences.aiConfig.webSearchEnabled = false
                 appState.savePreferences()
+                appState.refreshAIModelCatalog()
             }
         )
     }
@@ -177,9 +172,30 @@ struct AIConnectionSettingsView: View {
                 if let mode = activeProvider.authMode(for: authKind) {
                     appState.preferences.aiConfig.authMode = mode
                     appState.savePreferences()
+                    appState.refreshAIModelCatalog()
                 }
             }
         )
+    }
+
+    private var modelSelection: Binding<String> {
+        Binding(
+            get: { appState.preferences.aiConfig.model },
+            set: { modelID in
+                appState.selectAIChatModel(modelID)
+            }
+        )
+    }
+
+    private var modelOptions: [SettingsMenuOption<String>] {
+        appState.aiModelCatalog.chatModels.map { model in
+            SettingsMenuOption(
+                value: model.id,
+                title: model.displayName,
+                subtitle: model.description ?? appState.aiModelCatalog.source,
+                assetName: activeProvider.logoAssetName
+            )
+        }
     }
 
     private var providerStatusRow: some View {
@@ -191,6 +207,35 @@ struct AIConnectionSettingsView: View {
                     .foregroundStyle(MinimalTheme.tertiary)
                     .lineLimit(1)
                     .truncationMode(.tail)
+            }
+        }
+    }
+
+    private var modelSelectionRow: some View {
+        aiValueRow("Model") {
+            HStack(spacing: 8) {
+                SettingsMenuSelector(
+                    selection: modelSelection,
+                    options: modelOptions,
+                    width: SettingsLayout.controlWidth
+                )
+                .disabled(modelOptions.isEmpty || appState.isRefreshingAIModelCatalog)
+
+                if appState.isRefreshingAIModelCatalog {
+                    ProgressView()
+                        .controlSize(.small)
+                        .frame(width: 28, height: 28)
+                } else {
+                    Button {
+                        appState.refreshAIModelCatalog()
+                    } label: {
+                        Image(systemName: "arrow.clockwise")
+                            .font(.system(size: 12, weight: .semibold))
+                    }
+                    .buttonStyle(AIIconButtonStyle())
+                    .help("Refresh models")
+                    .accessibilityLabel("Refresh models")
+                }
             }
         }
     }
@@ -535,6 +580,23 @@ private struct AIPillButtonStyle: ButtonStyle {
                 Capsule()
                     .stroke(isDestructive ? MinimalTheme.destructive.opacity(0.28) : MinimalTheme.divider, lineWidth: 0.7)
             )
+    }
+}
+
+private struct AIIconButtonStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .foregroundStyle(MinimalTheme.primary)
+            .frame(width: 28, height: 28)
+            .background(
+                Circle()
+                    .fill(configuration.isPressed ? MinimalTheme.settingsControlPressed : MinimalTheme.settingsControl)
+            )
+            .overlay(
+                Circle()
+                    .stroke(MinimalTheme.divider, lineWidth: 0.7)
+            )
+            .contentShape(Circle())
     }
 }
 

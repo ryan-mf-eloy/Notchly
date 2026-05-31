@@ -27,8 +27,6 @@ final class MeetingDetectionService {
                     appName: activity.displayName,
                     meetingURL: activity.browserTab?.url,
                     status: .detected,
-                    primaryLanguage: SupportedLanguage.normalizedCode(preferences.defaultLanguage),
-                    meetingType: preferences.defaultMeetingType,
                     automationSourceAppName: activity.displayName,
                     automationSourceBundleId: activity.bundleIdentifier
                 )

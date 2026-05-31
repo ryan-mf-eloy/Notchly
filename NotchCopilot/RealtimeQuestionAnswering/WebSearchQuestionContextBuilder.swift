@@ -13,8 +13,7 @@ struct WebSearchQuestionContextBuilder {
         classification: QuestionClassification,
         preferences: AppPreferences
     ) async -> [AnswerSource] {
-        guard preferences.aiConfig.webSearchEnabled,
-              preferences.aiConfig.cloudProcessingEnabled,
+        guard preferences.aiConfig.cloudProcessingEnabled,
               !preferences.localOnlyMode,
               let service,
               shouldUseWeb(for: classification)

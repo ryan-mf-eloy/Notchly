@@ -554,7 +554,7 @@ class RealtimeQuestionAnsweringEngine {
                 options: AnswerGenerationOptions(
                     maxSentences: 3,
                     allowCommitments: false,
-                    enableWebSearch: preferences.aiConfig.webSearchEnabled,
+                    enableWebSearch: false,
                     enableRAG: preferences.aiConfig.ragEnabled,
                     localOnlyMode: preferences.localOnlyMode
                 )

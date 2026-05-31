@@ -78,7 +78,7 @@ enum AuthError: LocalizedError, Equatable {
         case .unsupportedAccessMode:
             "The current provider session is not authorized for API access."
         case .unsupportedOAuthFlow:
-            "OpenAI OAuth subscription access is not currently available for this desktop integration. Use Local Mode or configure an officially supported provider."
+            "OpenAI OAuth subscription access is not currently available for this desktop integration. Use Apple Local or configure an officially supported provider."
         case .missingConfiguration:
             "OAuth is missing an official client configuration."
         case .invalidCallback:
@@ -94,7 +94,7 @@ enum AuthError: LocalizedError, Equatable {
         case .authenticationSessionFailed:
             "The secure provider login session could not be started."
         case .unsupportedProviderOAuth(let provider):
-            "\(provider) OAuth/account login is not currently available for this desktop integration. Use API Key, Local Mode, or configure an officially supported provider."
+            "\(provider) OAuth/account login is not currently available for this desktop integration. Use API Key, Apple Local, or configure an officially supported provider."
         }
     }
 }
@@ -121,7 +121,7 @@ enum AIConnectionStatus: Equatable {
         case .unsupportedOAuthFlow:
             "Unsupported OAuth flow"
         case .localOnlyMode:
-            "Local only mode"
+            "On device"
         }
     }
 }

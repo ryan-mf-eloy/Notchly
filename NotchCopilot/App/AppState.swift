@@ -1210,6 +1210,33 @@ final class AppState: ObservableObject {
         ambientCopilotController?.evaluateRunningState()
     }
 
+    func updateTranscriptionLanguage(_ language: String) {
+        let normalizedLanguage = SupportedLanguage.normalizedCode(language)
+        if currentMeeting != nil, let sessionManager {
+            Task { await sessionManager.updateActiveTranscriptionLanguage(normalizedLanguage) }
+            return
+        }
+        if currentMeeting != nil {
+            currentMeeting?.primaryLanguage = normalizedLanguage
+            return
+        }
+        preferences.defaultLanguage = normalizedLanguage
+        savePreferences()
+    }
+
+    func updateTranscriptionMeetingType(_ meetingType: MeetingType) {
+        if currentMeeting != nil, let sessionManager {
+            Task { await sessionManager.updateActiveMeetingType(meetingType) }
+            return
+        }
+        if currentMeeting != nil {
+            currentMeeting?.meetingType = meetingType
+            return
+        }
+        preferences.defaultMeetingType = meetingType
+        savePreferences()
+    }
+
     private func savePreferencesWithoutConnectionRefresh() {
         persistPreferences(refreshConnectionStatus: false)
     }
@@ -2128,6 +2155,17 @@ final class AppState: ObservableObject {
         Task { await updateAIModelCatalog() }
     }
 
+    func selectAIChatModel(_ modelID: String) {
+        let trimmedModelID = modelID.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let model = aiModelCatalog.chatModels.first(where: { $0.id == trimmedModelID }) else {
+            settingsStatus = "Model is not available for the selected provider."
+            return
+        }
+        preferences.aiConfig.model = model.id
+        savePreferencesWithoutConnectionRefresh()
+        settingsStatus = "Using \(model.displayName)"
+    }
+
     func saveOpenAIKey(_ value: String) {
         saveLegacyOpenAIKey(value)
     }
@@ -2172,7 +2210,7 @@ final class AppState: ObservableObject {
         preferences.transcriptionEngineMode = .appleSpeech
         savePreferences()
         applyAIModelCatalog(.local)
-        settingsStatus = "Local Only Mode enabled"
+        settingsStatus = "Apple Local enabled"
     }
 
     func clearAllAuthData() {

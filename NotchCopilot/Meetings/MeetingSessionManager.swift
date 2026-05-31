@@ -596,7 +596,7 @@ final class MeetingSessionManager {
         var session = seed ?? MeetingSession(title: title, source: source, status: .listening, meetingType: appState.preferences.defaultMeetingType)
         session.status = .listening
         session.startedAt = Date()
-        session.primaryLanguage = SupportedLanguage.normalizedCode(appState.preferences.defaultLanguage)
+        session.primaryLanguage = SupportedLanguage.normalizedCode(session.primaryLanguage ?? appState.preferences.defaultLanguage)
         if appState.preferences.saveAudioRecordings {
             let url = fileStorage.recordingURL(for: session.id)
             do {
@@ -651,6 +651,47 @@ final class MeetingSessionManager {
             appState.currentMeeting = meeting
         }
         try? repository.save(meeting)
+    }
+
+    func updateActiveTranscriptionLanguage(_ language: String) async {
+        await updateActiveTranscriptionSettings(language: SupportedLanguage.normalizedCode(language), meetingType: nil)
+    }
+
+    func updateActiveMeetingType(_ meetingType: MeetingType) async {
+        await updateActiveTranscriptionSettings(language: nil, meetingType: meetingType)
+    }
+
+    private func updateActiveTranscriptionSettings(language: String?, meetingType: MeetingType?) async {
+        guard var meeting = appState.currentMeeting else { return }
+        let normalizedLanguage = language.map(SupportedLanguage.normalizedCode)
+        let languageChanged = normalizedLanguage.map { $0 != SupportedLanguage.normalizedCode(meeting.primaryLanguage) } ?? false
+        let typeChanged = meetingType.map { $0 != meeting.meetingType } ?? false
+        guard languageChanged || typeChanged else { return }
+
+        if let normalizedLanguage {
+            meeting.primaryLanguage = normalizedLanguage
+        }
+        if let meetingType {
+            meeting.meetingType = meetingType
+        }
+
+        appState.currentMeeting = meeting
+        try? repository.save(meeting)
+        configureRealtimeQuestionEngine(for: meeting)
+
+        guard meeting.status == .listening else { return }
+        appState.statusMessage = "Updating transcription..."
+        appState.meetingTranscriptionStatus = .restartingSource
+        await stopRunningServices(keepMeeting: true)
+        appState.currentMeeting = meeting
+        configureRealtimeQuestionEngine(for: meeting)
+        startTimer(startedAt: meeting.startedAt)
+        let restarted = await startRealtimePipeline(for: meeting)
+        if !restarted {
+            meeting.status = .failed
+            appState.currentMeeting = meeting
+            try? repository.save(meeting)
+        }
     }
 
     func draftAnswer(for question: String, refinementStyle: AnswerRefinementStyle? = nil) async {
@@ -1406,8 +1447,9 @@ final class MeetingSessionManager {
         audioStream = AsyncStream<AudioBuffer> { $0.finish() }
         configAudioSource = sourceCount == 1 ? (sourceSeparatedSources.first?.audioSource ?? .unknown) : .mixed
         let speechContext = transcriptionSpeechContext(for: session)
+        let transcriptionLanguage = SupportedLanguage.normalizedCode(session.primaryLanguage ?? appState.preferences.defaultLanguage)
         let transcriptionConfig = TranscriptionConfig(
-            languageCode: SupportedLanguage.normalizedCode(appState.preferences.defaultLanguage),
+            languageCode: transcriptionLanguage,
             requiresOnDeviceRecognition: appState.preferences.localOnlyMode,
             meetingId: session.id,
             contextualStrings: speechContext.contextualStrings,
@@ -1415,7 +1457,7 @@ final class MeetingSessionManager {
             audioSource: configAudioSource,
             accuracyMode: appState.preferences.transcriptionAccuracyMode,
             commitPolicy: appState.preferences.copilotASRCommitPolicy,
-            preferredLanguageHints: TranscriptionConfig.normalizedLanguageHints(primary: appState.preferences.defaultLanguage, hints: [session.primaryLanguage].compactMap { $0 }),
+            preferredLanguageHints: TranscriptionConfig.normalizedLanguageHints(primary: transcriptionLanguage, hints: [session.primaryLanguage, appState.preferences.defaultLanguage].compactMap { $0 }),
             sourceSeparationRequired: true,
             featureFlags: appState.preferences.effectiveTranscriptionFeatureFlags,
             localASRRefinerModel: appState.preferences.localASRRefinerModel,

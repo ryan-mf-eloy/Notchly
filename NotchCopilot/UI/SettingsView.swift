@@ -140,12 +140,6 @@ struct SettingsView: View {
                 settingsToggleRow("Confirm before recording", isOn: $appState.preferences.requireConfirmationBeforeRecording)
             }
 
-            EssentialSection(title: "Language") {
-                settingsMenuRow("Transcript language", selection: $appState.preferences.defaultLanguage, options: languageOptions)
-                SettingsDivider()
-                settingsMenuRow("Meeting type", selection: $appState.preferences.defaultMeetingType, options: meetingTypeOptions)
-            }
-
             EssentialSection(title: "Notchly") {
                 settingsToggleRow("Hotkey", isOn: $appState.preferences.copilotHotkeyEnabled)
                     .onChange(of: appState.preferences.copilotHotkeyEnabled) {
@@ -175,6 +169,10 @@ struct SettingsView: View {
             }
 
             EssentialSection(title: "Transcription") {
+                settingsMenuRow("Language", selection: transcriptionLanguageSelection, options: languageOptions)
+                SettingsDivider()
+                settingsMenuRow("Meeting type", selection: transcriptionMeetingTypeSelection, options: meetingTypeOptions)
+                SettingsDivider()
                 settingsSegmentedRow("Quality", selection: transcriptionAccuracySelection, options: transcriptionQualityOptions)
                 SettingsDivider()
                 settingsSegmentedRow("Commit", selection: $appState.preferences.copilotASRCommitPolicy, options: commitPolicyOptions)
@@ -234,15 +232,6 @@ struct SettingsView: View {
     private var privacy: some View {
         VStack(spacing: 30) {
             EssentialSection(title: "Privacy") {
-                settingsToggleRow("Local Only Mode", isOn: $appState.preferences.localOnlyMode)
-                    .onChange(of: appState.preferences.localOnlyMode) {
-                        if appState.preferences.localOnlyMode {
-                            appState.preferences.aiConfig.cloudProcessingEnabled = false
-                            appState.preferences.aiConfig.webSearchEnabled = false
-                        }
-                        appState.savePreferences()
-                    }
-                SettingsDivider()
                 settingsStepperRow("Retention", value: $appState.preferences.retentionDays, range: 1...365, suffix: "days")
                 SettingsDivider()
                 settingsToggleRow("Recording indicator", isOn: $appState.preferences.showRecordingIndicator)
@@ -331,6 +320,28 @@ struct SettingsView: View {
             set: { mode in
                 appState.preferences.transcriptionAccuracyMode = mode
                 appState.preferences.audioQuality = mode.legacyAudioQualityName
+            }
+        )
+    }
+
+    private var transcriptionLanguageSelection: Binding<String> {
+        Binding(
+            get: {
+                SupportedLanguage.normalizedCode(appState.currentMeeting?.primaryLanguage ?? appState.preferences.defaultLanguage)
+            },
+            set: { language in
+                appState.updateTranscriptionLanguage(language)
+            }
+        )
+    }
+
+    private var transcriptionMeetingTypeSelection: Binding<MeetingType> {
+        Binding(
+            get: {
+                appState.currentMeeting?.meetingType ?? appState.preferences.defaultMeetingType
+            },
+            set: { meetingType in
+                appState.updateTranscriptionMeetingType(meetingType)
             }
         )
     }

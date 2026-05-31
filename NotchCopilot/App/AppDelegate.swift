@@ -582,8 +582,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         menu.addItem(NSMenuItem(title: "History", action: #selector(openHistorySelector), keyEquivalent: ""))
         menu.addItem(NSMenuItem(title: "Settings", action: #selector(openSettingsSelector), keyEquivalent: ","))
         menu.addItem(.separator())
-        let privacyItem = NSMenuItem(title: "Toggle Local Only", action: #selector(toggleLocalOnly), keyEquivalent: "")
-        menu.addItem(privacyItem)
         let stealthItem = NSMenuItem(title: "Stealth Mode", action: #selector(toggleStealthMode), keyEquivalent: "")
         stealthModeMenuItem = stealthItem
         menu.addItem(stealthItem)
@@ -620,14 +618,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     @objc private func openSettingsSelector() {
         openSettings()
-    }
-
-    @objc private func toggleLocalOnly() {
-        appState.preferences.localOnlyMode.toggle()
-        if appState.preferences.localOnlyMode {
-            appState.preferences.aiConfig.cloudProcessingEnabled = false
-        }
-        appState.savePreferences()
     }
 
     @objc private func toggleStealthMode() {
