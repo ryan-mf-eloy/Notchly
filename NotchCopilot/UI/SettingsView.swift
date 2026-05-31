@@ -141,17 +141,9 @@ struct SettingsView: View {
             }
 
             EssentialSection(title: "Language") {
-                settingsPickerRow("Transcript language", selection: $appState.preferences.defaultLanguage) {
-                    ForEach(SupportedLanguage.allCases) { language in
-                        Text(language.displayName).tag(language.rawValue)
-                    }
-                }
+                settingsMenuRow("Transcript language", selection: $appState.preferences.defaultLanguage, options: languageOptions)
                 SettingsDivider()
-                settingsPickerRow("Meeting type", selection: $appState.preferences.defaultMeetingType) {
-                    ForEach(MeetingType.allCases) { type in
-                        Text(type.displayName).tag(type)
-                    }
-                }
+                settingsMenuRow("Meeting type", selection: $appState.preferences.defaultMeetingType, options: meetingTypeOptions)
             }
 
             EssentialSection(title: "Notchly") {
@@ -165,11 +157,7 @@ struct SettingsView: View {
                         .settingsSecondaryText()
                 }
                 SettingsDivider()
-                settingsPickerRow("Island design", selection: $appState.preferences.islandDesignMode) {
-                    ForEach(IslandDesignMode.allCases) { mode in
-                        Text(mode.displayName).tag(mode)
-                    }
-                }
+                settingsMenuRow("Island design", selection: $appState.preferences.islandDesignMode, options: islandDesignOptions)
             }
         }
     }
@@ -179,11 +167,7 @@ struct SettingsView: View {
             audioStatus
 
             EssentialSection(title: "Capture") {
-                settingsPickerRow("Capture mode", selection: audioCaptureModeBinding) {
-                    ForEach(AudioCaptureMode.allCases) { mode in
-                        Text(mode.displayName).tag(mode)
-                    }
-                }
+                settingsMenuRow("Capture mode", selection: audioCaptureModeBinding, options: captureModeOptions)
                 SettingsDivider()
                 devicePickerRow("Input device", direction: .input, selection: inputDeviceSelection)
                 SettingsDivider()
@@ -191,17 +175,9 @@ struct SettingsView: View {
             }
 
             EssentialSection(title: "Transcription") {
-                settingsSegmentedRow("Quality", selection: transcriptionAccuracySelection) {
-                    ForEach(TranscriptionAccuracyMode.allCases) { mode in
-                        Text(mode.displayName).tag(mode)
-                    }
-                }
+                settingsSegmentedRow("Quality", selection: transcriptionAccuracySelection, options: transcriptionQualityOptions)
                 SettingsDivider()
-                settingsSegmentedRow("Commit", selection: $appState.preferences.copilotASRCommitPolicy) {
-                    ForEach(CopilotASRCommitPolicy.allCases) { policy in
-                        Text(policy.displayName).tag(policy)
-                    }
-                }
+                settingsSegmentedRow("Commit", selection: $appState.preferences.copilotASRCommitPolicy, options: commitPolicyOptions)
             }
 
             EssentialSection(title: "Output") {
@@ -367,6 +343,58 @@ struct SettingsView: View {
         deviceSelectionBinding(\.selectedOutputDeviceUID)
     }
 
+    private var languageOptions: [SettingsMenuOption<String>] {
+        SupportedLanguage.allCases.map { language in
+            SettingsMenuOption(
+                value: language.rawValue,
+                title: language.displayName,
+                systemImage: "textformat"
+            )
+        }
+    }
+
+    private var meetingTypeOptions: [SettingsMenuOption<MeetingType>] {
+        MeetingType.allCases.map { type in
+            SettingsMenuOption(
+                value: type,
+                title: type.displayName,
+                systemImage: "person.2"
+            )
+        }
+    }
+
+    private var islandDesignOptions: [SettingsMenuOption<IslandDesignMode>] {
+        IslandDesignMode.allCases.map { mode in
+            SettingsMenuOption(
+                value: mode,
+                title: mode.displayName,
+                systemImage: mode == .liquidGlass ? "circle.hexagongrid" : "capsule"
+            )
+        }
+    }
+
+    private var captureModeOptions: [SettingsMenuOption<AudioCaptureMode>] {
+        AudioCaptureMode.allCases.map { mode in
+            SettingsMenuOption(
+                value: mode,
+                title: mode.displayName,
+                systemImage: captureModeSystemImage(mode)
+            )
+        }
+    }
+
+    private var transcriptionQualityOptions: [SettingsMenuOption<TranscriptionAccuracyMode>] {
+        TranscriptionAccuracyMode.allCases.map { mode in
+            SettingsMenuOption(value: mode, title: mode.displayName)
+        }
+    }
+
+    private var commitPolicyOptions: [SettingsMenuOption<CopilotASRCommitPolicy>] {
+        CopilotASRCommitPolicy.allCases.map { policy in
+            SettingsMenuOption(value: policy, title: policy.displayName)
+        }
+    }
+
     private func deviceSelectionBinding(_ keyPath: WritableKeyPath<AppPreferences, String?>) -> Binding<String> {
         Binding(
             get: { appState.preferences[keyPath: keyPath] ?? AudioDevicePickerSentinel.systemDefault },
@@ -409,22 +437,49 @@ struct SettingsView: View {
     }
 
     private func devicePickerRow(_ title: String, direction: AudioDeviceDirection, selection: Binding<String>) -> some View {
-        let devices = audioDevices.devices(for: direction)
-        let selectedUID = selection.wrappedValue == AudioDevicePickerSentinel.systemDefault ? nil : selection.wrappedValue
-        return settingsValueRow(title) {
-            Picker("", selection: selection) {
-                Text(systemDefaultLabel(for: direction)).tag(AudioDevicePickerSentinel.systemDefault)
-                ForEach(devices) { device in
-                    Text(device.isDefault ? "\(device.name) • Default" : device.name).tag(device.uid)
-                }
-                if let selectedUID, !audioDevices.isAvailable(selectedUID, direction: direction) {
-                    Text("Disconnected device").tag(selectedUID)
-                }
-            }
-            .labelsHidden()
-            .pickerStyle(.menu)
-            .frame(width: 276, alignment: .trailing)
+        settingsValueRow(title) {
+            SettingsMenuSelector(
+                selection: selection,
+                options: deviceOptions(for: direction, selectedValue: selection.wrappedValue),
+                width: SettingsLayout.controlWidth
+            )
         }
+    }
+
+    private func deviceOptions(for direction: AudioDeviceDirection, selectedValue: String) -> [SettingsMenuOption<String>] {
+        let devices = audioDevices.devices(for: direction)
+        let selectedUID = selectedValue == AudioDevicePickerSentinel.systemDefault ? nil : selectedValue
+        var options: [SettingsMenuOption<String>] = [
+            SettingsMenuOption(
+                value: AudioDevicePickerSentinel.systemDefault,
+                title: "System Default",
+                subtitle: audioDevices.defaultDeviceName(for: direction),
+                systemImage: deviceSystemImage(for: direction)
+            )
+        ]
+
+        options.append(contentsOf: devices.map { device in
+            SettingsMenuOption(
+                value: device.uid,
+                title: device.name,
+                subtitle: device.isDefault ? "Default" : nil,
+                systemImage: deviceSystemImage(for: direction)
+            )
+        })
+
+        if let selectedUID, !audioDevices.isAvailable(selectedUID, direction: direction) {
+            options.append(
+                SettingsMenuOption(
+                    value: selectedUID,
+                    title: "Disconnected device",
+                    subtitle: selectedUID,
+                    systemImage: "exclamationmark.triangle",
+                    isUnavailable: true
+                )
+            )
+        }
+
+        return options
     }
 
     private func systemDefaultLabel(for direction: AudioDeviceDirection) -> String {
@@ -434,39 +489,54 @@ struct SettingsView: View {
         return "System Default"
     }
 
+    private func deviceSystemImage(for direction: AudioDeviceDirection) -> String {
+        switch direction {
+        case .input: "mic"
+        case .output: "speaker.wave.2"
+        }
+    }
+
+    private func captureModeSystemImage(_ mode: AudioCaptureMode) -> String {
+        switch mode {
+        case .microphoneOnly: "mic"
+        case .systemOnly: "speaker.wave.2"
+        case .microphoneAndSystem: "waveform"
+        }
+    }
+
     private func settingsToggleRow(_ title: String, isOn: Binding<Bool>) -> some View {
         settingsValueRow(title) {
             Toggle("", isOn: isOn)
                 .labelsHidden()
-                .toggleStyle(.switch)
-                .tint(MinimalTheme.notchAccent.opacity(0.82))
-                .scaleEffect(0.82)
+                .toggleStyle(NotchlySwitchStyle())
         }
     }
 
-    private func settingsPickerRow<Selection: Hashable, Content: View>(
+    private func settingsMenuRow<Selection: Hashable>(
         _ title: String,
         selection: Binding<Selection>,
-        @ViewBuilder content: () -> Content
+        options: [SettingsMenuOption<Selection>]
     ) -> some View {
         settingsValueRow(title) {
-            Picker("", selection: selection, content: content)
-                .labelsHidden()
-                .pickerStyle(.menu)
-                .frame(width: 250, alignment: .trailing)
+            SettingsMenuSelector(
+                selection: selection,
+                options: options,
+                width: SettingsLayout.controlWidth
+            )
         }
     }
 
-    private func settingsSegmentedRow<Selection: Hashable, Content: View>(
+    private func settingsSegmentedRow<Selection: Hashable>(
         _ title: String,
         selection: Binding<Selection>,
-        @ViewBuilder content: () -> Content
+        options: [SettingsMenuOption<Selection>]
     ) -> some View {
         settingsValueRow(title) {
-            Picker("", selection: selection, content: content)
-                .labelsHidden()
-                .pickerStyle(.segmented)
-                .frame(width: 260, alignment: .trailing)
+            SettingsSegmentedSelector(
+                selection: selection,
+                options: options,
+                width: SettingsLayout.controlWidth
+            )
         }
     }
 
@@ -475,7 +545,7 @@ struct SettingsView: View {
             Stepper("\(value.wrappedValue) \(suffix)", value: value, in: range)
                 .font(.system(size: 12.5, weight: .medium))
                 .foregroundStyle(MinimalTheme.secondary)
-                .frame(width: 190, alignment: .trailing)
+                .frame(width: 190, alignment: .leading)
         }
     }
 
@@ -498,7 +568,7 @@ struct SettingsView: View {
                 .foregroundStyle(MinimalTheme.secondary)
                 .lineLimit(1)
                 .minimumScaleFactor(0.88)
-                .frame(width: 174, alignment: .trailing)
+                .frame(width: SettingsLayout.labelWidth, alignment: .leading)
             accessory()
                 .frame(maxWidth: .infinity, alignment: .leading)
         }
@@ -514,11 +584,11 @@ struct SettingsView: View {
             .frame(height: 24)
             .background(
                 Capsule()
-                    .fill(isPositive ? MinimalTheme.success.opacity(0.18) : MinimalTheme.settingsControl)
+                    .fill(isPositive ? MinimalTheme.settingsActive.opacity(0.18) : MinimalTheme.settingsControl)
             )
             .overlay(
                 Capsule()
-                    .stroke(isPositive ? MinimalTheme.success.opacity(0.24) : MinimalTheme.divider, lineWidth: 0.7)
+                    .stroke(isPositive ? MinimalTheme.settingsActive.opacity(0.24) : MinimalTheme.divider, lineWidth: 0.7)
             )
     }
 
@@ -572,7 +642,7 @@ private struct EssentialSection<Content: View>: View {
                 .font(.system(size: 11, weight: .semibold))
                 .foregroundStyle(MinimalTheme.tertiary)
                 .textCase(.uppercase)
-                .frame(width: 174, alignment: .trailing)
+                .frame(width: SettingsLayout.labelWidth, alignment: .leading)
             VStack(spacing: 0) {
                 content
             }
@@ -589,7 +659,7 @@ private struct SettingsDivider: View {
         Rectangle()
             .fill(MinimalTheme.divider)
             .frame(height: 0.6)
-            .padding(.leading, fullWidth ? 0 : 190)
+            .padding(.leading, fullWidth ? 0 : SettingsLayout.dividerInset)
     }
 }
 
@@ -600,7 +670,7 @@ private struct NotchMark: View {
                 .fill(MinimalTheme.primary.opacity(0.92))
                 .frame(width: 28, height: 10)
             Capsule()
-                .fill(MinimalTheme.background)
+                .fill(Color.black)
                 .frame(width: 18, height: 6)
                 .offset(y: -1)
         }
@@ -617,7 +687,7 @@ private struct AudioMicroWaveform: View {
             HStack(alignment: .center, spacing: 3) {
                 ForEach(0..<18, id: \.self) { index in
                     Capsule()
-                        .fill(index % 5 == 0 ? MinimalTheme.notchAccent.opacity(0.88) : MinimalTheme.primary.opacity(0.62))
+                        .fill(index % 5 == 0 ? MinimalTheme.settingsActive.opacity(0.9) : MinimalTheme.primary.opacity(0.62))
                         .frame(width: 3, height: barHeight(index: index, date: timeline.date))
                 }
             }
@@ -643,7 +713,7 @@ private struct SettingsPillButtonStyle: ButtonStyle {
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
             .font(.system(size: 12, weight: .semibold))
-            .foregroundStyle(isDestructive ? MinimalTheme.notchAccent : MinimalTheme.primary)
+            .foregroundStyle(isDestructive ? MinimalTheme.destructive : MinimalTheme.primary)
             .padding(.horizontal, 12)
             .frame(height: 28)
             .background(
@@ -652,7 +722,7 @@ private struct SettingsPillButtonStyle: ButtonStyle {
             )
             .overlay(
                 Capsule()
-                    .stroke(isDestructive ? MinimalTheme.notchAccent.opacity(0.28) : MinimalTheme.divider, lineWidth: 0.7)
+                    .stroke(isDestructive ? MinimalTheme.destructive.opacity(0.28) : MinimalTheme.divider, lineWidth: 0.7)
             )
     }
 }

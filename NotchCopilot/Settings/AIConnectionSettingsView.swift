@@ -15,11 +15,7 @@ struct AIConnectionSettingsView: View {
     var body: some View {
         VStack(spacing: 30) {
             AISection(title: "Provider") {
-                aiPickerRow("Active provider", selection: providerSelection) {
-                    ForEach(ProviderRegistry.visibleProviders) { provider in
-                        Text(provider.title).tag(provider.kind)
-                    }
-                }
+                aiMenuRow("Active provider", selection: providerSelection, options: providerOptions)
                 AIDivider()
                 authMethodRow
                 AIDivider()
@@ -57,11 +53,7 @@ struct AIConnectionSettingsView: View {
             }
 
             AISection(title: "Realtime Transcription") {
-                aiPickerRow("Provider", selection: realtimeTranscriptionProviderSelection) {
-                    ForEach(RealtimeTranscriptionProvider.allCases) { provider in
-                        Text(provider.displayName).tag(provider)
-                    }
-                }
+                aiMenuRow("Provider", selection: realtimeTranscriptionProviderSelection, options: realtimeTranscriptionProviderOptions)
                 AIDivider()
                 secureRow("ElevenLabs key", text: $elevenLabsAPIKeyDraft)
                 AIDivider()
@@ -130,17 +122,47 @@ struct AIConnectionSettingsView: View {
         )
     }
 
+    private var providerOptions: [SettingsMenuOption<AIProviderKind>] {
+        ProviderRegistry.visibleProviders.map { provider in
+            SettingsMenuOption(
+                value: provider.kind,
+                title: provider.title,
+                subtitle: providerMenuSubtitle(provider),
+                systemImage: provider.kind == .appleLocal ? "apple.logo" : nil,
+                assetName: provider.logoAssetName
+            )
+        }
+    }
+
+    private var realtimeTranscriptionProviderOptions: [SettingsMenuOption<RealtimeTranscriptionProvider>] {
+        RealtimeTranscriptionProvider.allCases.map { provider in
+            SettingsMenuOption(
+                value: provider,
+                title: provider.displayName,
+                subtitle: "Realtime transcription",
+                monogram: provider == .elevenLabs ? "11" : nil
+            )
+        }
+    }
+
+    private var authKindOptions: [SettingsMenuOption<AIProviderAuthKind>] {
+        activeProvider.supportedAuthKinds.map { authKind in
+            SettingsMenuOption(
+                value: authKind,
+                title: authKind.shortTitle,
+                systemImage: authKind.systemImage
+            )
+        }
+    }
+
     private var authMethodRow: some View {
         aiValueRow("Authentication") {
             if activeProvider.supportedAuthKinds.count > 1 {
-                Picker("", selection: authKindSelection) {
-                    ForEach(activeProvider.supportedAuthKinds) { authKind in
-                        Text(authKind.title).tag(authKind)
-                    }
-                }
-                .labelsHidden()
-                .pickerStyle(.segmented)
-                .frame(width: 280)
+                SettingsSegmentedSelector(
+                    selection: authKindSelection,
+                    options: authKindOptions,
+                    width: SettingsLayout.controlWidth
+                )
             } else {
                 Text(activeProvider.supportedAuthKinds.first?.title ?? "Default")
                     .aiSecondaryText()
@@ -374,14 +396,26 @@ struct AIConnectionSettingsView: View {
         }
     }
 
+    private func providerMenuSubtitle(_ provider: AIProviderDescriptor) -> String {
+        switch provider.kind {
+        case .openAI:
+            return "Codex or API key"
+        case .appleLocal:
+            return "On-device"
+        case .googleGemini:
+            return "Gemini"
+        case .anthropicClaude:
+            return "Claude"
+        case .perplexity:
+            return "Sonar"
+        case .appleFoundationModels:
+            return "On-device"
+        }
+    }
+
     private func secureRow(_ title: String, text: Binding<String>) -> some View {
         aiValueRow(title) {
-            SecureField("", text: text)
-                .textFieldStyle(.plain)
-                .font(.system(size: 12.5, weight: .medium))
-                .foregroundStyle(MinimalTheme.primary)
-                .multilineTextAlignment(.trailing)
-                .frame(width: 282)
+            SettingsSecureField(text: text, width: SettingsLayout.controlWidth)
         }
     }
 
@@ -389,22 +423,21 @@ struct AIConnectionSettingsView: View {
         aiValueRow(title) {
             Toggle("", isOn: isOn)
                 .labelsHidden()
-                .toggleStyle(.switch)
-                .tint(MinimalTheme.notchAccent.opacity(0.82))
-                .scaleEffect(0.82)
+                .toggleStyle(NotchlySwitchStyle())
         }
     }
 
-    private func aiPickerRow<Selection: Hashable, Content: View>(
+    private func aiMenuRow<Selection: Hashable>(
         _ title: String,
         selection: Binding<Selection>,
-        @ViewBuilder content: () -> Content
+        options: [SettingsMenuOption<Selection>]
     ) -> some View {
         aiValueRow(title) {
-            Picker("", selection: selection, content: content)
-                .labelsHidden()
-                .pickerStyle(.menu)
-                .frame(width: 282)
+            SettingsMenuSelector(
+                selection: selection,
+                options: options,
+                width: SettingsLayout.controlWidth
+            )
         }
     }
 
@@ -415,7 +448,7 @@ struct AIConnectionSettingsView: View {
                 .foregroundStyle(MinimalTheme.secondary)
                 .lineLimit(1)
                 .minimumScaleFactor(0.88)
-                .frame(width: 174, alignment: .trailing)
+                .frame(width: SettingsLayout.labelWidth, alignment: .leading)
             accessory()
                 .frame(maxWidth: .infinity, alignment: .leading)
         }
@@ -441,11 +474,11 @@ struct AIConnectionSettingsView: View {
             .frame(height: 24)
             .background(
                 Capsule()
-                    .fill(isPositive ? MinimalTheme.success.opacity(0.18) : MinimalTheme.settingsControl)
+                    .fill(isPositive ? MinimalTheme.settingsActive.opacity(0.18) : MinimalTheme.settingsControl)
             )
             .overlay(
                 Capsule()
-                    .stroke(isPositive ? MinimalTheme.success.opacity(0.24) : MinimalTheme.divider, lineWidth: 0.7)
+                    .stroke(isPositive ? MinimalTheme.settingsActive.opacity(0.24) : MinimalTheme.divider, lineWidth: 0.7)
             )
     }
 
@@ -465,7 +498,7 @@ private struct AISection<Content: View>: View {
                 .font(.system(size: 11, weight: .semibold))
                 .foregroundStyle(MinimalTheme.tertiary)
                 .textCase(.uppercase)
-                .frame(width: 174, alignment: .trailing)
+                .frame(width: SettingsLayout.labelWidth, alignment: .leading)
             VStack(spacing: 0) {
                 content
             }
@@ -482,7 +515,7 @@ private struct AIDivider: View {
         Rectangle()
             .fill(MinimalTheme.divider)
             .frame(height: 0.6)
-            .padding(.leading, fullWidth ? 0 : 190)
+            .padding(.leading, fullWidth ? 0 : SettingsLayout.dividerInset)
     }
 }
 
@@ -492,7 +525,7 @@ private struct AIPillButtonStyle: ButtonStyle {
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
             .font(.system(size: 12, weight: .semibold))
-            .foregroundStyle(isDestructive ? MinimalTheme.notchAccent : MinimalTheme.primary)
+            .foregroundStyle(isDestructive ? MinimalTheme.destructive : MinimalTheme.primary)
             .padding(.horizontal, 12)
             .frame(height: 28)
             .background(
@@ -501,8 +534,26 @@ private struct AIPillButtonStyle: ButtonStyle {
             )
             .overlay(
                 Capsule()
-                    .stroke(isDestructive ? MinimalTheme.notchAccent.opacity(0.28) : MinimalTheme.divider, lineWidth: 0.7)
+                    .stroke(isDestructive ? MinimalTheme.destructive.opacity(0.28) : MinimalTheme.divider, lineWidth: 0.7)
             )
+    }
+}
+
+private extension AIProviderAuthKind {
+    var shortTitle: String {
+        switch self {
+        case .accountLogin: "Account"
+        case .apiKey: "API Key"
+        case .local: "Local"
+        }
+    }
+
+    var systemImage: String {
+        switch self {
+        case .accountLogin: "person.crop.circle"
+        case .apiKey: "key"
+        case .local: "cpu"
+        }
     }
 }
 
