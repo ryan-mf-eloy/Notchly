@@ -11,10 +11,45 @@ protocol MicrophoneCaptureServicing: AnyObject, Sendable {
 enum MicrophoneVoiceProcessingPolicy: String, Equatable, Sendable {
     case disabled
     case enabled
+    case adaptive
+}
+
+struct MicrophoneVoiceProcessingDecision: Equatable, Sendable {
+    var shouldEnable: Bool
+    var reason: String
+}
+
+enum MicrophoneVoiceProcessingSelector {
+    static func decision(policy: MicrophoneVoiceProcessingPolicy, deviceName: String?) -> MicrophoneVoiceProcessingDecision {
+        switch policy {
+        case .disabled:
+            return MicrophoneVoiceProcessingDecision(shouldEnable: false, reason: "disabled_by_policy")
+        case .enabled:
+            return MicrophoneVoiceProcessingDecision(shouldEnable: true, reason: "enabled_by_policy")
+        case .adaptive:
+            return adaptiveDecision(deviceName: deviceName)
+        }
+    }
+
+    private static func adaptiveDecision(deviceName: String?) -> MicrophoneVoiceProcessingDecision {
+        let normalized = (deviceName ?? "").lowercased()
+        let externalRawDevices = [
+            "airpods", "headset", "headphone", "usb", "external", "rode",
+            "shure", "yeti", "scarlett", "focusrite", "elgato", "mv7", "sm7"
+        ]
+        if externalRawDevices.contains(where: { normalized.contains($0) }) {
+            return MicrophoneVoiceProcessingDecision(shouldEnable: false, reason: "external_or_headset_raw_capture")
+        }
+        let echoRiskDevices = ["built-in", "macbook", "studio display", "display audio", "iphone microphone"]
+        if normalized.isEmpty || echoRiskDevices.contains(where: { normalized.contains($0) }) {
+            return MicrophoneVoiceProcessingDecision(shouldEnable: true, reason: "echo_risk_voice_processing")
+        }
+        return MicrophoneVoiceProcessingDecision(shouldEnable: true, reason: "unknown_route_voice_processing")
+    }
 }
 
 final class AppleMicrophoneCaptureService: MicrophoneCaptureServicing, @unchecked Sendable {
-    static let defaultVoiceProcessingPolicy: MicrophoneVoiceProcessingPolicy = .disabled
+    static let defaultVoiceProcessingPolicy: MicrophoneVoiceProcessingPolicy = .adaptive
 
     private let engine = AVAudioEngine()
     private let analyzer = AppleAccelerateAudioAnalyzer()
@@ -103,18 +138,22 @@ final class AppleMicrophoneCaptureService: MicrophoneCaptureServicing, @unchecke
 
     private func configureVoiceProcessing(on input: AVAudioInputNode) {
         guard !ProcessInfo.processInfo.isRunningXCTest, #available(macOS 10.15, *) else { return }
-        switch voiceProcessingPolicy {
-        case .disabled:
+        let decision = MicrophoneVoiceProcessingSelector.decision(
+            policy: voiceProcessingPolicy,
+            deviceName: AVCaptureDevice.default(for: .audio)?.localizedName
+        )
+        guard decision.shouldEnable else {
             disableVoiceProcessingIfNeeded(on: input)
-        case .enabled:
-            do {
-                try input.setVoiceProcessingEnabled(true)
-                input.isVoiceProcessingBypassed = false
-                input.isVoiceProcessingAGCEnabled = true
-                AppLog.audio.info("Microphone voice processing enabled")
-            } catch {
-                AppLog.audio.info("Microphone voice processing unavailable: \(error.localizedDescription, privacy: .public)")
-            }
+            AppLog.audio.info("Microphone voice processing disabled reason=\(decision.reason, privacy: .public)")
+            return
+        }
+        do {
+            try input.setVoiceProcessingEnabled(true)
+            input.isVoiceProcessingBypassed = false
+            input.isVoiceProcessingAGCEnabled = true
+            AppLog.audio.info("Microphone voice processing enabled reason=\(decision.reason, privacy: .public)")
+        } catch {
+            AppLog.audio.info("Microphone voice processing unavailable: \(error.localizedDescription, privacy: .public)")
         }
     }
 

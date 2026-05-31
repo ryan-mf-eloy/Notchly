@@ -110,6 +110,40 @@ enum CopilotASRCommitPolicy: String, Codable, CaseIterable, Identifiable, Sendab
     }
 }
 
+struct TranscriptionFeatureFlags: Codable, Hashable, Sendable {
+    var advancedAudioConditioningEnabled: Bool
+    var vadGatingEnabled: Bool
+    var languageContinuityV2Enabled: Bool
+    var localASRRefinerEnabled: Bool
+    var transcriptionMetricsEnabled: Bool
+    var cloudFallbackEnabled: Bool
+
+    init(
+        advancedAudioConditioningEnabled: Bool = true,
+        vadGatingEnabled: Bool = true,
+        languageContinuityV2Enabled: Bool = true,
+        localASRRefinerEnabled: Bool = false,
+        transcriptionMetricsEnabled: Bool = false,
+        cloudFallbackEnabled: Bool = true
+    ) {
+        self.advancedAudioConditioningEnabled = advancedAudioConditioningEnabled
+        self.vadGatingEnabled = vadGatingEnabled
+        self.languageContinuityV2Enabled = languageContinuityV2Enabled
+        self.localASRRefinerEnabled = localASRRefinerEnabled
+        self.transcriptionMetricsEnabled = transcriptionMetricsEnabled
+        self.cloudFallbackEnabled = cloudFallbackEnabled
+    }
+
+    static let `default` = TranscriptionFeatureFlags()
+
+    func resolved(localOnlyMode: Bool, diagnosticsEnabled: Bool) -> TranscriptionFeatureFlags {
+        var flags = self
+        flags.cloudFallbackEnabled = flags.cloudFallbackEnabled && !localOnlyMode
+        flags.transcriptionMetricsEnabled = flags.transcriptionMetricsEnabled || diagnosticsEnabled
+        return flags
+    }
+}
+
 enum QAPrecisionMode: String, Codable, CaseIterable, Identifiable {
     case highPrecision
     case balanced
@@ -347,6 +381,8 @@ struct AppPreferences: Codable, Hashable {
     var showTranslatedText: Bool = false
     var transcriptionEngineMode: TranscriptionEngineMode = .appleSpeech
     var showTranscriptionDiagnostics: Bool = false
+    var transcriptionFeatureFlags: TranscriptionFeatureFlags = .default
+    var localASRRefinerModel: String = "distil-large-v3"
     var retentionDays: Int = 30
     var showRecordingIndicator: Bool = true
     var stealthModeEnabled: Bool = false
@@ -355,7 +391,7 @@ struct AppPreferences: Codable, Hashable {
     var qaPrecisionMode: QAPrecisionMode = .highPrecision
     var qaMultimodalMode: QAMultimodalMode = .enforced
     var localQuestionModelProfile: LocalQuestionModelProfile = .maxAccuracyMDeBERTa
-    var allowLocalModelDownloads: Bool = true
+    var allowLocalModelDownloads: Bool = false
     var qaShadowMode: Bool = true
     var copilotAlwaysOnEnabled: Bool = false
     var copilotHotkeyEnabled: Bool = true
@@ -407,6 +443,8 @@ struct AppPreferences: Codable, Hashable {
         case showTranslatedText
         case transcriptionEngineMode
         case showTranscriptionDiagnostics
+        case transcriptionFeatureFlags
+        case localASRRefinerModel
         case retentionDays
         case showRecordingIndicator
         case stealthModeEnabled
@@ -468,6 +506,8 @@ struct AppPreferences: Codable, Hashable {
         showTranslatedText = try container.decodeIfPresent(Bool.self, forKey: .showTranslatedText) ?? false
         transcriptionEngineMode = try container.decodeIfPresent(TranscriptionEngineMode.self, forKey: .transcriptionEngineMode) ?? .appleSpeech
         showTranscriptionDiagnostics = try container.decodeIfPresent(Bool.self, forKey: .showTranscriptionDiagnostics) ?? false
+        transcriptionFeatureFlags = try container.decodeIfPresent(TranscriptionFeatureFlags.self, forKey: .transcriptionFeatureFlags) ?? .default
+        localASRRefinerModel = try container.decodeIfPresent(String.self, forKey: .localASRRefinerModel) ?? "distil-large-v3"
         retentionDays = try container.decodeIfPresent(Int.self, forKey: .retentionDays) ?? 30
         showRecordingIndicator = try container.decodeIfPresent(Bool.self, forKey: .showRecordingIndicator) ?? true
         stealthModeEnabled = try container.decodeIfPresent(Bool.self, forKey: .stealthModeEnabled) ?? false
@@ -476,7 +516,7 @@ struct AppPreferences: Codable, Hashable {
         qaPrecisionMode = try container.decodeIfPresent(QAPrecisionMode.self, forKey: .qaPrecisionMode) ?? .highPrecision
         qaMultimodalMode = try container.decodeIfPresent(QAMultimodalMode.self, forKey: .qaMultimodalMode) ?? .enforced
         localQuestionModelProfile = try container.decodeIfPresent(LocalQuestionModelProfile.self, forKey: .localQuestionModelProfile) ?? .maxAccuracyMDeBERTa
-        allowLocalModelDownloads = try container.decodeIfPresent(Bool.self, forKey: .allowLocalModelDownloads) ?? true
+        allowLocalModelDownloads = try container.decodeIfPresent(Bool.self, forKey: .allowLocalModelDownloads) ?? false
         qaShadowMode = try container.decodeIfPresent(Bool.self, forKey: .qaShadowMode) ?? true
         _ = try container.decodeIfPresent(Bool.self, forKey: .copilotAlwaysOnEnabled)
         copilotAlwaysOnEnabled = false
@@ -507,6 +547,8 @@ struct AppPreferences: Codable, Hashable {
         ambientAudioScope = .microphoneOnly
         launchAtLogin = launchAtLogin || copilotLaunchAtLoginEnabled
         audioQuality = transcriptionAccuracyMode.legacyAudioQualityName
+        let trimmedLocalRefinerModel = localASRRefinerModel.trimmingCharacters(in: .whitespacesAndNewlines)
+        localASRRefinerModel = trimmedLocalRefinerModel.isEmpty ? "distil-large-v3" : trimmedLocalRefinerModel
 
         if !didMigrateRealtimeAudioDefaults {
             audioCaptureMode = .microphoneAndSystem
@@ -541,6 +583,7 @@ struct AppPreferences: Codable, Hashable {
             aiConfig.cloudProcessingEnabled = false
             aiConfig.webSearchEnabled = false
             transcriptionEngineMode = .appleSpeech
+            transcriptionFeatureFlags.cloudFallbackEnabled = false
         }
         aiConfig.normalizeRealtimeTranscriptionDefaults()
         questionAnsweringProfile.prune()
@@ -576,6 +619,13 @@ struct AppPreferences: Codable, Hashable {
 
     var sourceSeparatedHighAccuracyEnabled: Bool {
         transcriptionAccuracyMode == .highAccuracy
+    }
+
+    var effectiveTranscriptionFeatureFlags: TranscriptionFeatureFlags {
+        transcriptionFeatureFlags.resolved(
+            localOnlyMode: localOnlyMode,
+            diagnosticsEnabled: showTranscriptionDiagnostics
+        )
     }
 
     private mutating func mergeDefaultKnownMeetingApps() {

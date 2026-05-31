@@ -1,0 +1,79 @@
+[
+  {
+    "id": "pt-br-clean-jargon",
+    "locale": "pt-BR",
+    "profile": "clean",
+    "reference": "vamos validar o SpeechAnalyzer com Core ML e Notchly",
+    "jargon": ["SpeechAnalyzer", "Core ML", "Notchly"]
+  },
+  {
+    "id": "en-us-noisy-code-switch",
+    "locale": "en-US",
+    "profile": "noisy",
+    "reference": "ship the AVFoundation pipeline sem quebrar a transcricao",
+    "jargon": ["AVFoundation", "pipeline"]
+  },
+  {
+    "id": "es-es-low-volume",
+    "locale": "es-ES",
+    "profile": "lowVolume",
+    "reference": "validemos WhisperKit y el router de idioma",
+    "jargon": ["WhisperKit", "router"]
+  },
+  {
+    "id": "ja-jp-reverb",
+    "locale": "ja-JP",
+    "profile": "reverb",
+    "reference": "Notchly の SpeechAnalyzer を確認します",
+    "jargon": ["Notchly", "SpeechAnalyzer"]
+  },
+  {
+    "id": "pt-br-overlap",
+    "locale": "pt-BR",
+    "profile": "overlap",
+    "reference": "duas pessoas falaram sobre Notchly e pipeline",
+    "jargon": ["Notchly", "pipeline"]
+  },
+  {
+    "id": "en-us-clipping",
+    "locale": "en-US",
+    "profile": "clipping",
+    "reference": "Core ML should survive clipping without hallucinating",
+    "jargon": ["Core ML"]
+  },
+  {
+    "id": "es-es-code-switching",
+    "locale": "es-ES",
+    "profile": "codeSwitching",
+    "reference": "validemos el deploy con SpeechAnalyzer and Core ML",
+    "jargon": ["deploy", "SpeechAnalyzer", "Core ML"]
+  },
+  {
+    "id": "critical-silence",
+    "locale": "en-US",
+    "profile": "silence",
+    "reference": "",
+    "jargon": []
+  },
+  {
+    "id": "critical-clicks",
+    "locale": "en-US",
+    "profile": "clicks",
+    "reference": "",
+    "jargon": []
+  },
+  {
+    "id": "critical-music",
+    "locale": "en-US",
+    "profile": "music",
+    "reference": "",
+    "jargon": []
+  },
+  {
+    "id": "critical-breathing",
+    "locale": "en-US",
+    "profile": "breathing",
+    "reference": "",
+    "jargon": []
+  }
+]

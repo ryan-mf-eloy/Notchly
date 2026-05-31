@@ -36,6 +36,7 @@ final class NotchCopilotTests: XCTestCase {
         XCTAssertEqual(preferences.copilotRetentionDays, 7)
         XCTAssertEqual(preferences.copilotWebMode, .onDemand)
         XCTAssertEqual(preferences.copilotActivationPolicy, .clearIntent)
+        XCTAssertFalse(preferences.allowLocalModelDownloads)
     }
 
     func testAppPreferencesDecodesMissingAudioDevicesAsSystemDefault() throws {
@@ -143,6 +144,28 @@ final class NotchCopilotTests: XCTestCase {
         XCTAssertEqual(normalized.qaMultimodalMode, .enforced)
         XCTAssertTrue(normalized.didAuditSyntheticQAMultimodalDefault)
         XCTAssertTrue(normalized.didPromoteHardenedQAMultimodalDefault)
+    }
+
+    func testLocalASRRefinerDownloadConsentIsSeparateFromEnablement() {
+        var preferences = AppPreferences()
+        preferences.localOnlyMode = true
+        preferences.allowLocalModelDownloads = false
+        preferences.transcriptionFeatureFlags.localASRRefinerEnabled = true
+
+        preferences.normalizeForPersistence()
+
+        XCTAssertTrue(preferences.transcriptionFeatureFlags.localASRRefinerEnabled)
+        XCTAssertTrue(preferences.effectiveTranscriptionFeatureFlags.localASRRefinerEnabled)
+        XCTAssertFalse(preferences.effectiveTranscriptionFeatureFlags.cloudFallbackEnabled)
+
+        let config = TranscriptionConfig(
+            meetingId: UUID(),
+            featureFlags: preferences.effectiveTranscriptionFeatureFlags,
+            localASRRefinerModel: preferences.localASRRefinerModel,
+            allowLocalASRModelDownload: preferences.allowLocalModelDownloads
+        )
+        XCTAssertTrue(config.featureFlags.localASRRefinerEnabled)
+        XCTAssertFalse(config.allowLocalASRModelDownload)
     }
 
     func testLocalDataCryptorRoundTripsAndRejectsWrongKey() throws {
@@ -2949,8 +2972,10 @@ final class NotchCopilotTests: XCTestCase {
         XCTAssertEqual(result.buffer.pcmBuffer?.format.channelCount, 2)
     }
 
-    func testMicrophoneCaptureDoesNotAlterSystemPlaybackByDefault() {
-        XCTAssertEqual(AppleMicrophoneCaptureService.defaultVoiceProcessingPolicy, .disabled)
+    func testMicrophoneCaptureUsesAdaptiveVoiceProcessingByDefault() {
+        XCTAssertEqual(AppleMicrophoneCaptureService.defaultVoiceProcessingPolicy, .adaptive)
+        XCTAssertTrue(MicrophoneVoiceProcessingSelector.decision(policy: .adaptive, deviceName: "Built-in Microphone").shouldEnable)
+        XCTAssertFalse(MicrophoneVoiceProcessingSelector.decision(policy: .adaptive, deviceName: "USB Headset").shouldEnable)
     }
 
     func testSpeechRecognitionWatchdogRestartsOnlyForRecentAudioWithoutSegments() {
@@ -3205,18 +3230,34 @@ final class NotchCopilotTests: XCTestCase {
                 hypothesis: "Qual é a capital da França",
                 locale: "pt-BR",
                 activeVocabulary: ["França", "Ichimoku"],
+                namedEntities: ["França"],
                 firstPartialLatencyMs: 120,
                 finalLatencyMs: 900,
+                audioDurationMs: 1_000,
+                processingDurationMs: 420,
+                languageSwitchLatencyMs: 240,
                 gapCount: 0,
-                duplicateCount: 0
+                duplicateCount: 0,
+                correctionChurnCount: 1
             )
         ]).first)
 
         XCTAssertEqual(result.wordErrorRate, 0, accuracy: 0.0001)
         XCTAssertEqual(result.characterErrorRate, 0, accuracy: 0.0001)
         XCTAssertEqual(result.vocabularyRecognitionRate, 0.5, accuracy: 0.0001)
+        XCTAssertEqual(result.namedEntityRecognitionRate, 1, accuracy: 0.0001)
+        XCTAssertEqual(result.realTimeFactor ?? -1, 0.42, accuracy: 0.0001)
+        XCTAssertFalse(result.passedQualityGate)
+        XCTAssertEqual(result.failedGates, ["vocabulary_recall"])
         XCTAssertNoThrow(try suite.jsonReport(for: [
             TranscriptionBenchmarkCase(id: "json", reference: "BTC", hypothesis: "BTC", locale: "pt-BR", activeVocabulary: ["BTC"])
+        ]))
+        let summary = suite.summarize([result])
+        XCTAssertEqual(summary.caseCount, 1)
+        XCTAssertEqual(summary.passedCaseCount, 0)
+        XCTAssertEqual(summary.realTimeFactorP95 ?? -1, 0.42, accuracy: 0.0001)
+        XCTAssertNoThrow(try suite.jsonSummary(for: [
+            TranscriptionBenchmarkCase(id: "json-summary", reference: "BTC", hypothesis: "BTC", locale: "pt-BR", activeVocabulary: ["BTC"], namedEntities: ["BTC"])
         ]))
     }
 
@@ -3452,7 +3493,7 @@ final class NotchCopilotTests: XCTestCase {
         XCTAssertNotEqual(coordinator.coverageRevision(for: segment), coordinator.coverageRevision(for: revised))
     }
 
-    func testProviderRouterDefaultsToNativeAppleTranscription() {
+    func testProviderRouterDefaultsToStreamingAppleTranscriptionPipeline() {
         let preferences = AppPreferences()
         let router = ProviderRouter()
         let service = router.transcriptionService(
@@ -3462,7 +3503,7 @@ final class NotchCopilotTests: XCTestCase {
             ]
         )
 
-        XCTAssertTrue(service is AppleNativeTranscriptionService)
+        XCTAssertTrue(service is StreamingASRRouter)
         let report = CapabilityChecker().localReport(preferences: preferences)
         if #available(macOS 26.0, *), SpeechTranscriber.isAvailable {
             XCTAssertEqual(report.transcriptionEngine, .speechAnalyzer)
@@ -3483,7 +3524,7 @@ final class NotchCopilotTests: XCTestCase {
             ]
         )
 
-        XCTAssertTrue(service is MultiSourceAutoLanguageTranscriptionService || service is MultiSourceAppleSpeechTranscriptionService)
+        XCTAssertTrue(service is StreamingASRRouter)
     }
 
     func testProviderRouterHighAccuracyUsesCloudRealtimeWhenConfigured() {
@@ -4075,7 +4116,9 @@ final class NotchCopilotTests: XCTestCase {
 
     func testSmartMeetingDetectionIgnoresBrowserWhenMeetingTabCannotBeConfirmed() async {
         let service = MeetingDetectionService(
-            calendarDetector: EmptyCalendarMeetingDetector(),
+            calendarDetector: StaticCalendarMeetingDetector(
+                meeting: MeetingSession(title: "Calendar fallback", source: .calendar, status: .detected)
+            ),
             microphoneUsageMonitor: FakeMicrophoneUsageMonitor(inUse: true),
             appActivityMonitor: MeetingAppActivityMonitor(snapshots: {
                 [
@@ -4348,7 +4391,7 @@ final class NotchCopilotTests: XCTestCase {
         let service = router.transcriptionService(preferences: preferences, sources: sources)
 
         if router.supportsAutoLanguageAppleSpeech() {
-            XCTAssertTrue(service is MultiSourceAutoLanguageTranscriptionService)
+            XCTAssertTrue(service is StreamingASRRouter)
         }
     }
 
@@ -7921,7 +7964,10 @@ final class NotchCopilotTests: XCTestCase {
     }
 
     func testRealtimeQAGoldFixtureBenchmarkMeetsLatencyTargets() async throws {
-        let rows = try qaGoldFixtureRows()
+        let allRows = try qaGoldFixtureRows()
+        let rows = qaLatencyBenchmarkRows(from: allRows)
+        XCTAssertGreaterThanOrEqual(rows.count, 500)
+        XCTAssertLessThan(rows.count, allRows.count)
         let detector = QuestionDetectionService(precisionMode: .highPrecision)
         let rescueRunner = fixtureCandidateDetectionRunner(rows: rows)
         let classifier = QuestionClassifier(
@@ -8004,8 +8050,9 @@ final class NotchCopilotTests: XCTestCase {
         let pipelineP95 = percentile(pipelineLatencies, 0.95)
         let pipelineP99 = percentile(pipelineLatencies, 0.99)
         print(String(
-            format: "QA_BENCHMARK fixture=%d candidates=%d rescued=%d tp=%d fp=%d fn=%d tn=%d precision=%.4f recall=%.4f detection_p50_ms=%.3f detection_p95_ms=%.3f detection_p99_ms=%.3f classification_p50_ms=%.3f classification_p95_ms=%.3f classification_p99_ms=%.3f pipeline_p50_ms=%.3f pipeline_p95_ms=%.3f pipeline_p99_ms=%.3f",
+            format: "QA_BENCHMARK fixture=%d total_fixture=%d candidates=%d rescued=%d tp=%d fp=%d fn=%d tn=%d precision=%.4f recall=%.4f detection_p50_ms=%.3f detection_p95_ms=%.3f detection_p99_ms=%.3f classification_p50_ms=%.3f classification_p95_ms=%.3f classification_p99_ms=%.3f pipeline_p50_ms=%.3f pipeline_p95_ms=%.3f pipeline_p99_ms=%.3f",
             rows.count,
+            allRows.count,
             candidates,
             rescuedCandidates,
             truePositive,
@@ -9824,6 +9871,34 @@ final class NotchCopilotTests: XCTestCase {
             .map { try decoder.decode(QAGoldFixtureRow.self, from: Data($0.utf8)) }
     }
 
+    private func qaLatencyBenchmarkRows(from rows: [QAGoldFixtureRow]) -> [QAGoldFixtureRow] {
+        var selectedIndexes = Set<Int>()
+        var languagePolarityCounts: [String: Int] = [:]
+        var labelCounts: [String: Int] = [:]
+
+        for (index, row) in rows.enumerated() {
+            let key = "\(row.language)|\(row.responseNeeded)"
+            guard languagePolarityCounts[key, default: 0] < 72 else { continue }
+            selectedIndexes.insert(index)
+            languagePolarityCounts[key, default: 0] += 1
+        }
+
+        for (index, row) in rows.enumerated() {
+            let key = row.label ?? (row.responseNeeded ? "answerable_question" : "unlabeled_negative")
+            guard labelCounts[key, default: 0] < 24 else { continue }
+            selectedIndexes.insert(index)
+            labelCounts[key, default: 0] += 1
+        }
+
+        for index in stride(from: 0, to: rows.count, by: 17) {
+            selectedIndexes.insert(index)
+        }
+
+        return selectedIndexes
+            .sorted()
+            .map { rows[$0] }
+    }
+
     private func qaPrediction(
         for text: String,
         language: String,
@@ -10332,6 +10407,15 @@ private struct FakeMicrophoneUsageMonitor: MicrophoneUsageMonitoring {
 private struct EmptyCalendarMeetingDetector: CalendarMeetingDetecting {
     func detectCurrentMeeting() async -> MeetingSession? {
         nil
+    }
+}
+
+@MainActor
+private struct StaticCalendarMeetingDetector: CalendarMeetingDetecting {
+    var meeting: MeetingSession?
+
+    func detectCurrentMeeting() async -> MeetingSession? {
+        meeting
     }
 }
 

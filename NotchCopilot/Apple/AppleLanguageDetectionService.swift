@@ -1,7 +1,7 @@
 import Foundation
 import NaturalLanguage
 
-struct LanguageDetectionResult: Equatable {
+struct LanguageDetectionResult: Equatable, Sendable {
     var languageCode: String
     var confidence: Double
 }

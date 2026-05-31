@@ -71,21 +71,9 @@ struct ProviderRouter {
                 }
             )
         }
-        if sources.count > 1 {
-            if supportsAutoLanguageAppleSpeech() {
-                return MultiSourceAutoLanguageTranscriptionService(sources: sources)
-            }
-            if capabilityChecker.supportsAppleSpeechRecognition(language: preferences.defaultLanguage) {
-                return MultiSourceAppleSpeechTranscriptionService(
-                    sources: sources.map {
-                        MultiSourceAppleSpeechTranscriptionService.Source(
-                            speakerLabel: $0.speakerLabel,
-                            audioSource: $0.audioSource,
-                            audioStream: $0.audioStream
-                        )
-                    }
-                )
-            }
+        if sources.count > 0,
+           supportsAutoLanguageAppleSpeech() || capabilityChecker.supportsAppleSpeechRecognition(language: preferences.defaultLanguage) {
+            return StreamingASRRouter(sources: sources, conditioningTarget: .nativeSpeech)
         }
         return transcriptionService(preferences: preferences)
     }
@@ -115,19 +103,8 @@ struct ProviderRouter {
                 }
             )
         }
-        if supportsAutoLanguageAppleSpeech() {
-            return MultiSourceAutoLanguageTranscriptionService(sources: sources)
-        }
-        if capabilityChecker.supportsAppleSpeechRecognition(language: preferences.defaultLanguage) {
-            return MultiSourceAppleSpeechTranscriptionService(
-                sources: sources.map {
-                    MultiSourceAppleSpeechTranscriptionService.Source(
-                        speakerLabel: $0.speakerLabel,
-                        audioSource: $0.audioSource,
-                        audioStream: $0.audioStream
-                    )
-                }
-            )
+        if supportsAutoLanguageAppleSpeech() || capabilityChecker.supportsAppleSpeechRecognition(language: preferences.defaultLanguage) {
+            return StreamingASRRouter(sources: sources, conditioningTarget: .nativeSpeech)
         }
         return UnavailableTranscriptionService(error: .recognizerUnavailable)
     }
@@ -145,6 +122,7 @@ struct ProviderRouter {
     }
 
     func shouldUseCloudRealtimeTranscription(preferences: AppPreferences) -> Bool {
+        guard preferences.effectiveTranscriptionFeatureFlags.cloudFallbackEnabled else { return false }
         guard !preferences.localOnlyMode,
               preferences.aiConfig.realtimeTranscriptionProvider == .elevenLabs else { return false }
         guard preferences.transcriptionEngineMode == .cloudRealtime else { return false }
@@ -252,6 +230,7 @@ struct ProviderRouter {
     }
 
     private func cloudRealtimeTranscriptionService(preferences: AppPreferences) -> (any TranscriptionService)? {
+        guard preferences.effectiveTranscriptionFeatureFlags.cloudFallbackEnabled else { return nil }
         guard !preferences.localOnlyMode else { return nil }
         guard preferences.transcriptionEngineMode == .cloudRealtime else { return nil }
         switch preferences.aiConfig.realtimeTranscriptionProvider {

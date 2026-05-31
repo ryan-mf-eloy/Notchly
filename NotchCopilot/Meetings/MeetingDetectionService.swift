@@ -19,19 +19,23 @@ final class MeetingDetectionService {
     func detectMeeting(preferences: AppPreferences) async -> MeetingSession? {
         guard preferences.autoDetectMeetings else { return nil }
         if preferences.smartMeetingDetectionEnabled,
-           microphoneUsageMonitor.isInputInUseByAnotherApplication(),
-           let activity = appActivityMonitor.detect(preferences: preferences) {
-            return MeetingSession(
-                title: activity.meetingTitle,
-                source: .activeApp,
-                appName: activity.displayName,
-                meetingURL: activity.browserTab?.url,
-                status: .detected,
-                primaryLanguage: SupportedLanguage.normalizedCode(preferences.defaultLanguage),
-                meetingType: preferences.defaultMeetingType,
-                automationSourceAppName: activity.displayName,
-                automationSourceBundleId: activity.bundleIdentifier
-            )
+           microphoneUsageMonitor.isInputInUseByAnotherApplication() {
+            if let activity = appActivityMonitor.detect(preferences: preferences) {
+                return MeetingSession(
+                    title: activity.meetingTitle,
+                    source: .activeApp,
+                    appName: activity.displayName,
+                    meetingURL: activity.browserTab?.url,
+                    status: .detected,
+                    primaryLanguage: SupportedLanguage.normalizedCode(preferences.defaultLanguage),
+                    meetingType: preferences.defaultMeetingType,
+                    automationSourceAppName: activity.displayName,
+                    automationSourceBundleId: activity.bundleIdentifier
+                )
+            }
+            if appActivityMonitor.shouldSuppressCalendarFallback(preferences: preferences) {
+                return nil
+            }
         }
         if let calendarMeeting = await calendarDetector.detectCurrentMeeting() {
             return calendarMeeting

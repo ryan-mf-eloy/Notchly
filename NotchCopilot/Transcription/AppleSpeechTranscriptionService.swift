@@ -70,7 +70,8 @@ enum AppleSpeechAssetPreparer {
         let locale = Locale(identifier: SupportedLanguage.normalizedCode(languageCode))
         guard let supportedLocale = await SpeechTranscriber.supportedLocale(equivalentTo: locale) else { return .unsupportedLanguage }
         let transcriber = SpeechTranscriber(locale: supportedLocale, preset: .progressiveTranscription)
-        let modules: [any SpeechModule] = [transcriber]
+        let detector = SpeechDetector(detectionOptions: .init(sensitivityLevel: .medium), reportResults: true)
+        let modules: [any SpeechModule] = [detector, transcriber]
         do {
             _ = try await AssetInventory.reserve(locale: supportedLocale)
             if await AssetInventory.status(forModules: modules) < .installed,
@@ -98,8 +99,10 @@ final class SpeechAnalyzerTranscriptionService: TranscriptionService {
     private var analyzer: SpeechAnalyzer?
     private var transcriber: SpeechTranscriber?
     private var dictationTranscriber: DictationTranscriber?
+    private var speechDetector: SpeechDetector?
     private var audioPump: Task<Void, Never>?
     private var resultsTask: Task<Void, Never>?
+    private var speechDetectorTask: Task<Void, Never>?
     private var analyzerTask: Task<Void, Never>?
     private var watchdogTask: Task<Void, Never>?
     private var fallbackActivationTask: Task<Void, Never>?
@@ -119,6 +122,7 @@ final class SpeechAnalyzerTranscriptionService: TranscriptionService {
     private var lastSegmentEmittedAt = Date.distantPast
     private var lastWatchdogNudgeAt = Date.distantPast
     private var rangeReconciler = SpeechAnalyzerRangeReconciler()
+    private var speechDetectionTimeline = SpeechDetectionTimeline()
     private var qualityMonitor = SpeechAudioQualityMonitor(source: .unknown)
     private var isStopping = false
     private let languageDetector = AppleLanguageDetectionService()
@@ -155,6 +159,7 @@ final class SpeechAnalyzerTranscriptionService: TranscriptionService {
         lastSegmentEmittedAt = .distantPast
         lastWatchdogNudgeAt = .distantPast
         rangeReconciler.reset()
+        speechDetectionTimeline.reset()
         qualityMonitor = SpeechAudioQualityMonitor(source: config.audioSource)
 
         let setup = try await makeModule(config: config)
@@ -163,6 +168,7 @@ final class SpeechAnalyzerTranscriptionService: TranscriptionService {
         analyzer = setup.analyzer
         transcriber = setup.transcriber
         dictationTranscriber = setup.dictationTranscriber
+        speechDetector = setup.speechDetector
         converter = SpeechAnalyzerBufferConverter(outputFormat: setup.audioFormat)
 
         let inputStream = AsyncStream<AnalyzerInput> { continuation in
@@ -219,6 +225,7 @@ final class SpeechAnalyzerTranscriptionService: TranscriptionService {
         var analyzer: SpeechAnalyzer
         var transcriber: SpeechTranscriber?
         var dictationTranscriber: DictationTranscriber?
+        var speechDetector: SpeechDetector?
         var audioFormat: AVAudioFormat?
     }
 
@@ -232,12 +239,19 @@ final class SpeechAnalyzerTranscriptionService: TranscriptionService {
                 reportingOptions: [.volatileResults, .fastResults, .alternativeTranscriptions],
                 attributeOptions: [.audioTimeRange, .transcriptionConfidence]
             )
+            let detector = Self.speechDetectorIfEnabled(config: config)
+            var modules: [any SpeechModule] = []
+            if let detector {
+                modules.append(detector)
+            }
+            modules.append(transcriber)
             return try await preparedSetup(
                 backend: .speechAnalyzer,
                 locale: locale,
-                modules: [transcriber],
+                modules: modules,
                 transcriber: transcriber,
                 dictationTranscriber: nil,
+                speechDetector: detector,
                 config: config
             )
         }
@@ -255,17 +269,29 @@ final class SpeechAnalyzerTranscriptionService: TranscriptionService {
                 attributeOptions: [.audioTimeRange, .transcriptionConfidence]
             )
             let dictation = DictationTranscriber(locale: locale, preset: preset)
+            let detector = Self.speechDetectorIfEnabled(config: config)
+            var modules: [any SpeechModule] = []
+            if let detector {
+                modules.append(detector)
+            }
+            modules.append(dictation)
             return try await preparedSetup(
                 backend: .dictationTranscriber,
                 locale: locale,
-                modules: [dictation],
+                modules: modules,
                 transcriber: nil,
                 dictationTranscriber: dictation,
+                speechDetector: detector,
                 config: config
             )
         }
 
         throw TranscriptionError.recognizerUnavailable
+    }
+
+    private static func speechDetectorIfEnabled(config: TranscriptionConfig) -> SpeechDetector? {
+        guard config.featureFlags.vadGatingEnabled else { return nil }
+        return SpeechDetector(detectionOptions: .init(sensitivityLevel: .medium), reportResults: true)
     }
 
     private func preparedSetup(
@@ -274,6 +300,7 @@ final class SpeechAnalyzerTranscriptionService: TranscriptionService {
         modules: [any SpeechModule],
         transcriber: SpeechTranscriber?,
         dictationTranscriber: DictationTranscriber?,
+        speechDetector: SpeechDetector?,
         config: TranscriptionConfig
     ) async throws -> ModuleSetup {
         _ = try await AssetInventory.reserve(locale: locale)
@@ -308,11 +335,13 @@ final class SpeechAnalyzerTranscriptionService: TranscriptionService {
             analyzer: analyzer,
             transcriber: transcriber,
             dictationTranscriber: dictationTranscriber,
+            speechDetector: speechDetector,
             audioFormat: audioFormat
         )
     }
 
     private func observeResults(backend: AppleNativeSpeechBackend) {
+        observeSpeechDetectionResults()
         if let transcriber {
             resultsTask = Task { @MainActor [weak self, transcriber] in
                 do {
@@ -350,6 +379,30 @@ final class SpeechAnalyzerTranscriptionService: TranscriptionService {
         }
     }
 
+    private func observeSpeechDetectionResults() {
+        guard let speechDetector else { return }
+        speechDetectorTask = Task { @MainActor [weak self, speechDetector] in
+            do {
+                for try await result in speechDetector.results {
+                    guard let self else { return }
+                    self.speechDetectionTimeline.record(range: result.range, speechDetected: result.speechDetected)
+                    if let activeConfig = self.activeConfig,
+                       activeConfig.featureFlags.transcriptionMetricsEnabled {
+                        let source = activeConfig.audioSource == .mixed ? TranscriptAudioSource.unknown : activeConfig.audioSource
+                        Task {
+                            await TranscriptionMetrics.shared.recordNativeSpeechDetectorObservation(
+                                source: source,
+                                speechDetected: result.speechDetected
+                            )
+                        }
+                    }
+                }
+            } catch {
+                AppLog.audio.info("SpeechDetector result stream ended: \(error.localizedDescription, privacy: .public)")
+            }
+        }
+    }
+
     private func ingest(_ buffer: AudioBuffer) {
         let snapshot = qualityMonitor.ingest(buffer)
         if snapshot.isClipping {
@@ -381,6 +434,15 @@ final class SpeechAnalyzerTranscriptionService: TranscriptionService {
         guard !text.isEmpty else { return }
 
         let audioSource = activeConfig.audioSource == .mixed ? .unknown : activeConfig.audioSource
+        if speechDetectionTimeline.coverage(for: range) == .nonSpeech {
+            AppLog.audio.info("SpeechAnalyzer dropped non-speech transcript candidate source=\(audioSource.displayName, privacy: .public) chars=\(text.count, privacy: .public)")
+            if activeConfig.featureFlags.transcriptionMetricsEnabled {
+                Task {
+                    await TranscriptionMetrics.shared.recordNativeSpeechDetectorDrop()
+                }
+            }
+            return
+        }
         let segmentId = rangeReconciler.segmentID(for: range, audioSource: audioSource, isFinal: isFinal)
 
         let startTime = range.start.safeSeconds
@@ -402,6 +464,9 @@ final class SpeechAnalyzerTranscriptionService: TranscriptionService {
             transcriptionEngine: engine,
             engineConfidence: confidence,
             languageConfidence: detectedLanguage?.confidence,
+            languageEvidenceSource: detectedLanguage == nil ? "requested-locale" : "text-language-detection",
+            languageDetectionWindowMs: max(20, (endTime - startTime) * 1_000),
+            languageSpanCodes: [detectedLanguage?.languageCode ?? activeLocaleIdentifier].compactMap { $0 },
             finalizedBy: isFinal ? engine : nil,
             latencyMs: max(0, nowOffset - finalizedThrough) * 1_000,
             sourceFrameRange: SpeechFrameRangeEstimator.range(startTime: startTime, endTime: endTime),
@@ -516,6 +581,8 @@ final class SpeechAnalyzerTranscriptionService: TranscriptionService {
         audioPump = nil
         resultsTask?.cancel()
         resultsTask = nil
+        speechDetectorTask?.cancel()
+        speechDetectorTask = nil
         analyzerTask?.cancel()
         analyzerTask = nil
         inputContinuation?.finish()
@@ -524,13 +591,79 @@ final class SpeechAnalyzerTranscriptionService: TranscriptionService {
         analyzer = nil
         transcriber = nil
         dictationTranscriber = nil
+        speechDetector = nil
         converter = nil
         activeConfig = nil
         activeSpeechContext = nil
+        speechDetectionTimeline.reset()
         if shouldFinishContinuation {
             continuation?.finish()
             continuation = nil
         }
+    }
+}
+
+enum SpeechDetectionCoverage: Sendable, Equatable {
+    case unknown
+    case speech
+    case nonSpeech
+}
+
+struct SpeechDetectionTimeline: Sendable, Equatable {
+    private struct Observation: Sendable, Equatable {
+        var start: TimeInterval
+        var end: TimeInterval
+        var speechDetected: Bool
+    }
+
+    private var observations: [Observation] = []
+
+    mutating func reset() {
+        observations.removeAll()
+    }
+
+    mutating func record(range: CMTimeRange, speechDetected: Bool) {
+        let start = Self.seconds(range.start)
+        let end = Self.seconds(CMTimeRangeGetEnd(range))
+        guard end > start else { return }
+        observations.append(Observation(start: start, end: end, speechDetected: speechDetected))
+        if observations.count > 256 {
+            observations.removeFirst(observations.count - 256)
+        }
+    }
+
+    func coverage(for range: CMTimeRange) -> SpeechDetectionCoverage {
+        let start = Self.seconds(range.start)
+        let end = Self.seconds(CMTimeRangeGetEnd(range))
+        let duration = max(0, end - start)
+        guard duration > 0.02 else { return .unknown }
+
+        var speechOverlap: TimeInterval = 0
+        var nonSpeechOverlap: TimeInterval = 0
+        for observation in observations {
+            let overlap = min(end, observation.end) - max(start, observation.start)
+            guard overlap > 0 else { continue }
+            if observation.speechDetected {
+                speechOverlap += overlap
+            } else {
+                nonSpeechOverlap += overlap
+            }
+        }
+
+        if speechOverlap >= min(0.08, duration * 0.20) || speechOverlap >= duration * 0.30 {
+            return .speech
+        }
+        let covered = speechOverlap + nonSpeechOverlap
+        if covered >= max(0.08, duration * 0.55), nonSpeechOverlap >= covered * 0.80 {
+            return .nonSpeech
+        }
+        return .unknown
+    }
+
+    private static func seconds(_ time: CMTime) -> TimeInterval {
+        guard time.isValid, !time.isIndefinite, !time.isNegativeInfinity, !time.isPositiveInfinity else { return 0 }
+        let value = CMTimeGetSeconds(time)
+        return value.isFinite ? max(0, value) : 0
     }
 }
 
@@ -934,6 +1067,9 @@ final class AppleSpeechTranscriptionService: NSObject, TranscriptionService {
             transcriptionEngine: .appleSpeech,
             engineConfidence: confidence,
             languageConfidence: detectedLanguage?.confidence,
+            languageEvidenceSource: detectedLanguage == nil ? "requested-locale" : "text-language-detection",
+            languageDetectionWindowMs: max(20, (endTime - startTime) * 1_000),
+            languageSpanCodes: [detectedLanguage?.languageCode ?? activeLocaleIdentifier].compactMap { $0 },
             finalizedBy: finalizedBy,
             sourceFrameRange: SpeechFrameRangeEstimator.range(startTime: startTime, endTime: endTime),
             wordTimestamps: wordTimestamps,
@@ -1321,7 +1457,7 @@ struct SpeechRestartPolicy {
 
 @MainActor
 final class MultiSourceAppleSpeechTranscriptionService: TranscriptionService {
-    struct Source {
+    struct Source: Sendable {
         var speakerLabel: String
         var audioSource: TranscriptAudioSource
         var audioStream: AsyncStream<AudioBuffer>
@@ -1390,7 +1526,7 @@ final class MultiSourceAppleSpeechTranscriptionService: TranscriptionService {
 
 @MainActor
 final class MultiSourceAutoLanguageTranscriptionService: TranscriptionService {
-    struct Source {
+    struct Source: Sendable {
         var speakerLabel: String
         var audioSource: TranscriptAudioSource
         var audioStream: AsyncStream<AudioBuffer>

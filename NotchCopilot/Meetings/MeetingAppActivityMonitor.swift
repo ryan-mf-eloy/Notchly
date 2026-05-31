@@ -36,6 +36,13 @@ struct MeetingAppActivity: Hashable {
 @MainActor
 protocol MeetingAppActivityMonitoring {
     func detect(preferences: AppPreferences) -> MeetingAppActivity?
+    func shouldSuppressCalendarFallback(preferences: AppPreferences) -> Bool
+}
+
+extension MeetingAppActivityMonitoring {
+    func shouldSuppressCalendarFallback(preferences: AppPreferences) -> Bool {
+        false
+    }
 }
 
 @MainActor
@@ -70,6 +77,26 @@ struct MeetingAppActivityMonitor: MeetingAppActivityMonitoring {
             return activity
         }
         return nil
+    }
+
+    func shouldSuppressCalendarFallback(preferences: AppPreferences) -> Bool {
+        let knownApps = preferences.knownMeetingApps.isEmpty ? KnownMeetingApp.defaults : preferences.knownMeetingApps
+        guard let active = snapshots().first(where: \.isActive),
+              matchedKnownApp(for: active, knownApps: knownApps) != nil,
+              BrowserActiveTabResolver.isBrowser(active)
+        else {
+            return false
+        }
+
+        guard let browserTab = activeBrowserTab(active) else {
+            return true
+        }
+
+        return MeetingWebPlatform.detect(
+            url: browserTab.url,
+            title: browserTab.title,
+            appName: active.localizedName
+        ) == nil
     }
 
     private func matchedKnownApp(for snapshot: RunningApplicationSnapshot, knownApps: [KnownMeetingApp]) -> KnownMeetingApp? {

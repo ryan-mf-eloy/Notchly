@@ -258,6 +258,8 @@ final class MeetingSessionManager {
     private var speechQualityMonitors: [TranscriptAudioSource: SpeechAudioQualityMonitor] = [:]
     private let questionAudioLogMelBuffer = QuestionAudioLogMelRingBuffer()
     private let transcriptLedger = MeetingTranscriptLedger()
+    private let transcriptMerger = TranscriptSegmentMerger()
+    private let speechVocabularyBiasProvider = SpeechVocabularyBiasProvider()
 
     private var activeTranscriptionService: (any TranscriptionService)?
     private var realtimeQuestionEngine: RealtimeQuestionAnsweringEngine?
@@ -764,7 +766,12 @@ final class MeetingSessionManager {
     private func append(_ segment: TranscriptSegment) async {
         guard var meeting = appState.currentMeeting else { return }
         var segment = segment
-        let decision = transcriptLedger.decision(for: segment, in: meeting.transcriptSegments)
+        let decision = transcriptMerger.decision(for: segment, in: meeting.transcriptSegments)
+        if appState.preferences.effectiveTranscriptionFeatureFlags.transcriptionMetricsEnabled {
+            Task {
+                await TranscriptionMetrics.shared.recordMergeDecision(decision)
+            }
+        }
         let existingIndex: Int?
         let existingSegment: TranscriptSegment?
         let pendingTail: TranscriptSegment?
@@ -847,6 +854,17 @@ final class MeetingSessionManager {
         existingSegment: TranscriptSegment?,
         meeting: MeetingSession
     ) -> (language: SupportedLanguage, isTextDetected: Bool) {
+        let asrLanguageSignals: [LanguageContinuitySignal]
+        if let originalLanguage = segment.originalLanguage,
+           let confidence = segment.languageConfidence {
+            asrLanguageSignals = [LanguageContinuitySignal(
+                languageCode: originalLanguage,
+                confidence: confidence,
+                source: segment.languageEvidenceSource ?? segment.transcriptionEngine?.rawValue ?? "asr"
+            )]
+        } else {
+            asrLanguageSignals = []
+        }
         let resolution = languageContinuityResolver.resolve(
             text: segment.text,
             audioSource: segment.audioSource,
@@ -854,7 +872,8 @@ final class MeetingSessionManager {
             existingLanguage: existingSegment?.originalLanguage,
             meetingLanguage: meeting.primaryLanguage,
             defaultLanguage: appState.preferences.defaultLanguage,
-            isFinal: segment.isFinal
+            isFinal: segment.isFinal,
+            supplementalSignals: asrLanguageSignals
         )
         return (resolution.language, resolution.isTextDetected)
     }
@@ -1271,7 +1290,10 @@ final class MeetingSessionManager {
             accuracyMode: appState.preferences.transcriptionAccuracyMode,
             commitPolicy: appState.preferences.copilotASRCommitPolicy,
             preferredLanguageHints: TranscriptionConfig.normalizedLanguageHints(primary: appState.preferences.defaultLanguage, hints: [session.primaryLanguage].compactMap { $0 }),
-            sourceSeparationRequired: true
+            sourceSeparationRequired: true,
+            featureFlags: appState.preferences.effectiveTranscriptionFeatureFlags,
+            localASRRefinerModel: appState.preferences.localASRRefinerModel,
+            allowLocalASRModelDownload: appState.preferences.allowLocalModelDownloads
         )
         AppLog.audio.info("Transcription route service=\(String(describing: type(of: transcriptionService)), privacy: .public) mode=\(self.appState.preferences.transcriptionEngineMode.rawValue, privacy: .public) language=\(transcriptionConfig.languageCode ?? "nil", privacy: .public) localOnly=\(self.appState.preferences.localOnlyMode, privacy: .public) sourceSeparated=true sourceCount=\(sourceCount, privacy: .public)")
 
@@ -1362,28 +1384,10 @@ final class MeetingSessionManager {
     }
 
     private func transcriptionSpeechContext(for session: MeetingSession) -> SpeechRecognitionContext {
-        if let speechVocabularyStore = appState.speechVocabularyStore {
-            return speechVocabularyStore.speechContext(for: session, preferences: appState.preferences)
-        }
-
-        let names = ([appState.preferences.userDisplayName] + appState.preferences.userNicknames.split(separator: ",").map { String($0) })
-            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
-            .filter { !$0.isEmpty }
-        let appTerms = appState.preferences.knownMeetingApps.flatMap { [$0.displayName] + $0.nameKeywords }
-        let productTerms = [
-            "Notchly", "Dynamic Island", "Local Only", "OpenAI", "ChatGPT", "Realtime API",
-            "Swift", "SwiftUI", "AppKit", "AVFoundation", "ScreenCaptureKit", "Speech framework",
-            "macOS", "Keychain", "RAG", "transcript", "transcrição", "resumo", "decisão",
-            "action item", "follow-up", "bloqueio", "risco", "deadline", "roadmap"
-        ]
-        let terms = (names + appTerms + productTerms + [session.title]).map {
-            SpeechContextTerm(text: $0, locale: nil, category: .custom, weight: 1, pronunciationXSAMPA: nil, source: "legacy")
-        }
-        return SpeechRecognitionContext(
-            locale: SupportedLanguage.normalizedCode(appState.preferences.defaultLanguage),
-            terms: terms,
-            customLanguageModelEnabled: false,
-            status: "Using contextual hints only"
+        speechVocabularyBiasProvider.context(
+            for: session,
+            preferences: appState.preferences,
+            store: appState.speechVocabularyStore
         )
     }
 
@@ -1775,7 +1779,10 @@ final class CopilotRuntime {
                     accuracyMode: preferences.transcriptionAccuracyMode,
                     commitPolicy: preferences.copilotASRCommitPolicy,
                     preferredLanguageHints: TranscriptionConfig.normalizedLanguageHints(primary: preferences.defaultLanguage, hints: []),
-                    sourceSeparationRequired: false
+                    sourceSeparationRequired: false,
+                    featureFlags: preferences.effectiveTranscriptionFeatureFlags,
+                    localASRRefinerModel: preferences.localASRRefinerModel,
+                    allowLocalASRModelDownload: preferences.allowLocalModelDownloads
                 )
             )
         } catch AudioCaptureError.microphonePermissionDenied {

@@ -255,6 +255,14 @@ struct MeetingPanelView: View {
                 appState.copySelectedAnswerToPasteboard()
             }
             .accessibilityIdentifier("qa-action-copy")
+            IconButton(systemName: appState.isSelectedQuestionSaved ? "bookmark.fill" : "bookmark", help: "Save", size: .compact) {
+                appState.saveSelectedQuestionAnswer()
+            }
+            .accessibilityIdentifier("qa-action-save")
+            IconButton(systemName: "xmark", help: "Dismiss", role: .destructive, size: .compact) {
+                appState.dismissActiveQuestion()
+            }
+            .accessibilityIdentifier("qa-action-dismiss")
             IconButton(systemName: "link", help: "Open sources", isDisabled: !hasSourceLink, size: .compact) {
                 appState.openSelectedAnswerSources()
             }
@@ -267,14 +275,6 @@ struct MeetingPanelView: View {
             IconButton(systemName: "globe", help: "Regenerate with web", isDisabled: appState.currentMeeting != nil, size: .compact) {
                 appState.regenerateSelectedCopilotAnswerWithWeb()
             }
-            IconButton(systemName: appState.isSelectedQuestionSaved ? "bookmark.fill" : "bookmark", help: "Save", size: .compact) {
-                appState.saveSelectedQuestionAnswer()
-            }
-            .accessibilityIdentifier("qa-action-save")
-            IconButton(systemName: "xmark", help: "Dismiss", role: .destructive, size: .compact) {
-                appState.dismissActiveQuestion()
-            }
-            .accessibilityIdentifier("qa-action-dismiss")
             Spacer(minLength: 0)
             if appState.currentMeeting == nil {
                 IconButton(systemName: "pause", help: "Pause Notchly", size: .compact) {

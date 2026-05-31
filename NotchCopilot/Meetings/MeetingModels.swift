@@ -654,6 +654,7 @@ enum TranscriptionEngineName: String, Codable, CaseIterable, Identifiable, Senda
     case appleSpeech
     case speechAnalyzer
     case dictationTranscriber
+    case whisperKit
     case elevenLabs
     case unavailable
 
@@ -688,6 +689,7 @@ struct TranscriptAlternative: Codable, Hashable, Sendable {
         case transcription
         case wordAlternative = "word_alternative"
         case speechAnalyzer = "speech_analyzer"
+        case localRefiner = "local_refiner"
         case repair
 
         var id: String { rawValue }
@@ -714,6 +716,8 @@ struct TranscriptAlternative: Codable, Hashable, Sendable {
 enum TranscriptionRetentionReason: String, Codable, CaseIterable, Identifiable, Sendable {
     case appleFinalRetained
     case appleDraftRetained
+    case localRefinerAccepted
+    case localRefinerRejected
     case lowEnergyRejected
     case hallucinationRejected
     case overlapDeduplicated
@@ -770,6 +774,9 @@ struct TranscriptSegment: Identifiable, Codable, Hashable, Sendable {
     var transcriptionEngine: TranscriptionEngineName?
     var engineConfidence: Double?
     var languageConfidence: Double?
+    var languageEvidenceSource: String?
+    var languageDetectionWindowMs: Double?
+    var languageSpanCodes: [String]
     var revisionOfSegmentId: UUID?
     var revisionNumber: Int
     var finalizedBy: TranscriptionEngineName?
@@ -807,6 +814,9 @@ struct TranscriptSegment: Identifiable, Codable, Hashable, Sendable {
         transcriptionEngine: TranscriptionEngineName? = nil,
         engineConfidence: Double? = nil,
         languageConfidence: Double? = nil,
+        languageEvidenceSource: String? = nil,
+        languageDetectionWindowMs: Double? = nil,
+        languageSpanCodes: [String] = [],
         revisionOfSegmentId: UUID? = nil,
         revisionNumber: Int = 0,
         finalizedBy: TranscriptionEngineName? = nil,
@@ -843,6 +853,9 @@ struct TranscriptSegment: Identifiable, Codable, Hashable, Sendable {
         self.transcriptionEngine = transcriptionEngine
         self.engineConfidence = engineConfidence
         self.languageConfidence = languageConfidence
+        self.languageEvidenceSource = languageEvidenceSource
+        self.languageDetectionWindowMs = languageDetectionWindowMs
+        self.languageSpanCodes = languageSpanCodes
         self.revisionOfSegmentId = revisionOfSegmentId
         self.revisionNumber = revisionNumber
         self.finalizedBy = finalizedBy
@@ -881,6 +894,9 @@ struct TranscriptSegment: Identifiable, Codable, Hashable, Sendable {
         case transcriptionEngine
         case engineConfidence
         case languageConfidence
+        case languageEvidenceSource
+        case languageDetectionWindowMs
+        case languageSpanCodes
         case revisionOfSegmentId
         case revisionNumber
         case finalizedBy
@@ -920,6 +936,9 @@ struct TranscriptSegment: Identifiable, Codable, Hashable, Sendable {
         transcriptionEngine = try container.decodeIfPresent(TranscriptionEngineName.self, forKey: .transcriptionEngine)
         engineConfidence = try container.decodeIfPresent(Double.self, forKey: .engineConfidence)
         languageConfidence = try container.decodeIfPresent(Double.self, forKey: .languageConfidence)
+        languageEvidenceSource = try container.decodeIfPresent(String.self, forKey: .languageEvidenceSource)
+        languageDetectionWindowMs = try container.decodeIfPresent(Double.self, forKey: .languageDetectionWindowMs)
+        languageSpanCodes = try container.decodeIfPresent([String].self, forKey: .languageSpanCodes) ?? []
         revisionOfSegmentId = try container.decodeIfPresent(UUID.self, forKey: .revisionOfSegmentId)
         revisionNumber = try container.decodeIfPresent(Int.self, forKey: .revisionNumber) ?? 0
         finalizedBy = try container.decodeIfPresent(TranscriptionEngineName.self, forKey: .finalizedBy)
