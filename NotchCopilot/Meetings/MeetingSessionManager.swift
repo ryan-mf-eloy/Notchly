@@ -246,8 +246,8 @@ final class MeetingSessionManager {
     private let providerRouter: ProviderRouter
     private let knowledgeStore: LocalKnowledgeStore
     private let localDataCryptor: LocalDataCryptor
-    private let microphoneCaptureService: AppleMicrophoneCaptureService
-    private let systemAudioCaptureService: AppleSystemAudioCaptureService
+    private let microphoneCaptureService: any MicrophoneCaptureServicing
+    private let systemAudioCaptureService: any SystemAudioCaptureServicing
     private let audioRecorder: AudioRecorderService
     private let languageDetector = AppleLanguageDetectionService()
     private let audioAnalyzer = AppleAccelerateAudioAnalyzer()
@@ -280,8 +280,8 @@ final class MeetingSessionManager {
         providerRouter: ProviderRouter,
         knowledgeStore: LocalKnowledgeStore,
         localDataCryptor: LocalDataCryptor = .defaultOrCrash(),
-        microphoneCaptureService: AppleMicrophoneCaptureService = AppleMicrophoneCaptureService(),
-        systemAudioCaptureService: AppleSystemAudioCaptureService = AppleSystemAudioCaptureService(),
+        microphoneCaptureService: any MicrophoneCaptureServicing = AppleMicrophoneCaptureService(),
+        systemAudioCaptureService: any SystemAudioCaptureServicing = AppleSystemAudioCaptureService(),
         audioRecorder: AudioRecorderService = AudioRecorderService()
     ) {
         self.appState = appState
@@ -1204,11 +1204,13 @@ final class MeetingSessionManager {
 
         if wantsMic {
             do {
-                micStream = try await microphoneCaptureService.startCapture()
-                appState.activeCaptureLabel = "Mic"
+                micStream = try await microphoneCaptureService.startCapture(inputDeviceUID: appState.preferences.selectedInputDeviceUID)
+                appState.activeCaptureLabel = selectedDeviceLabel(prefix: "Mic", uid: appState.preferences.selectedInputDeviceUID, direction: .input)
                 appState.statusMessage = "Mic only • remote voices may be missed"
             } catch AudioCaptureError.microphonePermissionDenied {
                 appState.statusMessage = "Microphone permission required"
+            } catch AudioCaptureError.audioDeviceUnavailable {
+                appState.statusMessage = "Selected microphone unavailable"
             } catch {
                 appState.statusMessage = "Microphone unavailable"
             }
@@ -1216,11 +1218,14 @@ final class MeetingSessionManager {
 
         if wantsSystemAudio {
             do {
-                systemStream = try await systemAudioCaptureService.startCapture()
-                appState.activeCaptureLabel = micStream == nil ? "System audio" : "Mic + system"
+                systemStream = try await systemAudioCaptureService.startCapture(outputDeviceUID: appState.preferences.selectedOutputDeviceUID)
+                let systemLabel = selectedDeviceLabel(prefix: "System", uid: appState.preferences.selectedOutputDeviceUID, direction: .output)
+                appState.activeCaptureLabel = micStream == nil ? systemLabel : "Mic + system"
                 appState.statusMessage = micStream == nil ? "Listening via system audio" : "Listening via mic + system audio"
             } catch AudioCaptureError.systemAudioPermissionDenied {
                 appState.statusMessage = micStream == nil ? "Screen/System audio permission required" : "System audio permission required • mic only"
+            } catch AudioCaptureError.audioDeviceUnavailable {
+                appState.statusMessage = micStream == nil ? "Selected output unavailable" : "Selected output unavailable • mic only"
             } catch {
                 appState.statusMessage = micStream == nil ? "System audio unavailable" : "System audio unavailable • mic only"
             }
@@ -1328,6 +1333,16 @@ final class MeetingSessionManager {
         case .speechPermissionDenied, .recognizerUnavailable:
             return false
         }
+    }
+
+    private func selectedDeviceLabel(prefix: String, uid: String?, direction: AudioDeviceDirection) -> String {
+        guard let uid else { return prefix }
+        let devices = CoreAudioDeviceProvider().snapshot()
+        let device = direction == .input
+            ? devices.inputDevices.first { $0.uid == uid }
+            : devices.outputDevices.first { $0.uid == uid }
+        guard let device else { return "\(prefix) unavailable" }
+        return "\(prefix): \(device.name)"
     }
 
     private func localTranscriptionFallbackService(
@@ -1537,7 +1552,7 @@ final class CopilotRuntime {
     private let settingsRepository: SettingsRepository
     private let providerRouter: ProviderRouter
     private let knowledgeStore: LocalKnowledgeStore
-    private let microphoneCaptureService: AppleMicrophoneCaptureService
+    private let microphoneCaptureService: any MicrophoneCaptureServicing
     private let languageDetector = AppleLanguageDetectionService()
     private let audioAnalyzer = AppleAccelerateAudioAnalyzer()
     private var activeTranscriptionService: (any TranscriptionService)?
@@ -1567,7 +1582,7 @@ final class CopilotRuntime {
         settingsRepository: SettingsRepository,
         providerRouter: ProviderRouter,
         knowledgeStore: LocalKnowledgeStore,
-        microphoneCaptureService: AppleMicrophoneCaptureService = AppleMicrophoneCaptureService()
+        microphoneCaptureService: any MicrophoneCaptureServicing = AppleMicrophoneCaptureService()
     ) {
         self.appState = appState
         self.repository = repository
@@ -1724,7 +1739,7 @@ final class CopilotRuntime {
                 state: .asrStarting,
                 activeASRBackend: useCloudRealtimeASRFallback ? "Cloud realtime ASR" : (ambientAllowsHybridSpeechRecognition ? "Apple Speech hybrid" : "Apple Speech on-device")
             ))
-            let micStream = try await microphoneCaptureService.startCapture()
+            let micStream = try await microphoneCaptureService.startCapture(inputDeviceUID: appState.preferences.selectedInputDeviceUID)
             let service = providerRouter.copilotASRService(preferences: preferences)
             activeTranscriptionService = service
             observePushToTalkSegments(from: service)

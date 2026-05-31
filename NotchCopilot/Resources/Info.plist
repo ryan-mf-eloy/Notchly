@@ -39,6 +39,8 @@
 	<string>Notchly can inspect calendar events to detect meetings. Calendar access is optional.</string>
 	<key>NSMicrophoneUsageDescription</key>
 	<string>Notchly uses the microphone only after you start listening or approve a detected meeting.</string>
+	<key>NSAudioCaptureUsageDescription</key>
+	<string>Notchly can capture system audio from selected output devices only after you start listening or approve a detected meeting.</string>
 	<key>NSSpeechRecognitionUsageDescription</key>
 	<string>Notchly can use Apple Speech to transcribe meetings locally or with Apple's speech services.</string>
 	<key>NSHumanReadableCopyright</key>

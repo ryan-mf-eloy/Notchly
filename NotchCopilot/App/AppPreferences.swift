@@ -325,6 +325,8 @@ struct AppPreferences: Codable, Hashable {
     var defaultLanguage: String = AppPreferences.deviceDefaultTranscriptionLanguage
     var audioCaptureMode: AudioCaptureMode = .microphoneAndSystem
     var captureSystemAudio: Bool = true
+    var selectedInputDeviceUID: String?
+    var selectedOutputDeviceUID: String?
     var didMigrateRealtimeAudioDefaults: Bool = true
     var didMigrateLanguageDefaults: Bool = true
     var didPromoteTrainedQAMultimodalDefault: Bool = true
@@ -383,6 +385,8 @@ struct AppPreferences: Codable, Hashable {
         case defaultLanguage
         case audioCaptureMode
         case captureSystemAudio
+        case selectedInputDeviceUID
+        case selectedOutputDeviceUID
         case didMigrateRealtimeAudioDefaults
         case didMigrateLanguageDefaults
         case didPromoteTrainedQAMultimodalDefault
@@ -441,6 +445,8 @@ struct AppPreferences: Codable, Hashable {
         defaultLanguage = try container.decodeIfPresent(String.self, forKey: .defaultLanguage) ?? AppPreferences.deviceDefaultTranscriptionLanguage
         audioCaptureMode = try container.decodeIfPresent(AudioCaptureMode.self, forKey: .audioCaptureMode) ?? .microphoneAndSystem
         captureSystemAudio = try container.decodeIfPresent(Bool.self, forKey: .captureSystemAudio) ?? true
+        selectedInputDeviceUID = try container.decodeIfPresent(String.self, forKey: .selectedInputDeviceUID)
+        selectedOutputDeviceUID = try container.decodeIfPresent(String.self, forKey: .selectedOutputDeviceUID)
         didMigrateRealtimeAudioDefaults = try container.decodeIfPresent(Bool.self, forKey: .didMigrateRealtimeAudioDefaults) ?? false
         didMigrateLanguageDefaults = try container.decodeIfPresent(Bool.self, forKey: .didMigrateLanguageDefaults) ?? false
         didPromoteTrainedQAMultimodalDefault = try container.decodeIfPresent(Bool.self, forKey: .didPromoteTrainedQAMultimodalDefault) ?? false
@@ -494,6 +500,8 @@ struct AppPreferences: Codable, Hashable {
         if workspaceId.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             workspaceId = "default"
         }
+        selectedInputDeviceUID = normalizedDeviceUID(selectedInputDeviceUID)
+        selectedOutputDeviceUID = normalizedDeviceUID(selectedOutputDeviceUID)
         copilotRetentionDays = min(max(copilotRetentionDays, 1), 30)
         copilotAlwaysOnEnabled = false
         ambientAudioScope = .microphoneOnly
@@ -584,5 +592,10 @@ struct AppPreferences: Codable, Hashable {
             }
         }
         knownMeetingApps = merged
+    }
+
+    private func normalizedDeviceUID(_ uid: String?) -> String? {
+        let trimmed = uid?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        return trimmed.isEmpty ? nil : trimmed
     }
 }

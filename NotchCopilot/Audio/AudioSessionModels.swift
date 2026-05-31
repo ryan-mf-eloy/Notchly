@@ -927,6 +927,7 @@ enum AudioCaptureError: LocalizedError {
     case microphonePermissionDenied
     case systemAudioPermissionDenied
     case noInputNode
+    case audioDeviceUnavailable(String)
     case screenCaptureUnavailable
     case recorderUnavailable
 
@@ -935,6 +936,7 @@ enum AudioCaptureError: LocalizedError {
         case .microphonePermissionDenied: "Microphone permission is required to listen."
         case .systemAudioPermissionDenied: "Screen recording permission is required for system audio capture."
         case .noInputNode: "No microphone input node is available."
+        case .audioDeviceUnavailable(let name): "\(name) is not available."
         case .screenCaptureUnavailable: "System audio capture is unavailable on this macOS version."
         case .recorderUnavailable: "Audio recorder is not available."
         }

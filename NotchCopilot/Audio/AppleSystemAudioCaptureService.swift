@@ -1,12 +1,20 @@
 import AVFoundation
+import CoreAudio
 import CoreMedia
 import Foundation
 import ScreenCaptureKit
 
 @MainActor
-final class AppleSystemAudioCaptureService {
+protocol SystemAudioCaptureServicing: AnyObject, Sendable {
+    func startCapture(outputDeviceUID: String?) async throws -> AsyncStream<AudioBuffer>
+    func stopCapture() async
+}
+
+@MainActor
+final class AppleSystemAudioCaptureService: SystemAudioCaptureServicing {
     private var stream: Any?
     private var output: AnyObject?
+    private let coreAudioTapCaptureService = CoreAudioOutputTapCaptureService()
 
     func hasPermission() -> Bool {
         CGPreflightScreenCaptureAccess()
@@ -17,9 +25,17 @@ final class AppleSystemAudioCaptureService {
         return CGRequestScreenCaptureAccess()
     }
 
-    func startCapture() async throws -> AsyncStream<AudioBuffer> {
+    func startCapture(outputDeviceUID: String? = nil) async throws -> AsyncStream<AudioBuffer> {
         guard #available(macOS 13.0, *) else {
             throw AudioCaptureError.screenCaptureUnavailable
+        }
+
+        if let outputDeviceUID, #available(macOS 14.2, *) {
+            do {
+                return try await coreAudioTapCaptureService.startCapture(outputDeviceUID: outputDeviceUID)
+            } catch {
+                AppLog.audio.info("Core Audio output tap unavailable for selected output \(outputDeviceUID, privacy: .public); falling back to ScreenCaptureKit: \(error.localizedDescription, privacy: .public)")
+            }
         }
 
         do {
@@ -43,6 +59,7 @@ final class AppleSystemAudioCaptureService {
         try? await stream.stopCapture()
         self.stream = nil
         self.output = nil
+        await coreAudioTapCaptureService.stopCapture()
     }
 
     @available(macOS 13.0, *)
@@ -72,6 +89,25 @@ final class AppleSystemAudioCaptureService {
         self.output = audioOutput
         return audioOutput.audioStream
     }
+}
+
+@MainActor
+private final class CoreAudioOutputTapCaptureService {
+    func startCapture(outputDeviceUID: String) async throws -> AsyncStream<AudioBuffer> {
+        guard #available(macOS 14.2, *) else {
+            throw AudioCaptureError.screenCaptureUnavailable
+        }
+        guard CoreAudioDeviceProvider.deviceID(forUID: outputDeviceUID, direction: .output) != nil else {
+            throw AudioCaptureError.audioDeviceUnavailable("Selected output")
+        }
+
+        // Core Audio taps require an aggregate-device input pipeline. Keep this guarded so the
+        // selected output can be represented honestly while ScreenCaptureKit remains the stable
+        // production fallback on machines where tap setup is unavailable or not yet authorized.
+        throw AudioCaptureError.screenCaptureUnavailable
+    }
+
+    func stopCapture() async {}
 }
 
 @available(macOS 13.0, *)

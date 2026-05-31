@@ -126,3 +126,40 @@ final class TestRealtimeQuestionAnsweringEngine: RealtimeQuestionAnsweringEngine
         )
     }
 }
+
+final class FakeAudioDeviceProvider: AudioDeviceProviding, @unchecked Sendable {
+    private let lock = NSLock()
+    private var storedSnapshot: AudioDeviceSnapshot
+    private var changeHandler: (@Sendable () -> Void)?
+
+    init(snapshot: AudioDeviceSnapshot) {
+        self.storedSnapshot = snapshot
+    }
+
+    func snapshot() -> AudioDeviceSnapshot {
+        lock.lock()
+        let snapshot = storedSnapshot
+        lock.unlock()
+        return snapshot
+    }
+
+    func startMonitoring(onChange: @escaping @Sendable () -> Void) {
+        lock.lock()
+        changeHandler = onChange
+        lock.unlock()
+    }
+
+    func stopMonitoring() {
+        lock.lock()
+        changeHandler = nil
+        lock.unlock()
+    }
+
+    func update(to snapshot: AudioDeviceSnapshot) {
+        lock.lock()
+        storedSnapshot = snapshot
+        let changeHandler = changeHandler
+        lock.unlock()
+        changeHandler?()
+    }
+}

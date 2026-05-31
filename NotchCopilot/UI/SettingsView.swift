@@ -1,133 +1,114 @@
 import AppKit
 import SwiftUI
-import UniformTypeIdentifiers
 
 struct SettingsView: View {
     @ObservedObject var appState: AppState
     @StateObject private var permissions = PermissionsManager()
+    @StateObject private var audioDevices = AudioDeviceManager()
+    @Namespace private var tabNamespace
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var selectedPane: SettingsPane = .general
-    @State private var fileImporterPresented = false
-    @State private var diagnosticsRefreshID = UUID()
-    @State private var speechVocabularySearch = ""
-    @State private var speechTermText = ""
-    @State private var speechTermAliases = ""
-    @State private var speechTermPronunciation = ""
-    @State private var speechTermTemplatePattern = ""
-    @State private var speechTermTemplateSlots = ""
-    @State private var speechTermCategory: SpeechVocabularyCategory = .custom
-    @State private var speechTermLocale: String = SupportedLanguage.portugueseBR.rawValue
-    @State private var speechTermBoost = 1.4
+    @State private var hoveredPane: SettingsPane?
 
     var body: some View {
-        HStack(spacing: 0) {
-            sidebar
+        VStack(spacing: 0) {
+            header
             Rectangle()
                 .fill(MinimalTheme.divider)
-                .frame(width: 0.6)
+                .frame(height: 0.6)
             content
         }
         .background(MinimalTheme.background)
         .foregroundStyle(MinimalTheme.primary)
         .preferredColorScheme(.dark)
-        .frame(minWidth: 760, minHeight: 560)
+        .frame(minWidth: 920, minHeight: 640)
         .onAppear {
             permissions.refresh()
-            appState.reloadKnowledgeDocuments()
-            appState.reloadSpeechVocabulary()
+            audioDevices.refresh()
         }
         .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
             permissions.refresh()
-        }
-        .fileImporter(isPresented: $fileImporterPresented, allowedContentTypes: [.plainText, .text, .pdf, .item], allowsMultipleSelection: true) { result in
-            if let urls = try? result.get() {
-                appState.addKnowledgeFiles(urls: urls)
-            }
+            audioDevices.refresh()
         }
     }
 
-    private var sidebar: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack(spacing: 8) {
-                Image("NotchIcon")
-                    .renderingMode(.template)
-                    .resizable()
-                    .scaledToFit()
-                    .frame(width: 26, height: 14)
-                Text("Notchly")
+    private var header: some View {
+        VStack(spacing: 18) {
+            HStack(spacing: 9) {
+                NotchMark()
+                    .frame(width: 28, height: 14)
+                Text("Notchly Settings")
+                    .font(.system(size: 18, weight: .semibold))
+                    .foregroundStyle(MinimalTheme.primary)
+            }
+            .padding(.top, 8)
+
+            HStack(spacing: 34) {
+                ForEach(SettingsPane.allCases) { pane in
+                    tabButton(pane)
+                }
+            }
+        }
+        .padding(.top, 18)
+        .padding(.bottom, 14)
+        .frame(maxWidth: .infinity)
+        .background(MinimalTheme.sidebar.opacity(0.18))
+    }
+
+    private func tabButton(_ pane: SettingsPane) -> some View {
+        Button {
+            withAnimation(reduceMotion ? nil : .spring(response: 0.36, dampingFraction: 0.86)) {
+                selectedPane = pane
+            }
+        } label: {
+            VStack(spacing: 7) {
+                Image(systemName: pane.systemName)
+                    .font(.system(size: 24, weight: .semibold))
+                Text(pane.title)
                     .font(.system(size: 13, weight: .semibold))
             }
-            .foregroundStyle(MinimalTheme.primary)
-            .padding(.horizontal, 14)
-            .padding(.top, 16)
-            .padding(.bottom, 10)
-
-            ForEach(SettingsPane.allCases) { pane in
-                Button {
-                    selectedPane = pane
-                } label: {
-                    HStack(spacing: 10) {
-                        Image(systemName: pane.systemName)
-                            .font(.system(size: 13, weight: .medium))
-                            .frame(width: 18)
-                        Text(pane.title)
-                            .font(.system(size: 13, weight: .medium))
-                        Spacer()
-                    }
-                    .foregroundStyle(selectedPane == pane ? MinimalTheme.primary : MinimalTheme.secondary)
-                    .padding(.horizontal, 12)
-                    .frame(height: 34)
-                    .background(
-                        RoundedRectangle(cornerRadius: 8, style: .continuous)
-                            .fill(selectedPane == pane ? MinimalTheme.selected : Color.clear)
-                    )
+            .foregroundStyle(selectedPane == pane ? MinimalTheme.primary : MinimalTheme.secondary)
+            .frame(width: 106, height: 74)
+            .background {
+                if selectedPane == pane {
+                    RoundedRectangle(cornerRadius: 10, style: .continuous)
+                        .fill(MinimalTheme.settingsControlPressed)
+                        .matchedGeometryEffect(id: "selected-tab", in: tabNamespace)
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                                .stroke(Color.white.opacity(0.11), lineWidth: 0.8)
+                        )
+                } else if hoveredPane == pane {
+                    RoundedRectangle(cornerRadius: 10, style: .continuous)
+                        .fill(MinimalTheme.settingsControl.opacity(0.72))
                 }
-                .buttonStyle(.plain)
             }
-
-            Spacer()
-
-            HStack(spacing: 8) {
-                Circle()
-                    .fill(appState.preferences.localOnlyMode ? MinimalTheme.primary : MinimalTheme.tertiary)
-                    .frame(width: 7, height: 7)
-                Text(appState.preferences.localOnlyMode ? "Local Only" : "Cloud enabled")
-                    .font(.system(size: 12, weight: .medium))
-                    .foregroundStyle(MinimalTheme.secondary)
-            }
-            .padding(.horizontal, 14)
-            .padding(.bottom, 16)
+            .contentShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
         }
-        .padding(.horizontal, 8)
-        .frame(width: 190)
-        .background(MinimalTheme.sidebar)
+        .buttonStyle(.plain)
+        .onHover { isHovered in
+            withAnimation(reduceMotion ? nil : .easeOut(duration: 0.16)) {
+                hoveredPane = isHovered ? pane : nil
+            }
+        }
+        .help(pane.title)
     }
 
     private var content: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 16) {
-                HStack {
-                    VStack(alignment: .leading, spacing: 3) {
-                        Text(selectedPane.title)
-                            .font(.system(size: 20, weight: .semibold))
-                            .foregroundStyle(MinimalTheme.primary)
-                        Text(selectedPane.subtitle)
-                            .font(.system(size: 12, weight: .medium))
-                            .foregroundStyle(MinimalTheme.tertiary)
-                    }
-                    Spacer()
-                    Button {
-                        appState.savePreferences()
-                    } label: {
-                        Label("Save", systemImage: "checkmark")
-                    }
-                    .buttonStyle(MinimalButtonStyle())
-                }
-                .padding(.top, 2)
-
+            ZStack {
                 paneContent
+                    .id(selectedPane)
+                    .transition(reduceMotion ? .identity : .asymmetric(
+                        insertion: .opacity.combined(with: .move(edge: .trailing)),
+                        removal: .opacity.combined(with: .move(edge: .leading))
+                    ))
             }
-            .padding(22)
-            .frame(maxWidth: .infinity, alignment: .leading)
+            .animation(reduceMotion ? nil : .easeInOut(duration: 0.22), value: selectedPane)
+            .frame(maxWidth: 650)
+            .padding(.top, 42)
+            .padding(.bottom, 42)
+            .frame(maxWidth: .infinity)
         }
         .scrollContentBackground(.hidden)
         .background(MinimalTheme.background)
@@ -141,216 +122,231 @@ struct SettingsView: View {
         case .audio:
             audio
         case .ai:
-            ai
-        case .speechVocabulary:
-            speechVocabulary
+            AIConnectionSettingsView(appState: appState)
         case .privacy:
             privacy
-        case .knowledge:
-            knowledge
+        case .about:
+            about
         }
     }
 
     private var general: some View {
-        VStack(spacing: 16) {
-            MinimalSection(title: "Appearance") {
-                pickerRow("Island design", systemName: "circle.lefthalf.filled", selection: $appState.preferences.islandDesignMode) {
-                    ForEach(IslandDesignMode.allCases) { mode in
-                        Text(mode.displayName).tag(mode)
+        VStack(spacing: 30) {
+            EssentialSection(title: "Startup") {
+                settingsToggleRow("Launch at login", isOn: launchAtLoginBinding)
+                SettingsDivider()
+                settingsToggleRow("Auto-detect meetings", isOn: $appState.preferences.autoDetectMeetings)
+                SettingsDivider()
+                settingsToggleRow("Confirm before recording", isOn: $appState.preferences.requireConfirmationBeforeRecording)
+            }
+
+            EssentialSection(title: "Language") {
+                settingsPickerRow("Transcript language", selection: $appState.preferences.defaultLanguage) {
+                    ForEach(SupportedLanguage.allCases) { language in
+                        Text(language.displayName).tag(language.rawValue)
                     }
                 }
-                .onChange(of: appState.preferences.islandDesignMode) {
-                    appState.savePreferences()
-                }
-            }
-
-            MinimalSection(title: "Meeting") {
-                toggleRow("Launch at login", systemName: "power", isOn: $appState.preferences.launchAtLogin)
-                MinimalDivider()
-                toggleRow("Auto-detect meetings", systemName: "calendar.badge.clock", isOn: $appState.preferences.autoDetectMeetings)
-                MinimalDivider()
-                toggleRow("Smart mic detection", systemName: "mic.badge.plus", isOn: $appState.preferences.smartMeetingDetectionEnabled)
-                MinimalDivider()
-                toggleRow("Auto-start listening", systemName: "play.circle", isOn: $appState.preferences.autoStartListening)
-                MinimalDivider()
-                toggleRow("Confirm before recording", systemName: "checkmark.shield", isOn: $appState.preferences.requireConfirmationBeforeRecording)
-                MinimalDivider()
-                toggleRow("Auto-end detected meetings", systemName: "stop.circle", isOn: $appState.preferences.autoEndDetectedMeetings)
-                MinimalDivider()
-                stepperRow("Auto-end delay", systemName: "timer", value: $appState.preferences.autoEndGraceSeconds, suffix: "sec")
-            }
-
-            MinimalSection(title: "Profile") {
-                textRow("Name", systemName: "person", text: $appState.preferences.userDisplayName)
-                MinimalDivider()
-                textRow("Nicknames", systemName: "person.2", text: $appState.preferences.userNicknames)
-                MinimalDivider()
-                textRow("Role", systemName: "briefcase", text: $appState.preferences.userRole)
-                MinimalDivider()
-                pickerRow("Meeting type", systemName: "rectangle.stack", selection: $appState.preferences.defaultMeetingType) {
+                SettingsDivider()
+                settingsPickerRow("Meeting type", selection: $appState.preferences.defaultMeetingType) {
                     ForEach(MeetingType.allCases) { type in
                         Text(type.displayName).tag(type)
                     }
                 }
-                MinimalDivider()
-                languagePickerRow("Transcript language", systemName: "globe", selection: $appState.preferences.defaultLanguage)
             }
 
-            MinimalSection(title: "Notchly") {
-                toggleRow("Hotkey enabled", systemName: "keyboard", isOn: $appState.preferences.copilotHotkeyEnabled)
+            EssentialSection(title: "Notchly") {
+                settingsToggleRow("Hotkey", isOn: $appState.preferences.copilotHotkeyEnabled)
                     .onChange(of: appState.preferences.copilotHotkeyEnabled) {
                         appState.savePreferences()
                     }
-                MinimalDivider()
-                diagnosticRow("Hotkey", systemName: "command", value: CopilotHotkeyDescriptor.default.displayName)
-                MinimalDivider()
-                toggleRow("Launch at login", systemName: "power", isOn: $appState.preferences.copilotLaunchAtLoginEnabled)
-                    .onChange(of: appState.preferences.copilotLaunchAtLoginEnabled) {
-                        appState.savePreferences()
-                    }
-                MinimalDivider()
-                pickerRow("Web", systemName: "globe", selection: $appState.preferences.copilotWebMode) {
-                    ForEach(CopilotWebMode.allCases) { mode in
+                SettingsDivider()
+                settingsValueRow("Shortcut") {
+                    Text(CopilotHotkeyDescriptor.default.displayName)
+                        .settingsSecondaryText()
+                }
+                SettingsDivider()
+                settingsPickerRow("Island design", selection: $appState.preferences.islandDesignMode) {
+                    ForEach(IslandDesignMode.allCases) { mode in
                         Text(mode.displayName).tag(mode)
                     }
                 }
-                MinimalDivider()
-                stepperRow("Notchly retention", systemName: "clock.arrow.circlepath", value: $appState.preferences.copilotRetentionDays, suffix: "days")
-                MinimalDivider()
-                pickerRow("Precision", systemName: "scope", selection: $appState.preferences.qaPrecisionMode) {
-                    ForEach(QAPrecisionMode.allCases) { mode in
-                        Text(mode.displayName).tag(mode)
-                    }
-                }
-                MinimalDivider()
-                pickerRow("Local model", systemName: "brain", selection: $appState.preferences.localQuestionModelProfile) {
-                    ForEach(LocalQuestionModelProfile.allCases) { profile in
-                        Text(profile.displayName).tag(profile)
-                    }
-                }
-                MinimalDivider()
-                toggleRow("Model downloads", systemName: "arrow.down.circle", isOn: $appState.preferences.allowLocalModelDownloads)
-                MinimalDivider()
-                toggleRow("Shadow validation", systemName: "chart.xyaxis.line", isOn: $appState.preferences.qaShadowMode)
-                MinimalDivider()
-                actionRow("History", systemName: "trash") {
-                    Button("Clear 7 days") { appState.clearCopilotHistory() }
-                        .buttonStyle(MinimalButtonStyle(isDestructive: true))
-                }
-            }
-
-            MinimalSection(title: "Notchly Quality") {
-                diagnosticRow("Runtime", systemName: "dot.radiowaves.left.and.right", value: appState.copilotRuntimeState.displayText)
-                MinimalDivider()
-                diagnosticRow("Accepted", systemName: "checkmark.circle", value: "\(appState.copilotQualitySnapshot.acceptedCount)")
-                MinimalDivider()
-                diagnosticRow("Ignored", systemName: "moon", value: "\(appState.copilotQualitySnapshot.ignoredCount)")
-                MinimalDivider()
-                diagnosticRow("Failures", systemName: "exclamationmark.triangle", value: "\(appState.copilotQualitySnapshot.failureCount)")
-                MinimalDivider()
-                diagnosticRow("Latency p95", systemName: "speedometer", value: formatLatency(appState.copilotQualitySnapshot.p95LatencyMs))
-                if let reason = appState.copilotQualitySnapshot.latestReason {
-                    MinimalDivider()
-                    diagnosticRow("Last decision", systemName: "list.bullet.clipboard", value: reason)
-                }
-            }
-
-            MinimalSection(title: "Translation") {
-                toggleRow("Live translation", systemName: "captions.bubble", isOn: $appState.preferences.liveTranslationEnabled)
-                    .onChange(of: appState.preferences.liveTranslationEnabled) {
-                        appState.setLiveTranslationEnabled(appState.preferences.liveTranslationEnabled)
-                    }
-                MinimalDivider()
-                languagePickerRow("Translate to", systemName: "arrow.left.arrow.right", selection: $appState.preferences.targetLanguage)
-                    .onChange(of: appState.preferences.targetLanguage) {
-                        appState.savePreferences()
-                        if appState.preferences.liveTranslationEnabled {
-                            appState.prepareTranslationLanguages()
-                            appState.sessionManager?.refreshTranslationsForCurrentMeeting()
-                        }
-                    }
-                MinimalDivider()
-                actionRow("Languages", systemName: "arrow.down.circle") {
-                    if appState.isPreparingTranslationLanguages {
-                        ProgressView()
-                            .controlSize(.small)
-                            .scaleEffect(0.72)
-                        Text("Preparing")
-                            .font(.system(size: 12, weight: .medium))
-                            .foregroundStyle(MinimalTheme.secondary)
-                    } else {
-                        Button("Prepare") { appState.prepareTranslationLanguages() }
-                            .buttonStyle(MinimalButtonStyle())
-                        Button("System Settings") { appState.openTranslationSystemSettings() }
-                            .buttonStyle(MinimalButtonStyle())
-                    }
-                }
-                if !appState.translationPreparationStatus.isEmpty {
-                    MinimalDivider()
-                    statusRow(appState.translationPreparationStatus, systemName: "info.circle")
-                }
-                MinimalDivider()
-                toggleRow("Show original", systemName: "text.quote", isOn: $appState.preferences.showOriginalText)
-                MinimalDivider()
-                toggleRow("Show translation", systemName: "character.bubble", isOn: $appState.preferences.showTranslatedText)
             }
         }
     }
 
     private var audio: some View {
-        VStack(spacing: 16) {
-            MinimalSection(title: "Capture") {
-                pickerRow("Mode", systemName: "waveform", selection: $appState.preferences.audioCaptureMode) {
+        VStack(spacing: 30) {
+            audioStatus
+
+            EssentialSection(title: "Capture") {
+                settingsPickerRow("Capture mode", selection: audioCaptureModeBinding) {
                     ForEach(AudioCaptureMode.allCases) { mode in
                         Text(mode.displayName).tag(mode)
                     }
                 }
-                MinimalDivider()
-                toggleRow("System audio", systemName: "speaker.wave.2", isOn: $appState.preferences.captureSystemAudio)
-                MinimalDivider()
-                toggleRow("Save recordings", systemName: "record.circle", isOn: $appState.preferences.saveAudioRecordings)
-                MinimalDivider()
-                toggleRow("Waveform", systemName: "waveform.path", isOn: $appState.preferences.showWaveform)
-                MinimalDivider()
-                pickerRow("Quality", systemName: "slider.horizontal.3", selection: transcriptionAccuracySelection) {
+                SettingsDivider()
+                devicePickerRow("Input device", direction: .input, selection: inputDeviceSelection)
+                SettingsDivider()
+                devicePickerRow("Output device", direction: .output, selection: outputDeviceSelection)
+            }
+
+            EssentialSection(title: "Transcription") {
+                settingsSegmentedRow("Quality", selection: transcriptionAccuracySelection) {
                     ForEach(TranscriptionAccuracyMode.allCases) { mode in
                         Text(mode.displayName).tag(mode)
                     }
                 }
-            }
-
-            MinimalSection(title: "Transcription") {
-                statusRow(appState.speechVocabularyStatus, systemName: "text.badge.checkmark")
-                MinimalDivider()
-                pickerRow("Commit", systemName: "checkmark.seal", selection: $appState.preferences.copilotASRCommitPolicy) {
+                SettingsDivider()
+                settingsSegmentedRow("Commit", selection: $appState.preferences.copilotASRCommitPolicy) {
                     ForEach(CopilotASRCommitPolicy.allCases) { policy in
                         Text(policy.displayName).tag(policy)
                     }
                 }
-                MinimalDivider()
-                statusRow(transcriptionBackendStatus, systemName: "waveform.badge.magnifyingglass")
-                MinimalDivider()
-                statusRow(transcriptionPrivacyStatus, systemName: appState.preferences.localOnlyMode ? "lock.shield" : "cloud")
-                if appState.preferences.localOnlyMode {
-                    MinimalDivider()
-                    statusRow("Custom vocabulary model eligible", systemName: "lock.shield")
-                }
             }
 
-            MinimalSection(title: "Permissions") {
-                permissionRow("Microphone", systemName: "mic", granted: permissions.state.microphone) {
+            EssentialSection(title: "Output") {
+                settingsToggleRow("Save recordings", isOn: $appState.preferences.saveAudioRecordings)
+                SettingsDivider()
+                settingsToggleRow("Waveform", isOn: $appState.preferences.showWaveform)
+            }
+
+            EssentialSection(title: "Permissions") {
+                permissionRow("Microphone", granted: permissions.state.microphone) {
                     Task { await permissions.requestMicrophone() }
                 }
-                MinimalDivider()
-                permissionRow("Speech Recognition", systemName: "text.quote", granted: permissions.state.speech) {
+                SettingsDivider()
+                permissionRow("Speech Recognition", granted: permissions.state.speech) {
                     Task { await permissions.requestSpeech() }
                 }
-                MinimalDivider()
-                permissionRow("Screen Recording", systemName: "rectangle.dashed", granted: permissions.state.screenCapture) {
+                SettingsDivider()
+                permissionRow("Screen Recording", granted: permissions.state.screenCapture) {
                     permissions.requestScreenCapture()
                 }
             }
         }
+    }
+
+    private var audioStatus: some View {
+        HStack(spacing: 14) {
+            AudioMicroWaveform(isActive: appState.currentMeeting?.status == .listening)
+                .frame(width: 96, height: 22)
+            VStack(alignment: .leading, spacing: 3) {
+                Text(audioStatusTitle)
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundStyle(MinimalTheme.primary)
+                    .lineLimit(1)
+                Text(audioStatusDetail)
+                    .font(.system(size: 11.5, weight: .medium))
+                    .foregroundStyle(MinimalTheme.secondary)
+                    .lineLimit(1)
+            }
+            Spacer()
+            statusChip(appState.currentMeeting?.status == .listening ? "Live" : "Ready", isPositive: true)
+        }
+        .padding(.horizontal, 16)
+        .frame(height: 58)
+        .background(
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .fill(MinimalTheme.surface.opacity(0.72))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .stroke(Color.white.opacity(0.075), lineWidth: 0.7)
+        )
+    }
+
+    private var privacy: some View {
+        VStack(spacing: 30) {
+            EssentialSection(title: "Privacy") {
+                settingsToggleRow("Local Only Mode", isOn: $appState.preferences.localOnlyMode)
+                    .onChange(of: appState.preferences.localOnlyMode) {
+                        if appState.preferences.localOnlyMode {
+                            appState.preferences.aiConfig.cloudProcessingEnabled = false
+                            appState.preferences.aiConfig.webSearchEnabled = false
+                        }
+                        appState.savePreferences()
+                    }
+                SettingsDivider()
+                settingsStepperRow("Retention", value: $appState.preferences.retentionDays, range: 1...365, suffix: "days")
+                SettingsDivider()
+                settingsToggleRow("Recording indicator", isOn: $appState.preferences.showRecordingIndicator)
+                SettingsDivider()
+                settingsToggleRow("Stealth Mode", isOn: $appState.preferences.stealthModeEnabled)
+                    .onChange(of: appState.preferences.stealthModeEnabled) {
+                        appState.savePreferences()
+                    }
+                SettingsDivider()
+                settingsToggleRow("Keep code snippets local", isOn: $appState.preferences.doNotSendCodeSnippetsToCloud)
+            }
+
+            EssentialSection(title: "Data") {
+                settingsValueRow("Local history") {
+                    HStack(spacing: 8) {
+                        Button("Export") { appState.openHistoryHandler?() }
+                            .buttonStyle(SettingsPillButtonStyle())
+                        Button("Delete All") { appState.deleteAllData() }
+                            .buttonStyle(SettingsPillButtonStyle(isDestructive: true))
+                    }
+                }
+            }
+        }
+    }
+
+    private var about: some View {
+        VStack(spacing: 30) {
+            VStack(spacing: 16) {
+                Image("NotchIcon")
+                    .renderingMode(.template)
+                    .resizable()
+                    .scaledToFit()
+                    .frame(width: 66, height: 34)
+                    .foregroundStyle(MinimalTheme.notchAccent)
+                VStack(spacing: 5) {
+                    Text("Notchly")
+                        .font(.system(size: 22, weight: .semibold))
+                        .foregroundStyle(MinimalTheme.primary)
+                    Text("Version \(appVersion)")
+                        .font(.system(size: 13, weight: .medium))
+                        .foregroundStyle(MinimalTheme.secondary)
+                }
+            }
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 38)
+
+            EssentialSection(title: "Links") {
+                settingsValueRow("Website") {
+                    Button("Visit Website") { openURL("https://github.com/ryan-mf-eloy/Notchly") }
+                        .buttonStyle(SettingsPillButtonStyle())
+                }
+                SettingsDivider()
+                settingsValueRow("Feedback") {
+                    Button("Send Feedback") { openURL("https://github.com/ryan-mf-eloy/Notchly/issues") }
+                        .buttonStyle(SettingsPillButtonStyle())
+                }
+            }
+        }
+    }
+
+    private var launchAtLoginBinding: Binding<Bool> {
+        Binding(
+            get: { appState.preferences.launchAtLogin || appState.preferences.copilotLaunchAtLoginEnabled },
+            set: { value in
+                appState.preferences.launchAtLogin = value
+                appState.preferences.copilotLaunchAtLoginEnabled = value
+                appState.savePreferences()
+            }
+        )
+    }
+
+    private var audioCaptureModeBinding: Binding<AudioCaptureMode> {
+        Binding(
+            get: { appState.preferences.audioCaptureMode },
+            set: { mode in
+                appState.preferences.audioCaptureMode = mode
+                appState.preferences.captureSystemAudio = mode != .microphoneOnly
+                appState.savePreferences()
+            }
+        )
     }
 
     private var transcriptionAccuracySelection: Binding<TranscriptionAccuracyMode> {
@@ -363,531 +359,185 @@ struct SettingsView: View {
         )
     }
 
-    private var transcriptionBackendStatus: String {
-        let engine = appState.capabilityReport?.transcriptionEngine.rawValue ?? "Apple Speech"
-        let mode = appState.preferences.transcriptionAccuracyMode.displayName
-        let commit = appState.preferences.copilotASRCommitPolicy.displayName
-        return "\(mode) · \(commit) · \(engine)"
+    private var inputDeviceSelection: Binding<String> {
+        deviceSelectionBinding(\.selectedInputDeviceUID)
     }
 
-    private var transcriptionPrivacyStatus: String {
-        if appState.preferences.localOnlyMode {
-            return "Local Only: remote ASR disabled"
-        }
-        return "Hybrid: cloud realtime when authenticated, Apple fallback"
+    private var outputDeviceSelection: Binding<String> {
+        deviceSelectionBinding(\.selectedOutputDeviceUID)
     }
 
-    private var speechVocabulary: some View {
-        VStack(spacing: 16) {
-            MinimalSection(title: "Add Term") {
-                textRow("Term", systemName: "textformat", text: $speechTermText)
-                MinimalDivider()
-                textRow("Aliases", systemName: "text.badge.plus", text: $speechTermAliases)
-                MinimalDivider()
-                languagePickerRow("Language", systemName: "globe", selection: $speechTermLocale)
-                MinimalDivider()
-                pickerRow("Category", systemName: "tag", selection: $speechTermCategory) {
-                    ForEach(SpeechVocabularyCategory.allCases) { category in
-                        Text(category.displayName).tag(category)
-                    }
-                }
-                MinimalDivider()
-                baseRow("Boost", systemName: "slider.horizontal.3") {
-                    Stepper(String(format: "%.1fx", speechTermBoost), value: $speechTermBoost, in: 0.1...3.0, step: 0.1)
-                        .font(.system(size: 12, weight: .medium))
-                        .foregroundStyle(MinimalTheme.secondary)
-                        .frame(width: 160, alignment: .trailing)
-                }
-                MinimalDivider()
-                textRow("X-SAMPA", systemName: "waveform", text: $speechTermPronunciation)
-                MinimalDivider()
-                textRow("Template", systemName: "text.insert", text: $speechTermTemplatePattern)
-                MinimalDivider()
-                textRow("Slots", systemName: "list.bullet.rectangle", text: $speechTermTemplateSlots)
-                MinimalDivider()
-                actionRow("Actions", systemName: "plus.circle") {
-                    Button("Add") {
-                        let aliases = speechTermAliases.split(separator: ",").map(String.init)
-                        let templateSlots = speechTermTemplateSlots.split(separator: ",").map(String.init)
-                        appState.saveSpeechVocabularyTerm(SpeechVocabularyTerm(
-                            text: speechTermText,
-                            locale: speechTermLocale,
-                            category: speechTermCategory,
-                            aliases: aliases,
-                            pronunciationXSAMPA: speechTermPronunciation,
-                            boost: speechTermBoost,
-                            scope: .workspace,
-                            scopeValue: appState.preferences.workspaceId,
-                            templatePattern: speechTermTemplatePattern,
-                            templateSlots: templateSlots
-                        ))
-                        speechTermText = ""
-                        speechTermAliases = ""
-                        speechTermPronunciation = ""
-                        speechTermTemplatePattern = ""
-                        speechTermTemplateSlots = ""
-                    }
-                    .buttonStyle(MinimalButtonStyle())
-                    .disabled(SpeechVocabularyTerm.cleaned(speechTermText).isEmpty)
-
-                    Button("Import CSV") {
-                        if let csv = NSPasteboard.general.string(forType: .string) {
-                            appState.importSpeechVocabularyCSV(csv)
-                        }
-                    }
-                    .buttonStyle(MinimalButtonStyle())
-
-                    Button("Copy CSV") {
-                        appState.exportSpeechVocabularyCSVToPasteboard()
-                    }
-                    .buttonStyle(MinimalButtonStyle())
-                }
+    private func deviceSelectionBinding(_ keyPath: WritableKeyPath<AppPreferences, String?>) -> Binding<String> {
+        Binding(
+            get: { appState.preferences[keyPath: keyPath] ?? AudioDevicePickerSentinel.systemDefault },
+            set: { value in
+                appState.preferences[keyPath: keyPath] = value == AudioDevicePickerSentinel.systemDefault ? nil : value
+                appState.savePreferences()
             }
+        )
+    }
 
-            MinimalSection(title: "Vocabulary") {
-                textRow("Search", systemName: "magnifyingglass", text: $speechVocabularySearch)
-                MinimalDivider()
-                diagnosticRow("Status", systemName: "text.badge.checkmark", value: appState.speechVocabularyStatus)
-                if filteredSpeechVocabularyTerms.isEmpty {
-                    MinimalDivider()
-                    emptyRow("No vocabulary terms match this search.")
-                } else {
-                    ForEach(filteredSpeechVocabularyTerms) { term in
-                        MinimalDivider()
-                        speechVocabularyTermRow(term)
-                    }
-                }
-                MinimalDivider()
-                actionRow("Maintenance", systemName: "trash") {
-                    Button("Clear custom") {
-                        appState.clearUserSpeechVocabulary()
-                    }
-                    .buttonStyle(MinimalButtonStyle(isDestructive: true))
-                }
-            }
-
-            let suggestions = speechVocabularySuggestions
-            if !suggestions.isEmpty {
-                MinimalSection(title: "Suggestions") {
-                    ForEach(suggestions) { suggestion in
-                        speechVocabularySuggestionRow(suggestion)
-                        if suggestion.id != suggestions.last?.id {
-                            MinimalDivider()
-                        }
-                    }
-                }
-            }
+    private var audioStatusTitle: String {
+        let input = audioDevices.deviceName(for: appState.preferences.selectedInputDeviceUID, direction: .input)
+        let output = audioDevices.deviceName(for: appState.preferences.selectedOutputDeviceUID, direction: .output)
+        switch appState.preferences.audioCaptureMode {
+        case .microphoneOnly:
+            return "Listening from \(cleanDefaultLabel(input))"
+        case .systemOnly:
+            return "Capturing \(cleanDefaultLabel(output))"
+        case .microphoneAndSystem:
+            return "Mic + system ready"
         }
     }
 
-    private var ai: some View {
-        AIConnectionSettingsView(appState: appState)
+    private var audioStatusDetail: String {
+        let input = audioDevices.deviceName(for: appState.preferences.selectedInputDeviceUID, direction: .input)
+        let output = audioDevices.deviceName(for: appState.preferences.selectedOutputDeviceUID, direction: .output)
+        return "Input: \(cleanDefaultLabel(input)) • Output: \(cleanDefaultLabel(output))"
     }
 
-    private var privacy: some View {
-        let diagnostics = PrivacyDiagnostics.snapshot(isStealthModeEnabled: appState.preferences.stealthModeEnabled)
-        return VStack(spacing: 16) {
-            MinimalSection(title: "Privacy") {
-                toggleRow("Local Only Mode", systemName: "lock.shield", isOn: $appState.preferences.localOnlyMode)
-                    .onChange(of: appState.preferences.localOnlyMode) {
-                        if appState.preferences.localOnlyMode {
-                            appState.preferences.aiConfig.cloudProcessingEnabled = false
-                            appState.preferences.aiConfig.webSearchEnabled = false
-                        }
-                    }
-                MinimalDivider()
-                stepperRow("Retention", systemName: "clock.arrow.circlepath", value: $appState.preferences.retentionDays, suffix: "days")
-                MinimalDivider()
-                toggleRow("Recording indicator", systemName: "record.circle", isOn: $appState.preferences.showRecordingIndicator)
-                MinimalDivider()
-                toggleRow("Stealth Mode", systemName: "eye.slash", isOn: $appState.preferences.stealthModeEnabled)
-                    .onChange(of: appState.preferences.stealthModeEnabled) {
-                        appState.savePreferences()
-                    }
-                MinimalDivider()
-                toggleRow("Keep code snippets local", systemName: "chevron.left.forwardslash.chevron.right", isOn: $appState.preferences.doNotSendCodeSnippetsToCloud)
-            }
+    private func cleanDefaultLabel(_ label: String) -> String {
+        label
+            .replacingOccurrences(of: "System Default (", with: "")
+            .replacingOccurrences(of: ")", with: "")
+    }
 
-            MinimalSection(title: "Privacy Diagnostics") {
-                diagnosticRow("Mode", systemName: "shield.lefthalf.filled", value: diagnostics.modeDisplayName)
-                MinimalDivider()
-                diagnosticRow("Capture policy", systemName: "camera.viewfinder", value: diagnostics.capturePolicySummary)
-                MinimalDivider()
-                diagnosticRow("Focus policy", systemName: "cursorarrow.rays", value: diagnostics.focusPolicySummary)
-                MinimalDivider()
-                diagnosticRow("Local encryption", systemName: "lock.doc", value: diagnostics.localEncryptionSummary)
-                MinimalDivider()
-                diagnosticRow("macOS", systemName: "desktopcomputer", value: diagnostics.macOSVersion)
-                MinimalDivider()
-                actionRow("Window audit", systemName: "list.bullet.rectangle") {
-                    Text("\(diagnostics.protectedWindowCount)/\(diagnostics.windowAudits.count) protected")
-                        .font(.system(size: 12, weight: .medium))
-                        .foregroundStyle(MinimalTheme.secondary)
-                    Button("Refresh") {
-                        WindowCaptureProtection.applyToCurrentAppWindows(isEnabled: appState.preferences.stealthModeEnabled)
-                        diagnosticsRefreshID = UUID()
-                    }
-                    .buttonStyle(MinimalButtonStyle())
-                }
-                if diagnostics.windowAudits.isEmpty {
-                    MinimalDivider()
-                    emptyRow("No protected windows have been audited yet.")
-                } else {
-                    ForEach(diagnostics.windowAudits) { audit in
-                        MinimalDivider()
-                        windowAuditRow(audit)
-                    }
-                }
-            }
-            .id(diagnosticsRefreshID)
+    private var appVersion: String {
+        let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "0.1.0"
+        let build = Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "1"
+        return "\(version) (\(build))"
+    }
 
-            MinimalSection(title: "Validation Limits") {
-                ForEach(Array(diagnostics.limitations.enumerated()), id: \.offset) { index, limitation in
-                    limitationRow(limitation)
-                    if index < diagnostics.limitations.count - 1 {
-                        MinimalDivider()
-                    }
+    private func devicePickerRow(_ title: String, direction: AudioDeviceDirection, selection: Binding<String>) -> some View {
+        let devices = audioDevices.devices(for: direction)
+        let selectedUID = selection.wrappedValue == AudioDevicePickerSentinel.systemDefault ? nil : selection.wrappedValue
+        return settingsValueRow(title) {
+            Picker("", selection: selection) {
+                Text(systemDefaultLabel(for: direction)).tag(AudioDevicePickerSentinel.systemDefault)
+                ForEach(devices) { device in
+                    Text(device.isDefault ? "\(device.name) • Default" : device.name).tag(device.uid)
+                }
+                if let selectedUID, !audioDevices.isAvailable(selectedUID, direction: direction) {
+                    Text("Disconnected device").tag(selectedUID)
                 }
             }
-
-            MinimalSection(title: "Manual Validation") {
-                ForEach(Array(diagnostics.manualValidationItems.enumerated()), id: \.element.id) { index, item in
-                    validationItemRow(item)
-                    if index < diagnostics.manualValidationItems.count - 1 {
-                        MinimalDivider()
-                    }
-                }
-            }
-
-            MinimalSection(title: "Access") {
-                permissionRow("Calendar", systemName: "calendar", granted: permissions.state.calendar) {
-                    Task { await permissions.requestCalendar() }
-                }
-                MinimalDivider()
-                actionRow("Data", systemName: "externaldrive") {
-                    Button("Export") { appState.openHistoryHandler?() }
-                        .buttonStyle(MinimalButtonStyle())
-                    Button("Delete All") { appState.deleteAllData() }
-                        .buttonStyle(MinimalButtonStyle(isDestructive: true))
-                }
-            }
+            .labelsHidden()
+            .pickerStyle(.menu)
+            .frame(width: 276, alignment: .trailing)
         }
     }
 
-    private var knowledge: some View {
-        VStack(spacing: 16) {
-            MinimalSection(title: "Local Knowledge") {
-                actionRow("Files", systemName: "doc.badge.plus") {
-                    Button("Add") { fileImporterPresented = true }
-                        .buttonStyle(MinimalButtonStyle())
-                    Button("Reindex") { appState.reloadKnowledgeDocuments() }
-                        .buttonStyle(MinimalButtonStyle())
-                    Button("Clear") { appState.clearKnowledge() }
-                        .buttonStyle(MinimalButtonStyle(isDestructive: true))
-                }
-            }
-
-            MinimalSection(title: "Indexed") {
-                if appState.knowledgeDocumentNames.isEmpty {
-                    emptyRow("No local documents indexed yet.")
-                } else {
-                    ForEach(Array(appState.knowledgeDocumentNames.enumerated()), id: \.offset) { index, name in
-                        labelRow(name, systemName: "doc.text")
-                        if index < appState.knowledgeDocumentNames.count - 1 {
-                            MinimalDivider()
-                        }
-                    }
-                }
-            }
+    private func systemDefaultLabel(for direction: AudioDeviceDirection) -> String {
+        if let name = audioDevices.defaultDeviceName(for: direction) {
+            return "System Default — \(name)"
         }
+        return "System Default"
     }
 
-    private var technicalRows: some View {
-        let report = appState.capabilityReport
-        return VStack(spacing: 0) {
-            engineRow("Transcription", engine: report?.transcriptionEngine ?? .unavailable, mode: report?.transcriptionMode ?? .unavailable)
-            MinimalDivider()
-            engineRow("Translation", engine: report?.translationEngine ?? .appleTranslation, mode: report?.translationMode ?? .local)
-            MinimalDivider()
-            engineRow("Summary", engine: report?.summaryEngine ?? .unavailable, mode: report?.summaryMode ?? .unavailable)
-            MinimalDivider()
-            engineRow("Language", engine: report?.languageDetectionEngine ?? .appleNaturalLanguage, mode: .local)
-            MinimalDivider()
-            engineRow("Audio", engine: report?.audioCaptureEngine ?? .avFoundationScreenCaptureKit, mode: .local)
-        }
-    }
-
-    private func baseRow<Accessory: View>(_ title: String, systemName: String, @ViewBuilder accessory: () -> Accessory) -> some View {
-        HStack(spacing: 11) {
-            Image(systemName: systemName)
-                .font(.system(size: 12, weight: .medium))
-                .foregroundStyle(MinimalTheme.secondary)
-                .frame(width: 18)
-            Text(title)
-                .font(.system(size: 13, weight: .medium))
-                .foregroundStyle(MinimalTheme.primary)
-                .lineLimit(1)
-                .minimumScaleFactor(0.82)
-            Spacer(minLength: 12)
-            accessory()
-        }
-        .padding(.horizontal, 12)
-        .frame(minHeight: 42)
-    }
-
-    private func toggleRow(_ title: String, systemName: String, isOn: Binding<Bool>) -> some View {
-        baseRow(title, systemName: systemName) {
+    private func settingsToggleRow(_ title: String, isOn: Binding<Bool>) -> some View {
+        settingsValueRow(title) {
             Toggle("", isOn: isOn)
                 .labelsHidden()
                 .toggleStyle(.switch)
-                .tint(.gray)
+                .tint(MinimalTheme.notchAccent.opacity(0.82))
                 .scaleEffect(0.82)
         }
     }
 
-    private func textRow(_ title: String, systemName: String, text: Binding<String>) -> some View {
-        baseRow(title, systemName: systemName) {
-            TextField("", text: text)
-                .textFieldStyle(.plain)
-                .font(.system(size: 12, weight: .medium))
-                .foregroundStyle(MinimalTheme.primary)
-                .multilineTextAlignment(.trailing)
-                .frame(width: 260)
-        }
-    }
-
-    private func secureRow(_ title: String, systemName: String, text: Binding<String>) -> some View {
-        baseRow(title, systemName: systemName) {
-            SecureField("", text: text)
-                .textFieldStyle(.plain)
-                .font(.system(size: 12, weight: .medium))
-                .foregroundStyle(MinimalTheme.primary)
-                .multilineTextAlignment(.trailing)
-                .frame(width: 260)
-        }
-    }
-
-    private func pickerRow<Selection: Hashable, Content: View>(_ title: String, systemName: String, selection: Binding<Selection>, @ViewBuilder content: () -> Content) -> some View {
-        baseRow(title, systemName: systemName) {
+    private func settingsPickerRow<Selection: Hashable, Content: View>(
+        _ title: String,
+        selection: Binding<Selection>,
+        @ViewBuilder content: () -> Content
+    ) -> some View {
+        settingsValueRow(title) {
             Picker("", selection: selection, content: content)
                 .labelsHidden()
                 .pickerStyle(.menu)
-                .frame(width: 230, alignment: .trailing)
+                .frame(width: 250, alignment: .trailing)
         }
     }
 
-    private func languagePickerRow(_ title: String, systemName: String, selection: Binding<String>) -> some View {
-        pickerRow(title, systemName: systemName, selection: selection) {
-            ForEach(SupportedLanguage.allCases) { language in
-                Text(language.displayName).tag(language.rawValue)
-            }
+    private func settingsSegmentedRow<Selection: Hashable, Content: View>(
+        _ title: String,
+        selection: Binding<Selection>,
+        @ViewBuilder content: () -> Content
+    ) -> some View {
+        settingsValueRow(title) {
+            Picker("", selection: selection, content: content)
+                .labelsHidden()
+                .pickerStyle(.segmented)
+                .frame(width: 260, alignment: .trailing)
         }
     }
 
-    private func stepperRow(_ title: String, systemName: String, value: Binding<Int>, suffix: String) -> some View {
-        baseRow(title, systemName: systemName) {
-            Stepper("\(value.wrappedValue) \(suffix)", value: value, in: 0...365)
-                .font(.system(size: 12, weight: .medium))
+    private func settingsStepperRow(_ title: String, value: Binding<Int>, range: ClosedRange<Int>, suffix: String) -> some View {
+        settingsValueRow(title) {
+            Stepper("\(value.wrappedValue) \(suffix)", value: value, in: range)
+                .font(.system(size: 12.5, weight: .medium))
                 .foregroundStyle(MinimalTheme.secondary)
-                .frame(width: 170, alignment: .trailing)
+                .frame(width: 190, alignment: .trailing)
         }
     }
 
-    private func permissionRow(_ title: String, systemName: String, granted: Bool, action: @escaping () -> Void) -> some View {
-        baseRow(title, systemName: systemName) {
+    private func permissionRow(_ title: String, granted: Bool, action: @escaping () -> Void) -> some View {
+        settingsValueRow(title) {
             HStack(spacing: 8) {
-                Label(granted ? "Granted" : "Needed", systemImage: granted ? "checkmark.circle" : "circle")
-                    .font(.system(size: 12, weight: .medium))
-                    .foregroundStyle(granted ? MinimalTheme.primary : MinimalTheme.secondary)
-                Button("Request", action: action)
-                    .buttonStyle(MinimalButtonStyle())
-            }
-        }
-    }
-
-    private func actionRow<Actions: View>(_ title: String, systemName: String, @ViewBuilder actions: () -> Actions) -> some View {
-        baseRow(title, systemName: systemName) {
-            HStack(spacing: 8) {
-                actions()
-            }
-        }
-    }
-
-    private func statusRow(_ text: String, systemName: String) -> some View {
-        baseRow("Status", systemName: systemName) {
-            Text(text)
-                .font(.system(size: 12, weight: .medium))
-                .foregroundStyle(MinimalTheme.secondary)
-                .lineLimit(2)
-                .multilineTextAlignment(.trailing)
-        }
-    }
-
-    private func diagnosticRow(_ title: String, systemName: String, value: String) -> some View {
-        baseRow(title, systemName: systemName) {
-            Text(value)
-                .font(.system(size: 12, weight: .medium))
-                .foregroundStyle(MinimalTheme.secondary)
-                .lineLimit(2)
-                .multilineTextAlignment(.trailing)
-        }
-    }
-
-    private var filteredSpeechVocabularyTerms: [SpeechVocabularyTerm] {
-        let query = speechVocabularySearch.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !query.isEmpty else { return appState.speechVocabularyTerms }
-        return appState.speechVocabularyTerms.filter { term in
-            ([term.text] + term.aliases + [term.category.displayName, term.locale ?? ""])
-                .contains { $0.localizedCaseInsensitiveContains(query) }
-        }
-    }
-
-    private var speechVocabularySuggestions: [SpeechVocabularyTerm] {
-        let segments = appState.currentMeeting?.transcriptSegments ?? appState.selectedMeeting?.transcriptSegments ?? []
-        return appState.speechVocabularyStore?.suggestedTerms(
-            from: segments,
-            locale: appState.preferences.defaultLanguage,
-            limit: 6
-        ) ?? []
-    }
-
-    private func speechVocabularyTermRow(_ term: SpeechVocabularyTerm) -> some View {
-        HStack(spacing: 11) {
-            Image(systemName: term.enabled ? "text.badge.checkmark" : "text.badge.xmark")
-                .font(.system(size: 12, weight: .medium))
-                .foregroundStyle(MinimalTheme.secondary)
-                .frame(width: 18)
-            VStack(alignment: .leading, spacing: 2) {
-                Text(term.text)
-                    .font(.system(size: 13, weight: .semibold))
-                    .foregroundStyle(MinimalTheme.primary)
-                    .lineLimit(1)
-                Text("\(term.category.displayName) • \(term.locale ?? "Any") • \(String(format: "%.1fx", term.boost))\(term.templatePattern == nil ? "" : " • Template")")
-                    .font(.system(size: 11, weight: .medium))
-                    .foregroundStyle(MinimalTheme.tertiary)
-                    .lineLimit(1)
-            }
-            Spacer(minLength: 10)
-            if term.isSystemSeed {
-                Text("System")
-                    .font(.system(size: 11, weight: .semibold))
-                    .foregroundStyle(MinimalTheme.tertiary)
-            } else {
-                Button("Delete") {
-                    appState.deleteSpeechVocabularyTerm(term)
+                statusChip(granted ? "Granted" : "Needed", isPositive: granted)
+                if !granted {
+                    Button("Request", action: action)
+                        .buttonStyle(SettingsPillButtonStyle())
                 }
-                .buttonStyle(MinimalButtonStyle(isDestructive: true))
-            }
-        }
-        .padding(.horizontal, 12)
-        .frame(minHeight: 46)
-    }
-
-    private func speechVocabularySuggestionRow(_ suggestion: SpeechVocabularyTerm) -> some View {
-        actionRow(suggestion.text, systemName: "sparkle.magnifyingglass") {
-            Button("Add") {
-                appState.saveSpeechVocabularyTerm(suggestion)
-            }
-            .buttonStyle(MinimalButtonStyle())
-        }
-    }
-
-    private func formatLatency(_ value: Double) -> String {
-        value <= 0 ? "-" : "\(Int(value.rounded())) ms"
-    }
-
-    private func windowAuditRow(_ audit: WindowCaptureProtectionAudit) -> some View {
-        baseRow(audit.role.displayName, systemName: audit.isSharingBlocked ? "eye.slash" : "eye") {
-            VStack(alignment: .trailing, spacing: 2) {
-                Text(audit.windowTitle)
-                    .font(.system(size: 12, weight: .medium))
-                    .foregroundStyle(MinimalTheme.secondary)
-                    .lineLimit(1)
-                Text("\(audit.sharingTypeDescription) · \(audit.lastAppliedAt.formatted(date: .omitted, time: .standard))")
-                    .font(.system(size: 10.5, weight: .medium))
-                    .foregroundStyle(MinimalTheme.tertiary)
-                    .lineLimit(1)
             }
         }
     }
 
-    private func limitationRow(_ text: String) -> some View {
-        baseRow("Limit", systemName: "exclamationmark.triangle") {
-            Text(text)
-                .font(.system(size: 12, weight: .medium))
-                .foregroundStyle(MinimalTheme.secondary)
-                .lineLimit(3)
-                .multilineTextAlignment(.trailing)
-        }
-    }
-
-    private func validationItemRow(_ item: PrivacyManualValidationItem) -> some View {
-        baseRow(item.title, systemName: "checklist") {
-            Text(item.expectedResult)
-                .font(.system(size: 12, weight: .medium))
-                .foregroundStyle(MinimalTheme.secondary)
-                .lineLimit(3)
-                .multilineTextAlignment(.trailing)
-        }
-    }
-
-    private func labelRow(_ title: String, systemName: String) -> some View {
-        baseRow(title, systemName: systemName) {
-            Image(systemName: "checkmark")
-                .font(.system(size: 11, weight: .semibold))
-                .foregroundStyle(MinimalTheme.secondary)
-        }
-    }
-
-    private func emptyRow(_ title: String) -> some View {
-        HStack {
+    private func settingsValueRow<Accessory: View>(_ title: String, @ViewBuilder accessory: () -> Accessory) -> some View {
+        HStack(spacing: 16) {
             Text(title)
-                .font(.system(size: 13, weight: .medium))
-                .foregroundStyle(MinimalTheme.tertiary)
-            Spacer()
-        }
-        .padding(.horizontal, 12)
-        .frame(height: 44)
-    }
-
-    private func engineRow(_ feature: String, engine: EngineName, mode: ProcessingMode) -> some View {
-        HStack(spacing: 11) {
-            Image(systemName: mode == .cloud ? "icloud" : "cpu")
-                .font(.system(size: 12, weight: .medium))
-                .foregroundStyle(MinimalTheme.secondary)
-                .frame(width: 18)
-            Text(feature)
-                .font(.system(size: 13, weight: .medium))
-                .foregroundStyle(MinimalTheme.primary)
-                .frame(width: 100, alignment: .leading)
-            Text(engine.rawValue)
-                .font(.system(size: 12, weight: .medium))
+                .font(.system(size: 13, weight: .semibold))
                 .foregroundStyle(MinimalTheme.secondary)
                 .lineLimit(1)
-            Spacer()
-            Text(mode.rawValue.capitalized)
-                .font(.system(size: 11, weight: .semibold))
-                .foregroundStyle(MinimalTheme.tertiary)
+                .minimumScaleFactor(0.88)
+                .frame(width: 174, alignment: .trailing)
+            accessory()
+                .frame(maxWidth: .infinity, alignment: .leading)
         }
-        .padding(.horizontal, 12)
-        .frame(minHeight: 40)
+        .frame(minHeight: 54)
+        .contentShape(Rectangle())
     }
 
-    private func optionalString(_ source: Binding<String?>) -> Binding<String> {
-        Binding<String>(
-            get: { source.wrappedValue ?? "" },
-            set: { source.wrappedValue = $0.isEmpty ? nil : $0 }
-        )
+    private func statusChip(_ text: String, isPositive: Bool) -> some View {
+        Text(text)
+            .font(.system(size: 11.5, weight: .semibold))
+            .foregroundStyle(isPositive ? MinimalTheme.primary : MinimalTheme.secondary)
+            .padding(.horizontal, 10)
+            .frame(height: 24)
+            .background(
+                Capsule()
+                    .fill(isPositive ? MinimalTheme.success.opacity(0.18) : MinimalTheme.settingsControl)
+            )
+            .overlay(
+                Capsule()
+                    .stroke(isPositive ? MinimalTheme.success.opacity(0.24) : MinimalTheme.divider, lineWidth: 0.7)
+            )
     }
+
+    private func openURL(_ value: String) {
+        guard let url = URL(string: value) else { return }
+        NSWorkspace.shared.open(url)
+    }
+}
+
+private enum AudioDevicePickerSentinel {
+    static let systemDefault = "__system_default__"
 }
 
 private enum SettingsPane: String, CaseIterable, Identifiable {
     case general
     case audio
     case ai
-    case speechVocabulary
     case privacy
-    case knowledge
+    case about
 
     var id: String { rawValue }
 
@@ -896,31 +546,122 @@ private enum SettingsPane: String, CaseIterable, Identifiable {
         case .general: "General"
         case .audio: "Audio"
         case .ai: "AI"
-        case .speechVocabulary: "Speech Vocabulary"
         case .privacy: "Privacy"
-        case .knowledge: "Knowledge"
-        }
-    }
-
-    var subtitle: String {
-        switch self {
-        case .general: "Meeting behavior and user context"
-        case .audio: "Capture modes, waveform and permissions"
-        case .ai: "Local first routing and optional cloud provider"
-        case .speechVocabulary: "Terms that improve Apple Speech accuracy"
-        case .privacy: "Retention, access and local-only controls"
-        case .knowledge: "Private files used for local context"
+        case .about: "About"
         }
     }
 
     var systemName: String {
         switch self {
-        case .general: "slider.horizontal.3"
+        case .general: "gearshape"
         case .audio: "waveform"
         case .ai: "sparkles"
-        case .speechVocabulary: "text.badge.plus"
         case .privacy: "lock.shield"
-        case .knowledge: "books.vertical"
+        case .about: "app.badge"
         }
+    }
+}
+
+private struct EssentialSection<Content: View>: View {
+    let title: String
+    @ViewBuilder let content: Content
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text(title)
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundStyle(MinimalTheme.tertiary)
+                .textCase(.uppercase)
+                .frame(width: 174, alignment: .trailing)
+            VStack(spacing: 0) {
+                content
+            }
+            .overlay(alignment: .top) { SettingsDivider(fullWidth: true) }
+            .overlay(alignment: .bottom) { SettingsDivider(fullWidth: true) }
+        }
+    }
+}
+
+private struct SettingsDivider: View {
+    var fullWidth = false
+
+    var body: some View {
+        Rectangle()
+            .fill(MinimalTheme.divider)
+            .frame(height: 0.6)
+            .padding(.leading, fullWidth ? 0 : 190)
+    }
+}
+
+private struct NotchMark: View {
+    var body: some View {
+        ZStack {
+            Capsule()
+                .fill(MinimalTheme.primary.opacity(0.92))
+                .frame(width: 28, height: 10)
+            Capsule()
+                .fill(MinimalTheme.background)
+                .frame(width: 18, height: 6)
+                .offset(y: -1)
+        }
+        .accessibilityHidden(true)
+    }
+}
+
+private struct AudioMicroWaveform: View {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    var isActive: Bool
+
+    var body: some View {
+        TimelineView(.animation(minimumInterval: 0.22, paused: reduceMotion)) { timeline in
+            HStack(alignment: .center, spacing: 3) {
+                ForEach(0..<18, id: \.self) { index in
+                    Capsule()
+                        .fill(index % 5 == 0 ? MinimalTheme.notchAccent.opacity(0.88) : MinimalTheme.primary.opacity(0.62))
+                        .frame(width: 3, height: barHeight(index: index, date: timeline.date))
+                }
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+        }
+        .drawingGroup()
+        .accessibilityLabel("Audio activity")
+    }
+
+    private func barHeight(index: Int, date: Date) -> CGFloat {
+        guard isActive, !reduceMotion else {
+            return CGFloat([7, 10, 13, 9, 16, 11, 8, 14, 10, 17, 12, 9, 15, 11, 8, 13, 10, 7][index])
+        }
+        let phase = date.timeIntervalSinceReferenceDate * 2.5 + Double(index) * 0.48
+        let normalized = (sin(phase) + 1) * 0.5
+        return CGFloat(7 + normalized * 14)
+    }
+}
+
+private struct SettingsPillButtonStyle: ButtonStyle {
+    var isDestructive = false
+
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .font(.system(size: 12, weight: .semibold))
+            .foregroundStyle(isDestructive ? MinimalTheme.notchAccent : MinimalTheme.primary)
+            .padding(.horizontal, 12)
+            .frame(height: 28)
+            .background(
+                Capsule()
+                    .fill(configuration.isPressed ? MinimalTheme.settingsControlPressed : MinimalTheme.settingsControl)
+            )
+            .overlay(
+                Capsule()
+                    .stroke(isDestructive ? MinimalTheme.notchAccent.opacity(0.28) : MinimalTheme.divider, lineWidth: 0.7)
+            )
+    }
+}
+
+private extension Text {
+    func settingsSecondaryText() -> some View {
+        self
+            .font(.system(size: 12.5, weight: .semibold))
+            .foregroundStyle(MinimalTheme.secondary)
+            .lineLimit(1)
     }
 }

@@ -3,549 +3,361 @@ import SwiftUI
 
 struct AIConnectionSettingsView: View {
     @ObservedObject var appState: AppState
-    @State private var expandedProvider: AIProviderKind? = .openAI
     @State private var selectedAuthKind: AIProviderAuthKind = .accountLogin
     @State private var apiKeyDrafts: [AIProviderKind: String] = [:]
     @State private var accountCodeDrafts: [AIProviderKind: String] = [:]
-    @State private var elevenLabsAPIKeyDraft: String = ""
+    @State private var elevenLabsAPIKeyDraft = ""
+
+    private var activeProvider: AIProviderDescriptor {
+        ProviderRegistry.descriptor(for: appState.preferences.aiConfig.provider)
+    }
 
     var body: some View {
-        VStack(spacing: 16) {
-            MinimalSection(title: "AI Providers") {
-                ForEach(ProviderRegistry.visibleProviders) { provider in
-                    providerItem(provider)
-                    if provider.kind != ProviderRegistry.visibleProviders.last?.kind {
-                        MinimalDivider()
+        VStack(spacing: 30) {
+            AISection(title: "Provider") {
+                aiPickerRow("Active provider", selection: providerSelection) {
+                    ForEach(ProviderRegistry.visibleProviders) { provider in
+                        Text(provider.title).tag(provider.kind)
                     }
+                }
+                AIDivider()
+                authMethodRow
+                AIDivider()
+                providerStatusRow
+                AIDivider()
+                providerControls
+                if !appState.settingsStatus.isEmpty {
+                    AIDivider()
+                    noticeRow(appState.settingsStatus)
                 }
             }
 
-            modelsSection
-            realtimeTranscriptionSection
-            processingSection
+            AISection(title: "Processing") {
+                aiToggleRow("Local Only Mode", isOn: $appState.preferences.localOnlyMode)
+                    .onChange(of: appState.preferences.localOnlyMode) {
+                        if appState.preferences.localOnlyMode {
+                            appState.preferences.aiConfig.cloudProcessingEnabled = false
+                            appState.preferences.aiConfig.webSearchEnabled = false
+                            appState.preferences.transcriptionEngineMode = .appleSpeech
+                        }
+                        appState.savePreferences()
+                    }
+                AIDivider()
+                aiToggleRow("Cloud processing", isOn: $appState.preferences.aiConfig.cloudProcessingEnabled)
+                    .onChange(of: appState.preferences.aiConfig.cloudProcessingEnabled) {
+                        if appState.preferences.aiConfig.cloudProcessingEnabled {
+                            appState.preferences.localOnlyMode = false
+                        }
+                        appState.savePreferences()
+                    }
+                AIDivider()
+                aiToggleRow("Web search", isOn: $appState.preferences.aiConfig.webSearchEnabled)
+                AIDivider()
+                aiToggleRow("Realtime suggestions", isOn: $appState.preferences.realtimeSuggestionsEnabled)
+            }
+
+            AISection(title: "Realtime Transcription") {
+                aiPickerRow("Provider", selection: realtimeTranscriptionProviderSelection) {
+                    ForEach(RealtimeTranscriptionProvider.allCases) { provider in
+                        Text(provider.displayName).tag(provider)
+                    }
+                }
+                AIDivider()
+                secureRow("ElevenLabs key", text: $elevenLabsAPIKeyDraft)
+                AIDivider()
+                aiValueRow("Keychain") {
+                    HStack(spacing: 8) {
+                        statusChip(appState.elevenLabsConnectionStatus.title, isPositive: elevenLabsIsConnected)
+                        Button("Save & Test") {
+                            appState.saveElevenLabsAPIKey(elevenLabsAPIKeyDraft)
+                        }
+                        .buttonStyle(AIPillButtonStyle())
+                        .disabled(elevenLabsAPIKeyDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+
+                        Button("Use") {
+                            appState.useElevenLabsRealtimeTranscription()
+                        }
+                        .buttonStyle(AIPillButtonStyle())
+                        .disabled(!appState.hasElevenLabsAPIKey())
+
+                        Button("Clear") {
+                            elevenLabsAPIKeyDraft = ""
+                            appState.saveElevenLabsAPIKey("")
+                        }
+                        .buttonStyle(AIPillButtonStyle(isDestructive: true))
+                        .disabled(!appState.hasElevenLabsAPIKey() && elevenLabsAPIKeyDraft.isEmpty)
+                    }
+                }
+            }
         }
         .onAppear {
             syncSelectionFromPreferences()
             appState.refreshProviderConnectionStatuses()
-            appState.refreshAIModelCatalog()
         }
-        .onChange(of: expandedProvider) {
-            guard let expandedProvider else { return }
-            let descriptor = ProviderRegistry.descriptor(for: expandedProvider)
-            selectedAuthKind = descriptor.authKind(for: appState.preferences.aiConfig.provider == expandedProvider ? appState.preferences.aiConfig.authMode : descriptor.defaultAuthMode)
+        .onChange(of: appState.preferences.aiConfig.provider) {
+            syncSelectionFromPreferences()
         }
-        .onChange(of: appState.openAIConnectionStatus) {
-            collapseAccountLoginProviderIfConnected(.openAI)
+    }
+
+    private var providerSelection: Binding<AIProviderKind> {
+        Binding(
+            get: { appState.preferences.aiConfig.provider },
+            set: { provider in
+                let descriptor = ProviderRegistry.descriptor(for: provider)
+                appState.preferences.aiConfig.provider = descriptor.kind
+                appState.preferences.aiConfig.authMode = descriptor.defaultAuthMode
+                selectedAuthKind = descriptor.authKind(for: descriptor.defaultAuthMode)
+                if descriptor.kind == .appleLocal {
+                    appState.preferences.localOnlyMode = true
+                    appState.preferences.aiConfig.cloudProcessingEnabled = false
+                    appState.preferences.aiConfig.webSearchEnabled = false
+                }
+                appState.savePreferences()
+            }
+        )
+    }
+
+    private var realtimeTranscriptionProviderSelection: Binding<RealtimeTranscriptionProvider> {
+        Binding(
+            get: { appState.preferences.aiConfig.realtimeTranscriptionProvider ?? .elevenLabs },
+            set: { provider in
+                appState.preferences.aiConfig.realtimeTranscriptionProvider = provider
+                if provider == .elevenLabs {
+                    appState.preferences.aiConfig.realtimeTranscriptionModel = ElevenLabsRealtimeTranscriptionService.modelID
+                }
+                appState.savePreferences()
+            }
+        )
+    }
+
+    private var authMethodRow: some View {
+        aiValueRow("Authentication") {
+            if activeProvider.supportedAuthKinds.count > 1 {
+                Picker("", selection: authKindSelection) {
+                    ForEach(activeProvider.supportedAuthKinds) { authKind in
+                        Text(authKind.title).tag(authKind)
+                    }
+                }
+                .labelsHidden()
+                .pickerStyle(.segmented)
+                .frame(width: 280)
+            } else {
+                Text(activeProvider.supportedAuthKinds.first?.title ?? "Default")
+                    .aiSecondaryText()
+            }
         }
-        .onChange(of: appState.providerConnectionStatuses) {
-            for provider in ProviderRegistry.visibleProviders.map(\.kind) {
-                collapseAccountLoginProviderIfConnected(provider)
+    }
+
+    private var authKindSelection: Binding<AIProviderAuthKind> {
+        Binding(
+            get: { selectedAuthKind },
+            set: { authKind in
+                selectedAuthKind = authKind
+                if let mode = activeProvider.authMode(for: authKind) {
+                    appState.preferences.aiConfig.authMode = mode
+                    appState.savePreferences()
+                }
+            }
+        )
+    }
+
+    private var providerStatusRow: some View {
+        aiValueRow("Status") {
+            HStack(spacing: 8) {
+                statusChip(appState.providerConnectionStatus(for: activeProvider.kind).title, isPositive: providerIsConnected(activeProvider.kind))
+                Text(activeProvider.subtitle)
+                    .font(.system(size: 11.5, weight: .medium))
+                    .foregroundStyle(MinimalTheme.tertiary)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
             }
         }
     }
 
     @ViewBuilder
-    private func expandedProviderControls(_ provider: AIProviderDescriptor) -> some View {
-        VStack(spacing: 0) {
-            if provider.supportedAuthKinds.count > 1 {
-                authMethodRow(provider)
-                MinimalDivider()
-            }
-
-            switch selectedAuthKind {
-            case .accountLogin:
-                accountLoginControls(for: provider)
-            case .apiKey:
-                apiKeyControls(for: provider)
-            case .local:
-                localControls(for: provider)
-            }
-
-            if !appState.settingsStatus.isEmpty {
-                MinimalDivider()
-                noticeRow(appState.settingsStatus)
-            }
+    private var providerControls: some View {
+        switch selectedAuthKind {
+        case .accountLogin:
+            accountControls
+        case .apiKey:
+            apiKeyControls
+        case .local:
+            localControls
         }
     }
 
-    private func authMethodRow(_ provider: AIProviderDescriptor) -> some View {
-        baseRow("Method", systemName: "person.badge.key") {
-            Picker("", selection: $selectedAuthKind) {
-                ForEach(provider.supportedAuthKinds) { authKind in
-                    Text(authKind.title).tag(authKind)
-                }
-            }
-            .labelsHidden()
-            .pickerStyle(.segmented)
-            .frame(minWidth: 220, maxWidth: 300)
-        }
-    }
-
-    private func accountLoginControls(for provider: AIProviderDescriptor) -> some View {
+    private var accountControls: some View {
         VStack(spacing: 0) {
-            if let message = provider.accountLoginUnsupportedMessage {
-                noticeRow(message)
-            } else {
-                actionRow("Account", systemName: "link") {
-                    Button(loginInProgress(for: provider.kind) ? "Opening" : "Connect") {
-                        appState.connectProviderAccount(provider.kind)
+            aiValueRow("Account") {
+                HStack(spacing: 8) {
+                    Button(loginInProgress(activeProvider.kind) ? "Opening" : "Connect") {
+                        appState.connectProviderAccount(activeProvider.kind)
                     }
-                    .buttonStyle(MinimalButtonStyle())
-                    .disabled(loginInProgress(for: provider.kind))
+                    .buttonStyle(AIPillButtonStyle())
+                    .disabled(loginInProgress(activeProvider.kind))
 
                     Button("Disconnect") {
-                        appState.disconnectProvider(provider.kind)
+                        appState.disconnectProvider(activeProvider.kind)
                     }
-                    .buttonStyle(MinimalButtonStyle(isDestructive: true))
-                    .disabled(!canDisconnect(provider.kind))
-                }
-
-                if provider.kind == .openAI, let session = appState.openAICodexLoginSession {
-                    MinimalDivider()
-                    codexLoginRows(session)
-                } else if let session = appState.providerLoginSessions[provider.kind] {
-                    MinimalDivider()
-                    providerLoginRows(session)
-                } else {
-                    MinimalDivider()
-                    noticeRow(accountLoginCopy(for: provider.kind))
+                    .buttonStyle(AIPillButtonStyle(isDestructive: true))
+                    .disabled(!canDisconnect(activeProvider.kind))
                 }
             }
-        }
-    }
 
-    private func apiKeyControls(for provider: AIProviderDescriptor) -> some View {
-        return AnyView(providerAPIKeyControls(for: provider, title: "API Key"))
-    }
-
-    private func providerAPIKeyControls(for provider: AIProviderDescriptor, title: String) -> some View {
-        VStack(spacing: 0) {
-            secureRow(title, systemName: "key", text: Binding(
-                get: { apiKeyDrafts[provider.kind, default: ""] },
-                set: { apiKeyDrafts[provider.kind] = $0 }
-            ))
-            MinimalDivider()
-            actionRow("Keychain", systemName: appState.hasProviderAPIKey(provider.kind) ? "checkmark.shield" : "lock.shield") {
-                Text(appState.hasProviderAPIKey(provider.kind) ? "Saved" : "No key")
-                    .font(.system(size: 12, weight: .medium))
-                    .foregroundStyle(MinimalTheme.secondary)
-                    .lineLimit(1)
-
-                Button("Save & Test") {
-                    appState.saveProviderAPIKey(provider.kind, value: apiKeyDrafts[provider.kind, default: ""])
-                }
-                .buttonStyle(MinimalButtonStyle())
-                .disabled(apiKeyDrafts[provider.kind, default: ""].trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-
-                Button("Use") {
-                    appState.useProviderAPIKeyMode(provider.kind)
-                }
-                .buttonStyle(MinimalButtonStyle())
-                .disabled(!appState.hasProviderAPIKey(provider.kind))
-
-                Button("Clear") {
-                    apiKeyDrafts[provider.kind] = ""
-                    appState.saveProviderAPIKey(provider.kind, value: "")
-                }
-                .buttonStyle(MinimalButtonStyle(isDestructive: true))
-                .disabled(!appState.hasProviderAPIKey(provider.kind) && apiKeyDrafts[provider.kind, default: ""].isEmpty)
-            }
-        }
-    }
-
-    private func localControls(for provider: AIProviderDescriptor) -> some View {
-        actionRow("Local", systemName: "lock.shield") {
-            Text("On device")
-                .font(.system(size: 12, weight: .medium))
-                .foregroundStyle(MinimalTheme.secondary)
-                .lineLimit(1)
-
-            Button("Use") {
-                appState.useProviderLocalMode(provider.kind)
-            }
-            .buttonStyle(MinimalButtonStyle())
-        }
-    }
-
-    private var modelsSection: some View {
-        MinimalSection(title: "Models") {
-            statusLabelRow(
-                "Active Provider",
-                systemName: "switch.2",
-                value: ProviderRegistry.descriptor(for: appState.preferences.aiConfig.provider).title
-            )
-            MinimalDivider()
-            actionRow("Catalog", systemName: "list.bullet.rectangle") {
-                Text(appState.aiModelCatalog.source)
-                    .font(.system(size: 12, weight: .medium))
-                    .foregroundStyle(MinimalTheme.secondary)
-                    .lineLimit(1)
-                Button(appState.isRefreshingAIModelCatalog ? "Refreshing" : "Refresh") {
-                    appState.refreshAIModelCatalog()
-                }
-                .buttonStyle(MinimalButtonStyle())
-                .disabled(appState.isRefreshingAIModelCatalog)
-            }
-            MinimalDivider()
-            modelPickerRow(
-                "Chat",
-                systemName: "text.bubble",
-                selection: $appState.preferences.aiConfig.model,
-                options: appState.aiModelCatalog.chatModels
-            )
-            MinimalDivider()
-            optionalModelPickerRow(
-                "Translation",
-                systemName: "translate",
-                selection: $appState.preferences.aiConfig.translationModel,
-                options: appState.aiModelCatalog.translationModels
-            )
-            MinimalDivider()
-            optionalModelPickerRow(
-                "Realtime",
-                systemName: "dot.radiowaves.left.and.right",
-                selection: $appState.preferences.aiConfig.realtimeModel,
-                options: appState.aiModelCatalog.realtimeModels
-            )
-            MinimalDivider()
-            optionalModelPickerRow(
-                "Embeddings",
-                systemName: "point.3.connected.trianglepath.dotted",
-                selection: $appState.preferences.aiConfig.embeddingModel,
-                options: appState.aiModelCatalog.embeddingModels
-            )
-            if !appState.aiModelCatalogStatus.isEmpty {
-                MinimalDivider()
-                noticeRow(appState.aiModelCatalogStatus)
-            }
-        }
-    }
-
-    private var realtimeTranscriptionSection: some View {
-        MinimalSection(title: "Realtime Transcription") {
-            realtimeTranscriptionProviderRow
-            MinimalDivider()
-            optionalModelPickerRow(
-                "Model",
-                systemName: "waveform.badge.magnifyingglass",
-                selection: $appState.preferences.aiConfig.realtimeTranscriptionModel,
-                options: appState.realtimeTranscriptionModelOptions
-            )
-            MinimalDivider()
-            secureRow("ElevenLabs Key", systemName: "key", text: $elevenLabsAPIKeyDraft)
-            MinimalDivider()
-            actionRow("Keychain", systemName: appState.hasElevenLabsAPIKey() ? "checkmark.shield" : "lock.shield") {
-                Text(appState.elevenLabsConnectionStatus.title)
-                    .font(.system(size: 12, weight: .medium))
-                    .foregroundStyle(MinimalTheme.secondary)
-                    .lineLimit(1)
-
-                Button("Save & Test") {
-                    appState.saveElevenLabsAPIKey(elevenLabsAPIKeyDraft)
-                }
-                .buttonStyle(MinimalButtonStyle())
-                .disabled(elevenLabsAPIKeyDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-
-                Button("Use") {
-                    appState.useElevenLabsRealtimeTranscription()
-                }
-                .buttonStyle(MinimalButtonStyle())
-                .disabled(!appState.hasElevenLabsAPIKey())
-
-                Button("Clear") {
-                    elevenLabsAPIKeyDraft = ""
-                    appState.saveElevenLabsAPIKey("")
-                }
-                .buttonStyle(MinimalButtonStyle(isDestructive: true))
-                .disabled(!appState.hasElevenLabsAPIKey() && elevenLabsAPIKeyDraft.isEmpty)
-            }
-            MinimalDivider()
-            noticeRow("Zero retention is enforced for ElevenLabs realtime requests. Accounts that cannot use zero retention will fail verification.")
-        }
-    }
-
-    private var realtimeTranscriptionProviderRow: some View {
-        baseRow("Provider", systemName: "dot.radiowaves.left.and.right") {
-            Picker("", selection: Binding(
-                get: { appState.preferences.aiConfig.realtimeTranscriptionProvider ?? .elevenLabs },
-                set: { provider in
-                    appState.preferences.aiConfig.realtimeTranscriptionProvider = provider
-                    if provider == .elevenLabs {
-                        appState.preferences.aiConfig.realtimeTranscriptionModel = ElevenLabsRealtimeTranscriptionService.modelID
-                    }
-                    appState.savePreferences()
-                }
-            )) {
-                ForEach(RealtimeTranscriptionProvider.allCases) { provider in
-                    Text(provider.displayName).tag(provider)
-                }
-            }
-            .labelsHidden()
-            .pickerStyle(.menu)
-            .frame(minWidth: 180, maxWidth: 300)
-        }
-    }
-
-    private var processingSection: some View {
-        MinimalSection(title: "Processing") {
-            toggleRow("Cloud processing", systemName: "icloud", isOn: $appState.preferences.aiConfig.cloudProcessingEnabled)
-                .onChange(of: appState.preferences.aiConfig.cloudProcessingEnabled) {
-                    if appState.preferences.aiConfig.cloudProcessingEnabled {
-                        appState.preferences.localOnlyMode = false
-                    }
-                    appState.savePreferences()
-                }
-            MinimalDivider()
-            transcriptionEngineModeRow
-            MinimalDivider()
-            toggleRow("Realtime suggestions", systemName: "bolt", isOn: $appState.preferences.realtimeSuggestionsEnabled)
-            MinimalDivider()
-            toggleRow("Web search", systemName: "magnifyingglass", isOn: $appState.preferences.aiConfig.webSearchEnabled)
-            MinimalDivider()
-            toggleRow("RAG", systemName: "books.vertical", isOn: $appState.preferences.aiConfig.ragEnabled)
-            MinimalDivider()
-            technicalRows
-        }
-    }
-
-    private var transcriptionEngineModeRow: some View {
-        baseRow("Transcription", systemName: "captions.bubble") {
-            Picker("", selection: Binding(
-                get: { appState.preferences.transcriptionEngineMode },
-                set: { mode in
-                    appState.preferences.transcriptionEngineMode = appState.preferences.localOnlyMode ? .appleSpeech : mode
-                    appState.savePreferences()
-                }
-            )) {
-                ForEach(TranscriptionEngineMode.allCases) { mode in
-                    Text(mode.displayName).tag(mode)
-                }
-            }
-            .labelsHidden()
-            .pickerStyle(.segmented)
-            .frame(minWidth: 220, maxWidth: 300)
-            .disabled(appState.preferences.localOnlyMode)
-        }
-    }
-
-    private func providerItem(_ provider: AIProviderDescriptor) -> some View {
-        VStack(spacing: 0) {
-            providerHeader(provider)
-            if provider.kind == expandedProvider {
-                MinimalDivider()
-                expandedProviderControls(provider)
-            }
-        }
-    }
-
-    private func providerHeader(_ provider: AIProviderDescriptor) -> some View {
-        Button {
-            expandedProvider = expandedProvider == provider.kind ? nil : provider.kind
-        } label: {
-            HStack(spacing: 11) {
-                providerLogo(provider)
-                    .frame(width: 22, height: 22)
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(provider.title)
-                        .font(.system(size: 13, weight: .semibold))
-                        .foregroundStyle(MinimalTheme.primary)
-                    Text(provider.subtitle)
-                        .font(.system(size: 11, weight: .medium))
-                        .foregroundStyle(MinimalTheme.secondary)
-                        .lineLimit(1)
-                }
-                Spacer(minLength: 12)
-                providerStatusView(provider)
-                Image(systemName: provider.kind == expandedProvider ? "chevron.down" : "chevron.right")
-                    .font(.system(size: 12, weight: .semibold))
-                    .foregroundStyle(MinimalTheme.secondary)
-            }
-            .padding(.horizontal, 12)
-            .frame(minHeight: 52)
-            .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-    }
-
-    private func providerStatusView(_ provider: AIProviderDescriptor) -> some View {
-        let status = appState.providerConnectionStatus(for: provider.kind)
-        return HStack(spacing: 5) {
-            Image(systemName: statusIcon(for: provider.kind))
-                .font(.system(size: 10, weight: .semibold))
-            Text(status.title)
-                .font(.system(size: 11, weight: .semibold))
-                .lineLimit(1)
-                .truncationMode(.middle)
-        }
-        .foregroundStyle(statusColor(status, isExpanded: provider.kind == expandedProvider))
-        .frame(maxWidth: 220, alignment: .trailing)
-    }
-
-    @ViewBuilder
-    private func providerLogo(_ provider: AIProviderDescriptor) -> some View {
-        if provider.kind == .appleLocal || provider.kind == .appleFoundationModels {
-            Image(systemName: "apple.logo")
-                .font(.system(size: 18, weight: .medium))
-                .foregroundStyle(MinimalTheme.primary)
-        } else if let logoAssetName = provider.logoAssetName {
-            Image(logoAssetName)
-                .resizable()
-                .scaledToFit()
-        } else {
-            Text(String(provider.title.prefix(1)))
-                .font(.system(size: 13, weight: .semibold))
-                .foregroundStyle(MinimalTheme.primary)
-        }
-    }
-
-    private var technicalRows: some View {
-        let report = appState.capabilityReport
-        return VStack(spacing: 0) {
-            engineRow("Transcription", engine: report?.transcriptionEngine ?? .unavailable, mode: report?.transcriptionMode ?? .unavailable)
-            MinimalDivider()
-            engineRow("Translation", engine: report?.translationEngine ?? .appleTranslation, mode: report?.translationMode ?? .local)
-            MinimalDivider()
-            engineRow("Summary", engine: report?.summaryEngine ?? .unavailable, mode: report?.summaryMode ?? .unavailable)
-            MinimalDivider()
-            engineRow("Language", engine: report?.languageDetectionEngine ?? .appleNaturalLanguage, mode: .local)
-            MinimalDivider()
-            engineRow("Audio", engine: report?.audioCaptureEngine ?? .avFoundationScreenCaptureKit, mode: .local)
-        }
-    }
-
-    private func codexLoginRows(_ session: CodexCLILoginSessionState) -> some View {
-        VStack(spacing: 0) {
-            if let url = session.authURL {
-                approvalPageRow(url: url) { appState.openOpenAICodexApprovalPage() }
-                MinimalDivider()
-            }
-            if let userCode = session.userCode {
-                deviceCodeRow(userCode)
-                MinimalDivider()
-            }
-            actionRow("Approval", systemName: appState.isVerifyingOpenAICodexLogin ? "checkmark.circle" : "hourglass") {
-                Text(appState.isVerifyingOpenAICodexLogin ? "Verifying" : "Waiting")
-                    .font(.system(size: 12, weight: .medium))
-                    .foregroundStyle(MinimalTheme.secondary)
-                    .lineLimit(1)
-                Button("Cancel") { appState.cancelOpenAICodexLogin() }
-                    .buttonStyle(MinimalButtonStyle(isDestructive: true))
-            }
-            if !session.outputPreview.isEmpty {
-                MinimalDivider()
-                noticeRow(session.outputPreview)
-            }
-        }
-    }
-
-    private func providerLoginRows(_ session: ProviderCLILoginSessionState) -> some View {
-        VStack(spacing: 0) {
-            if let url = session.authURL {
-                approvalPageRow(url: url) { appState.openProviderApprovalPage(session.provider) }
-                MinimalDivider()
-            }
-            if let userCode = session.userCode {
-                deviceCodeRow(userCode)
-                MinimalDivider()
-            }
-            if session.provider == .anthropicClaude {
-                secureRow("Auth Code", systemName: "number", text: Binding(
-                    get: { accountCodeDrafts[session.provider, default: ""] },
-                    set: { accountCodeDrafts[session.provider] = $0 }
-                ))
-                MinimalDivider()
-                actionRow("Submit", systemName: "arrow.right.circle") {
-                    Button("Submit") {
+            if activeProvider.kind == .openAI, let session = appState.openAICodexLoginSession {
+                AIDivider()
+                loginSessionRows(
+                    authURL: session.authURL,
+                    userCode: session.userCode,
+                    isVerifying: appState.isVerifyingOpenAICodexLogin,
+                    outputPreview: session.outputPreview,
+                    open: { appState.openOpenAICodexApprovalPage() },
+                    submitCode: nil,
+                    cancel: { appState.cancelOpenAICodexLogin() }
+                )
+            } else if let session = appState.providerLoginSessions[activeProvider.kind] {
+                AIDivider()
+                loginSessionRows(
+                    authURL: session.authURL,
+                    userCode: session.userCode,
+                    isVerifying: appState.verifyingProviderLogins.contains(session.provider),
+                    outputPreview: session.outputPreview,
+                    open: { appState.openProviderApprovalPage(session.provider) },
+                    submitCode: session.provider == .anthropicClaude ? {
                         appState.submitProviderAccountCode(session.provider, code: accountCodeDrafts[session.provider, default: ""])
+                    } : nil,
+                    cancel: { appState.cancelProviderAccountLogin(session.provider) }
+                )
+            }
+        }
+    }
+
+    private var apiKeyControls: some View {
+        VStack(spacing: 0) {
+            secureRow("API key", text: Binding(
+                get: { apiKeyDrafts[activeProvider.kind, default: ""] },
+                set: { apiKeyDrafts[activeProvider.kind] = $0 }
+            ))
+            AIDivider()
+            aiValueRow("Keychain") {
+                HStack(spacing: 8) {
+                    statusChip(appState.hasProviderAPIKey(activeProvider.kind) ? "Saved" : "No key", isPositive: appState.hasProviderAPIKey(activeProvider.kind))
+                    Button("Save & Test") {
+                        appState.saveProviderAPIKey(activeProvider.kind, value: apiKeyDrafts[activeProvider.kind, default: ""])
                     }
-                    .buttonStyle(MinimalButtonStyle())
+                    .buttonStyle(AIPillButtonStyle())
+                    .disabled(apiKeyDrafts[activeProvider.kind, default: ""].trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+
+                    Button("Use") {
+                        appState.useProviderAPIKeyMode(activeProvider.kind)
+                    }
+                    .buttonStyle(AIPillButtonStyle())
+                    .disabled(!appState.hasProviderAPIKey(activeProvider.kind))
+
+                    Button("Clear") {
+                        apiKeyDrafts[activeProvider.kind] = ""
+                        appState.saveProviderAPIKey(activeProvider.kind, value: "")
+                    }
+                    .buttonStyle(AIPillButtonStyle(isDestructive: true))
+                    .disabled(!appState.hasProviderAPIKey(activeProvider.kind) && apiKeyDrafts[activeProvider.kind, default: ""].isEmpty)
                 }
-                MinimalDivider()
-            }
-            actionRow("Approval", systemName: appState.verifyingProviderLogins.contains(session.provider) ? "checkmark.circle" : "hourglass") {
-                Text(appState.verifyingProviderLogins.contains(session.provider) ? "Verifying" : "Waiting")
-                    .font(.system(size: 12, weight: .medium))
-                    .foregroundStyle(MinimalTheme.secondary)
-                    .lineLimit(1)
-                Button("Cancel") { appState.cancelProviderAccountLogin(session.provider) }
-                    .buttonStyle(MinimalButtonStyle(isDestructive: true))
-            }
-            if !session.outputPreview.isEmpty {
-                MinimalDivider()
-                noticeRow(session.outputPreview)
             }
         }
     }
 
-    private func approvalPageRow(url: URL, open: @escaping () -> Void) -> some View {
-        actionRow("Browser", systemName: "safari") {
-            Text(url.host ?? url.absoluteString)
-                .font(.system(size: 12, weight: .medium))
-                .foregroundStyle(MinimalTheme.secondary)
-                .lineLimit(1)
-            Button("Open", action: open)
-                .buttonStyle(MinimalButtonStyle())
+    private var localControls: some View {
+        aiValueRow("Local") {
+            HStack(spacing: 8) {
+                statusChip("On device", isPositive: true)
+                Button("Use") {
+                    appState.useProviderLocalMode(activeProvider.kind)
+                }
+                .buttonStyle(AIPillButtonStyle())
+            }
         }
     }
 
-    private func deviceCodeRow(_ userCode: String) -> some View {
-        baseRow("Code", systemName: "number") {
-            Text(userCode)
-                .font(.system(size: 13, weight: .semibold, design: .monospaced))
-                .foregroundStyle(MinimalTheme.primary)
-                .textSelection(.enabled)
-            Button("Copy") { copyToClipboard(userCode) }
-                .buttonStyle(MinimalButtonStyle())
+    private func loginSessionRows(
+        authURL: URL?,
+        userCode: String?,
+        isVerifying: Bool,
+        outputPreview: String,
+        open: @escaping () -> Void,
+        submitCode: (() -> Void)?,
+        cancel: @escaping () -> Void
+    ) -> some View {
+        VStack(spacing: 0) {
+            if let authURL {
+                aiValueRow("Browser") {
+                    HStack(spacing: 8) {
+                        Text(authURL.host ?? authURL.absoluteString)
+                            .aiSecondaryText()
+                            .lineLimit(1)
+                        Button("Open", action: open)
+                            .buttonStyle(AIPillButtonStyle())
+                    }
+                }
+            }
+            if let userCode {
+                AIDivider()
+                aiValueRow("Code") {
+                    HStack(spacing: 8) {
+                        Text(userCode)
+                            .font(.system(size: 13, weight: .semibold, design: .monospaced))
+                            .foregroundStyle(MinimalTheme.primary)
+                            .textSelection(.enabled)
+                        Button("Copy") { copyToClipboard(userCode) }
+                            .buttonStyle(AIPillButtonStyle())
+                    }
+                }
+            }
+            if let submitCode {
+                AIDivider()
+                secureRow("Auth code", text: Binding(
+                    get: { accountCodeDrafts[activeProvider.kind, default: ""] },
+                    set: { accountCodeDrafts[activeProvider.kind] = $0 }
+                ))
+                AIDivider()
+                aiValueRow("Submit") {
+                    Button("Submit", action: submitCode)
+                        .buttonStyle(AIPillButtonStyle())
+                }
+            }
+            AIDivider()
+            aiValueRow("Approval") {
+                HStack(spacing: 8) {
+                    statusChip(isVerifying ? "Verifying" : "Waiting", isPositive: isVerifying)
+                    Button("Cancel", action: cancel)
+                        .buttonStyle(AIPillButtonStyle(isDestructive: true))
+                }
+            }
+            if !outputPreview.isEmpty {
+                AIDivider()
+                noticeRow(outputPreview)
+            }
         }
     }
 
     private func syncSelectionFromPreferences() {
-        let provider = appState.preferences.aiConfig.provider == .appleFoundationModels ? AIProviderKind.appleLocal : appState.preferences.aiConfig.provider
-        let descriptor = ProviderRegistry.descriptor(for: provider)
+        let descriptor = ProviderRegistry.descriptor(for: appState.preferences.aiConfig.provider)
         selectedAuthKind = descriptor.authKind(for: appState.preferences.aiConfig.authMode)
-        expandedProvider = provider
-        collapseAccountLoginProviderIfConnected(provider)
     }
 
-    private func collapseAccountLoginProviderIfConnected(_ provider: AIProviderKind) {
-        guard expandedProvider == provider else { return }
-        let descriptor = ProviderRegistry.descriptor(for: provider)
-        guard descriptor.authKind(for: appState.preferences.aiConfig.authMode) == .accountLogin,
-              appState.preferences.aiConfig.provider == descriptor.kind,
-              providerConnectionIsConnected(provider) else { return }
-        expandedProvider = nil
-    }
-
-    private func providerConnectionIsConnected(_ provider: AIProviderKind) -> Bool {
+    private func providerIsConnected(_ provider: AIProviderKind) -> Bool {
         if case .connected = appState.providerConnectionStatus(for: provider) {
             return true
         }
         return false
     }
 
-    private func statusColor(_ status: AIConnectionStatus, isExpanded: Bool) -> Color {
-        if case .connected = status {
-            return MinimalTheme.success
+    private var elevenLabsIsConnected: Bool {
+        if case .connected = appState.elevenLabsConnectionStatus {
+            return true
         }
-        return isExpanded ? MinimalTheme.primary : MinimalTheme.secondary
+        return false
     }
 
-    private func statusIcon(for provider: AIProviderKind) -> String {
-        switch appState.providerConnectionStatus(for: provider) {
-        case .connected:
-            "checkmark.circle"
-        case .tokenExpired:
-            "clock.badge.exclamationmark"
-        case .unsupportedOAuthFlow:
-            "exclamationmark.octagon"
-        case .localOnlyMode:
-            "lock.shield"
-        case .notConnected:
-            "circle"
-        }
-    }
-
-    private func loginInProgress(for provider: AIProviderKind) -> Bool {
+    private func loginInProgress(_ provider: AIProviderKind) -> Bool {
         if provider == .openAI {
             return appState.openAICodexLoginSession != nil || appState.isVerifyingOpenAICodexLogin
         }
@@ -553,7 +365,7 @@ struct AIConnectionSettingsView: View {
     }
 
     private func canDisconnect(_ provider: AIProviderKind) -> Bool {
-        if loginInProgress(for: provider) { return false }
+        if loginInProgress(provider) { return false }
         switch appState.providerConnectionStatus(for: provider) {
         case .connected, .tokenExpired, .localOnlyMode:
             return true
@@ -562,170 +374,142 @@ struct AIConnectionSettingsView: View {
         }
     }
 
-    private func accountLoginCopy(for provider: AIProviderKind) -> String {
-        switch provider {
-        case .openAI:
-            "Official OAuth or Codex CLI. Tokens stay with OpenAI/Codex."
-        case .googleGemini:
-            "Official Gemini CLI login. Tokens stay with the CLI."
-        case .anthropicClaude:
-            "Official Claude Code login. Paste a code here only if Claude asks."
-        default:
-            "Account login appears only when an official provider flow is available."
+    private func secureRow(_ title: String, text: Binding<String>) -> some View {
+        aiValueRow(title) {
+            SecureField("", text: text)
+                .textFieldStyle(.plain)
+                .font(.system(size: 12.5, weight: .medium))
+                .foregroundStyle(MinimalTheme.primary)
+                .multilineTextAlignment(.trailing)
+                .frame(width: 282)
         }
+    }
+
+    private func aiToggleRow(_ title: String, isOn: Binding<Bool>) -> some View {
+        aiValueRow(title) {
+            Toggle("", isOn: isOn)
+                .labelsHidden()
+                .toggleStyle(.switch)
+                .tint(MinimalTheme.notchAccent.opacity(0.82))
+                .scaleEffect(0.82)
+        }
+    }
+
+    private func aiPickerRow<Selection: Hashable, Content: View>(
+        _ title: String,
+        selection: Binding<Selection>,
+        @ViewBuilder content: () -> Content
+    ) -> some View {
+        aiValueRow(title) {
+            Picker("", selection: selection, content: content)
+                .labelsHidden()
+                .pickerStyle(.menu)
+                .frame(width: 282)
+        }
+    }
+
+    private func aiValueRow<Accessory: View>(_ title: String, @ViewBuilder accessory: () -> Accessory) -> some View {
+        HStack(spacing: 16) {
+            Text(title)
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundStyle(MinimalTheme.secondary)
+                .lineLimit(1)
+                .minimumScaleFactor(0.88)
+                .frame(width: 174, alignment: .trailing)
+            accessory()
+                .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .frame(minHeight: 54)
+        .contentShape(Rectangle())
+    }
+
+    private func noticeRow(_ text: String) -> some View {
+        aiValueRow("Notice") {
+            Text(text)
+                .font(.system(size: 12, weight: .medium))
+                .foregroundStyle(MinimalTheme.secondary)
+                .lineLimit(3)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+
+    private func statusChip(_ text: String, isPositive: Bool) -> some View {
+        Text(text)
+            .font(.system(size: 11.5, weight: .semibold))
+            .foregroundStyle(isPositive ? MinimalTheme.primary : MinimalTheme.secondary)
+            .padding(.horizontal, 10)
+            .frame(height: 24)
+            .background(
+                Capsule()
+                    .fill(isPositive ? MinimalTheme.success.opacity(0.18) : MinimalTheme.settingsControl)
+            )
+            .overlay(
+                Capsule()
+                    .stroke(isPositive ? MinimalTheme.success.opacity(0.24) : MinimalTheme.divider, lineWidth: 0.7)
+            )
     }
 
     private func copyToClipboard(_ value: String) {
         NSPasteboard.general.clearContents()
         NSPasteboard.general.setString(value, forType: .string)
     }
+}
 
-    private func baseRow<Accessory: View>(_ title: String, systemName: String, @ViewBuilder accessory: () -> Accessory) -> some View {
-        HStack(spacing: 11) {
-            Image(systemName: systemName)
-                .font(.system(size: 12, weight: .medium))
-                .foregroundStyle(MinimalTheme.secondary)
-                .frame(width: 18)
+private struct AISection<Content: View>: View {
+    let title: String
+    @ViewBuilder let content: Content
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
             Text(title)
-                .font(.system(size: 13, weight: .medium))
-                .foregroundStyle(MinimalTheme.primary)
-            Spacer(minLength: 12)
-            accessory()
-        }
-        .padding(.horizontal, 12)
-        .frame(minHeight: 42)
-    }
-
-    private func statusRow(_ text: String, systemName: String) -> some View {
-        baseRow("Status", systemName: systemName) {
-            Text(text)
-                .font(.system(size: 12, weight: .medium))
-                .foregroundStyle(MinimalTheme.secondary)
-                .lineLimit(2)
-                .multilineTextAlignment(.trailing)
-        }
-    }
-
-    private func statusLabelRow(_ title: String, systemName: String, value: String) -> some View {
-        baseRow(title, systemName: systemName) {
-            Text(value)
-                .font(.system(size: 12, weight: .medium))
-                .foregroundStyle(MinimalTheme.secondary)
-                .lineLimit(2)
-                .multilineTextAlignment(.trailing)
-        }
-    }
-
-    private func noticeRow(_ text: String) -> some View {
-        HStack(alignment: .top, spacing: 11) {
-            Image(systemName: "info.circle")
-                .font(.system(size: 12, weight: .medium))
-                .foregroundStyle(MinimalTheme.secondary)
-                .frame(width: 18)
-            Text(text)
-                .font(.system(size: 12, weight: .medium))
-                .foregroundStyle(MinimalTheme.secondary)
-                .fixedSize(horizontal: false, vertical: true)
-            Spacer(minLength: 0)
-        }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 11)
-    }
-
-    private func toggleRow(_ title: String, systemName: String, isOn: Binding<Bool>) -> some View {
-        baseRow(title, systemName: systemName) {
-            Toggle("", isOn: isOn)
-                .labelsHidden()
-                .toggleStyle(.switch)
-                .tint(.gray)
-                .scaleEffect(0.82)
-        }
-    }
-
-    private func modelPickerRow(_ title: String, systemName: String, selection: Binding<String>, options: [AIModelOption]) -> some View {
-        baseRow(title, systemName: systemName) {
-            if options.isEmpty {
-                Text("Unavailable")
-                    .font(.system(size: 12, weight: .medium))
-                    .foregroundStyle(MinimalTheme.secondary)
-            } else {
-                Picker("", selection: selection) {
-                    ForEach(options) { option in
-                        Text(option.displayName).tag(option.id)
-                    }
-                }
-                .labelsHidden()
-                .pickerStyle(.menu)
-                .frame(minWidth: 180, maxWidth: 300)
-                .onChange(of: selection.wrappedValue) {
-                    appState.savePreferences()
-                }
-            }
-        }
-    }
-
-    private func optionalModelPickerRow(_ title: String, systemName: String, selection: Binding<String?>, options: [AIModelOption]) -> some View {
-        modelPickerRow(
-            title,
-            systemName: systemName,
-            selection: Binding<String>(
-                get: { selection.wrappedValue ?? "" },
-                set: { selection.wrappedValue = $0.isEmpty ? nil : $0 }
-            ),
-            options: options
-        )
-    }
-
-    private func secureRow(_ title: String, systemName: String, text: Binding<String>) -> some View {
-        baseRow(title, systemName: systemName) {
-            SecureField("", text: text)
-                .textFieldStyle(.plain)
-                .font(.system(size: 12, weight: .medium))
-                .foregroundStyle(MinimalTheme.primary)
-                .multilineTextAlignment(.trailing)
-                .frame(minWidth: 180, maxWidth: 300)
-        }
-    }
-
-    private func textRow(_ title: String, systemName: String, text: Binding<String>) -> some View {
-        baseRow(title, systemName: systemName) {
-            TextField("", text: text)
-                .textFieldStyle(.plain)
-                .font(.system(size: 12, weight: .medium))
-                .foregroundStyle(MinimalTheme.primary)
-                .multilineTextAlignment(.trailing)
-                .frame(minWidth: 180, maxWidth: 300)
-        }
-    }
-
-    private func actionRow<Actions: View>(_ title: String, systemName: String, @ViewBuilder actions: () -> Actions) -> some View {
-        baseRow(title, systemName: systemName) {
-            HStack(spacing: 8) {
-                actions()
-            }
-        }
-    }
-
-    private func engineRow(_ feature: String, engine: EngineName, mode: ProcessingMode) -> some View {
-        HStack(spacing: 11) {
-            Image(systemName: mode == .cloud ? "icloud" : "cpu")
-                .font(.system(size: 12, weight: .medium))
-                .foregroundStyle(MinimalTheme.secondary)
-                .frame(width: 18)
-            Text(feature)
-                .font(.system(size: 13, weight: .medium))
-                .foregroundStyle(MinimalTheme.primary)
-                .frame(width: 100, alignment: .leading)
-            Text(engine.rawValue)
-                .font(.system(size: 12, weight: .medium))
-                .foregroundStyle(MinimalTheme.secondary)
-                .lineLimit(1)
-            Spacer()
-            Text(mode.rawValue.capitalized)
                 .font(.system(size: 11, weight: .semibold))
                 .foregroundStyle(MinimalTheme.tertiary)
+                .textCase(.uppercase)
+                .frame(width: 174, alignment: .trailing)
+            VStack(spacing: 0) {
+                content
+            }
+            .overlay(alignment: .top) { AIDivider(fullWidth: true) }
+            .overlay(alignment: .bottom) { AIDivider(fullWidth: true) }
         }
-        .padding(.horizontal, 12)
-        .frame(minHeight: 40)
+    }
+}
+
+private struct AIDivider: View {
+    var fullWidth = false
+
+    var body: some View {
+        Rectangle()
+            .fill(MinimalTheme.divider)
+            .frame(height: 0.6)
+            .padding(.leading, fullWidth ? 0 : 190)
+    }
+}
+
+private struct AIPillButtonStyle: ButtonStyle {
+    var isDestructive = false
+
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .font(.system(size: 12, weight: .semibold))
+            .foregroundStyle(isDestructive ? MinimalTheme.notchAccent : MinimalTheme.primary)
+            .padding(.horizontal, 12)
+            .frame(height: 28)
+            .background(
+                Capsule()
+                    .fill(configuration.isPressed ? MinimalTheme.settingsControlPressed : MinimalTheme.settingsControl)
+            )
+            .overlay(
+                Capsule()
+                    .stroke(isDestructive ? MinimalTheme.notchAccent.opacity(0.28) : MinimalTheme.divider, lineWidth: 0.7)
+            )
+    }
+}
+
+private extension Text {
+    func aiSecondaryText() -> some View {
+        self
+            .font(.system(size: 12.5, weight: .semibold))
+            .foregroundStyle(MinimalTheme.secondary)
     }
 }

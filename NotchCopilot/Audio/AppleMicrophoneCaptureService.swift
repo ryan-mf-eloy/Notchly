@@ -1,12 +1,19 @@
 @preconcurrency import AVFoundation
+import AudioToolbox
+import CoreAudio
 import Foundation
+
+protocol MicrophoneCaptureServicing: AnyObject, Sendable {
+    func startCapture(inputDeviceUID: String?) async throws -> AsyncStream<AudioBuffer>
+    func stopCapture()
+}
 
 enum MicrophoneVoiceProcessingPolicy: String, Equatable, Sendable {
     case disabled
     case enabled
 }
 
-final class AppleMicrophoneCaptureService: @unchecked Sendable {
+final class AppleMicrophoneCaptureService: MicrophoneCaptureServicing, @unchecked Sendable {
     static let defaultVoiceProcessingPolicy: MicrophoneVoiceProcessingPolicy = .disabled
 
     private let engine = AVAudioEngine()
@@ -35,11 +42,14 @@ final class AppleMicrophoneCaptureService: @unchecked Sendable {
         }
     }
 
-    func startCapture() async throws -> AsyncStream<AudioBuffer> {
+    func startCapture(inputDeviceUID: String? = nil) async throws -> AsyncStream<AudioBuffer> {
         guard await requestPermission() else { throw AudioCaptureError.microphonePermissionDenied }
 
         stopCapture()
         let input = engine.inputNode
+        if let inputDeviceUID {
+            try configureInputDevice(uid: inputDeviceUID, on: input)
+        }
         configureVoiceProcessing(on: input)
         let format = input.outputFormat(forBus: 0)
 
@@ -65,6 +75,30 @@ final class AppleMicrophoneCaptureService: @unchecked Sendable {
         }
         disableVoiceProcessingIfNeeded(on: engine.inputNode)
         continuationBox.finish()
+    }
+
+    private func configureInputDevice(uid: String, on input: AVAudioInputNode) throws {
+        guard let deviceID = CoreAudioDeviceProvider.deviceID(forUID: uid, direction: .input) else {
+            throw AudioCaptureError.audioDeviceUnavailable("Selected microphone")
+        }
+
+        var mutableDeviceID = deviceID
+        guard let audioUnit = input.audioUnit else {
+            throw AudioCaptureError.audioDeviceUnavailable("Selected microphone")
+        }
+
+        let status = AudioUnitSetProperty(
+            audioUnit,
+            kAudioOutputUnitProperty_CurrentDevice,
+            kAudioUnitScope_Global,
+            0,
+            &mutableDeviceID,
+            UInt32(MemoryLayout<AudioDeviceID>.size)
+        )
+        guard status == noErr else {
+            AppLog.audio.error("Failed to select microphone device \(uid, privacy: .public): \(status, privacy: .public)")
+            throw AudioCaptureError.audioDeviceUnavailable("Selected microphone")
+        }
     }
 
     private func configureVoiceProcessing(on input: AVAudioInputNode) {

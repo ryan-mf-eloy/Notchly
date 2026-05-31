@@ -21,6 +21,9 @@ enum MinimalTheme {
     static let secondary = Color.white.opacity(0.56)
     static let tertiary = Color.white.opacity(0.34)
     static let success = Color(red: 0.32, green: 0.78, blue: 0.48)
+    static let notchAccent = Color(red: 1.0, green: 0.36, blue: 0.38)
+    static let settingsControl = Color.white.opacity(0.085)
+    static let settingsControlPressed = Color.white.opacity(0.14)
 
     static let historyChrome = Color(red: 0.055, green: 0.052, blue: 0.050)
     static let historyChromeRaised = Color(red: 0.092, green: 0.087, blue: 0.083)

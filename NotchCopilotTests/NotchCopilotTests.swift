@@ -38,6 +38,78 @@ final class NotchCopilotTests: XCTestCase {
         XCTAssertEqual(preferences.copilotActivationPolicy, .clearIntent)
     }
 
+    func testAppPreferencesDecodesMissingAudioDevicesAsSystemDefault() throws {
+        let preferences = try JSONDecoder().decode(AppPreferences.self, from: Data(#"{}"#.utf8))
+
+        XCTAssertNil(preferences.selectedInputDeviceUID)
+        XCTAssertNil(preferences.selectedOutputDeviceUID)
+    }
+
+    func testAppPreferencesNormalizesAudioDeviceUIDs() {
+        var blankPreferences = AppPreferences()
+        blankPreferences.selectedInputDeviceUID = "   "
+        blankPreferences.selectedOutputDeviceUID = "\n\t"
+
+        let blankNormalized = blankPreferences.normalizedForPersistence()
+
+        XCTAssertNil(blankNormalized.selectedInputDeviceUID)
+        XCTAssertNil(blankNormalized.selectedOutputDeviceUID)
+
+        var explicitPreferences = AppPreferences()
+        explicitPreferences.selectedInputDeviceUID = "  input-airpods  "
+        explicitPreferences.selectedOutputDeviceUID = "\noutput-studio-display\t"
+
+        let explicitNormalized = explicitPreferences.normalizedForPersistence()
+
+        XCTAssertEqual(explicitNormalized.selectedInputDeviceUID, "input-airpods")
+        XCTAssertEqual(explicitNormalized.selectedOutputDeviceUID, "output-studio-display")
+    }
+
+    func testAudioDeviceManagerReflectsDefaultChangesHotplugAndReconnection() async {
+        let builtInMic = AudioDevice(uid: "input-built-in", name: "MacBook Microphone", direction: .input, isDefault: true)
+        let airPodsMic = AudioDevice(uid: "input-airpods", name: "AirPods Pro", direction: .input, isDefault: false)
+        let speakers = AudioDevice(uid: "output-speakers", name: "MacBook Pro Speakers", direction: .output, isDefault: true)
+        let display = AudioDevice(uid: "output-display", name: "Studio Display", direction: .output, isDefault: false)
+        let provider = FakeAudioDeviceProvider(snapshot: AudioDeviceSnapshot(
+            inputDevices: [airPodsMic, builtInMic],
+            outputDevices: [display, speakers],
+            defaultInputDeviceUID: builtInMic.uid,
+            defaultOutputDeviceUID: speakers.uid
+        ))
+        let manager = AudioDeviceManager(provider: provider)
+
+        XCTAssertEqual(manager.deviceName(for: nil, direction: .input), "System Default (MacBook Microphone)")
+        XCTAssertEqual(manager.deviceName(for: nil, direction: .output), "System Default (MacBook Pro Speakers)")
+        XCTAssertTrue(manager.isAvailable(airPodsMic.uid, direction: .input))
+        XCTAssertEqual(manager.deviceName(for: display.uid, direction: .output), "Studio Display")
+
+        provider.update(to: AudioDeviceSnapshot(
+            inputDevices: [AudioDevice(uid: airPodsMic.uid, name: airPodsMic.name, direction: .input, isDefault: true)],
+            outputDevices: [speakers],
+            defaultInputDeviceUID: airPodsMic.uid,
+            defaultOutputDeviceUID: speakers.uid
+        ))
+        await Task.yield()
+
+        XCTAssertEqual(manager.deviceName(for: nil, direction: .input), "System Default (AirPods Pro)")
+        XCTAssertFalse(manager.isAvailable(builtInMic.uid, direction: .input))
+        XCTAssertEqual(manager.deviceName(for: builtInMic.uid, direction: .input), "Disconnected device")
+        XCTAssertFalse(manager.isAvailable(display.uid, direction: .output))
+
+        provider.update(to: AudioDeviceSnapshot(
+            inputDevices: [builtInMic, AudioDevice(uid: airPodsMic.uid, name: airPodsMic.name, direction: .input, isDefault: true)],
+            outputDevices: [display, speakers],
+            defaultInputDeviceUID: airPodsMic.uid,
+            defaultOutputDeviceUID: display.uid
+        ))
+        await Task.yield()
+
+        XCTAssertTrue(manager.isAvailable(builtInMic.uid, direction: .input))
+        XCTAssertTrue(manager.isAvailable(display.uid, direction: .output))
+        XCTAssertEqual(manager.deviceName(for: display.uid, direction: .output), "Studio Display")
+        XCTAssertEqual(manager.deviceName(for: nil, direction: .output), "System Default (Studio Display)")
+    }
+
     func testAppPreferencesNormalizationPreservesStealthMode() {
         var preferences = AppPreferences()
         preferences.stealthModeEnabled = true
