@@ -10,6 +10,53 @@
     "repair": 0.86,
     "language_fanout": 0.92
   },
+  "frameSelection": {
+    "sourceBiases": {
+      "best": 0.035,
+      "alternative": 0.015,
+      "repair": -0.025,
+      "language_fanout": 0.025
+    },
+    "finalUtteranceBonus": 0.14,
+    "partialPenalty": 0.12,
+    "accuratePartialPenalty": 0.24,
+    "veryShortCharacterThreshold": 10,
+    "veryShortPenalty": 0.16,
+    "shortCharacterThreshold": 18,
+    "shortPenalty": 0.06,
+    "lowConfidenceWordThreshold": 0.68,
+    "lowConfidenceWordPenalty": 0.045,
+    "lowConfidenceWordMaxPenalty": 0.20,
+    "lowLanguageConfidenceThreshold": 0.42,
+    "lowLanguageConfidencePenalty": 0.10,
+    "lowStabilityThreshold": 0.55,
+    "lowStabilityPenalty": 0.10,
+    "truncationPenalty": 0.07,
+    "dominantLanguageBonus": 0.025,
+    "contextTokenMinimumLength": 5,
+    "contextStopWords": [
+      "sobre", "qual", "quais", "como", "porque", "quando",
+      "where", "what", "which", "about"
+    ],
+    "contextOverlapPerMatchBonus": 0.012,
+    "contextOverlapMaxBonus": 0.05,
+    "trailingFragmentTerms": [
+      "de", "do", "da", "dos", "das", "para", "pra", "por", "com", "sobre",
+      "of", "for", "to", "with", "about", "the", "a", "an"
+    ],
+    "domainBoostTerms": [
+      "swiftui", "openai", "chatgpt", "api", "deploy", "deployment", "pr", "branch",
+      "bug", "latency", "roadmap", "notchly", "rag", "pull request", "screen capture kit"
+    ],
+    "domainBoostASRConfidenceBonus": 0.045,
+    "domainBoostLanguageConfidenceBonus": 0.035,
+    "partialStabilityBase": 0.42,
+    "partialStabilityWordLimit": 8,
+    "partialStabilityWordWeight": 0.055,
+    "partialStabilityRevisionWeight": 0.06,
+    "partialStabilityRevisionMaxBonus": 0.18,
+    "partialStabilityMax": 0.88
+  },
   "repairRules": [
     {
       "match": "cuanto is my days",

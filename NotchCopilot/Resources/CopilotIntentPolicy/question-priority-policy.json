@@ -1,0 +1,110 @@
+{
+  "priorityRules": [
+    {
+      "id": "directed_urgent_marker",
+      "priority": "urgent",
+      "markers": [
+        "blocked",
+        "blocker",
+        "bloqueado",
+        "production",
+        "producao",
+        "produção",
+        "security",
+        "seguranca",
+        "incident",
+        "cliente",
+        "customer"
+      ],
+      "requiresDirectedToUser": true
+    },
+    {
+      "id": "directed_high_priority_type",
+      "priority": "high",
+      "questionTypes": [
+        "deadline_or_estimate",
+        "technical_decision",
+        "risk_assessment",
+        "approval_request",
+        "action_request"
+      ],
+      "requiresDirectedToUser": true
+    },
+    {
+      "id": "high_priority_type",
+      "priority": "high",
+      "questionTypes": [
+        "deadline_or_estimate",
+        "technical_decision",
+        "risk_assessment",
+        "approval_request"
+      ]
+    },
+    {
+      "id": "directed_user_floor",
+      "priority": "high",
+      "requiresDirectedToUser": true
+    },
+    {
+      "id": "directed_group_floor",
+      "priority": "medium",
+      "requiresDirectedToGroup": true
+    },
+    {
+      "id": "actionable_floor",
+      "priority": "medium",
+      "requiresActionable": true
+    },
+    {
+      "id": "answerable_action_signal",
+      "priority": "medium",
+      "allSignals": ["action_request_frame"],
+      "anySignals": ["answerable_object_focus", "domain_object", "concrete_object"]
+    },
+    {
+      "id": "medium_priority_type",
+      "priority": "medium",
+      "questionTypes": [
+        "status_check",
+        "technical_explanation",
+        "clarification",
+        "general_question"
+      ]
+    }
+  ],
+  "urgentMarkers": [
+    "blocked",
+    "blocker",
+    "bloqueado",
+    "production",
+    "producao",
+    "produção",
+    "security",
+    "seguranca",
+    "incident",
+    "cliente",
+    "customer"
+  ],
+  "directedHighPriorityTypes": [
+    "deadline_or_estimate",
+    "technical_decision",
+    "risk_assessment",
+    "approval_request",
+    "action_request"
+  ],
+  "highPriorityTypes": [
+    "deadline_or_estimate",
+    "technical_decision",
+    "risk_assessment",
+    "approval_request"
+  ],
+  "mediumPriorityTypes": [
+    "status_check",
+    "technical_explanation",
+    "clarification",
+    "general_question"
+  ],
+  "directedToUserFloor": "high",
+  "directedToGroupFloor": "medium",
+  "actionableFloor": "medium"
+}

@@ -1,0 +1,312 @@
+{
+  "typeRules": [
+    {
+      "type": "status_check",
+      "markers": ["status", "estado", "situacao", "situación", "api pronta", "progress", "progreso", "terminou", "finished", "ready", "pronto", "done", "está listo", "esta listo", "進捗", "状況", "状態", "終わりました"]
+    },
+    {
+      "type": "risk_assessment",
+      "markers": ["risk", "risco", "blocker", "blockers", "bloqueio", "break", "quebra", "rompe", "impacta", "afeta", "security", "seguranca", "production", "producao", "migration", "migracao", "migracion", "リスク", "影響", "壊れ", "セキュリティ", "移行"]
+    },
+    {
+      "type": "technical_decision",
+      "markers": ["approach", "abordagem", "arquitetura", "architecture", "faz mais sentido", "which option", "decision", "decisao", "decisión", "scale", "scalable", "highly available", "alta disponibilidade", "altamente disponivel", "escalaria", "escalar", "system design", "lidar com", "como vamos lidar", "handle authentication", "how should we handle", "how do we handle", "アプローチ", "設計", "判断"]
+    },
+    {
+      "type": "technical_explanation",
+      "markers": ["explain", "explicar", "como funciona", "how does", "what is", "what's", "o que e", "o que sao", "que es", "cuales son", "hashid", "hash id", "python", "binary tree", "binary three", "binary dream", "arvore binaria", "invert a tree", "invert tree", "inverter uma arvore", "data structure", "algorithm", "algoritmo", "説明", "仕組み", "どう動く"]
+    },
+    {
+      "type": "deadline_or_estimate",
+      "markers": ["sexta", "friday", "deadline", "prazo", "entregar", "ship", "timeline", "estimate", "estimativa", "fecha", "plazo", "quando entregamos", "when can we ship", "いつ", "期限", "金曜", "金曜日"]
+    },
+    {
+      "type": "ownership",
+      "markers": ["quem vai", "quem fica", "responsavel", "responsável", "owner", "owns this", "who owns", "who will", "who is responsible", "quem cuida", "responsable", "quien se encarga", "quién se encarga", "誰が", "担当", "オーナー"]
+    },
+    {
+      "type": "product_scope",
+      "markers": ["scope", "escopo", "mvp", "roadmap", "alcance", "スコープ"]
+    },
+    {
+      "type": "business_context",
+      "markers": ["business", "cliente", "customer", "impacto", "impact", "negocio", "negócio", "revenue", "receita", "ventas", "顧客", "ビジネス"]
+    },
+    {
+      "type": "clarification",
+      "markers": ["clarify", "claro", "duvida", "doubt", "not clear", "nao ficou claro", "no queda claro", "no esta claro", "明確", "はっきり"]
+    },
+    {
+      "type": "approval_request",
+      "markers": ["approve", "approval", "aprovar", "aprovacao", "aprobacion", "sign off", "承認"]
+    },
+    {
+      "type": "action_request",
+      "markers": ["review", "validate", "revisar", "validar", "checar", "confirmar", "consegue", "can you", "could you", "please", "puedes", "podrias", "podrías", "レビュー", "確認して", "見てもらえ"]
+    },
+    {
+      "type": "action_request",
+      "anySignals": ["action_request_frame"]
+    },
+    {
+      "type": "opinion_request",
+      "markers": ["think", "acha", "opinion", "opiniao", "what do you think", "o que voces acham", "que opinan", "どう思"]
+    },
+    {
+      "type": "follow_up",
+      "markers": ["follow up", "next step", "proximo passo", "acompanhar", "siguiente paso", "次のステップ", "フォロー"]
+    }
+  ],
+  "selfSpeakerLabels": ["you", "voce", "você", "me", "microphone", "mic"],
+  "directedToUserMarkers": ["can you", "could you", "do you know if", "voce pode", "consegue", "você consegue", "me diz", "me fala", "puedes", "podrias", "sabes si", "確認して", "レビューして", "見てもらえ"],
+  "directedToGroupMarkers": ["anyone", "alguem", "do we", "can we", "should we", "we ", "temos", "podemos", "alguien", "nosotros", "any blockers", "hay algun", "hay alguna", "チーム", "みんな", "誰か"],
+  "intrinsicallyActionableTypes": [
+    "action_request",
+    "approval_request",
+    "deadline_or_estimate",
+    "ownership",
+    "technical_decision",
+    "risk_assessment",
+    "status_check"
+  ],
+  "responseJustifyingTypes": [
+    "status_check",
+    "technical_explanation",
+    "technical_decision",
+    "deadline_or_estimate",
+    "ownership",
+    "risk_assessment",
+    "product_scope",
+    "business_context",
+    "clarification",
+    "approval_request",
+    "action_request",
+    "opinion_request",
+    "follow_up"
+  ],
+  "responseJustifyingSignals": [
+    "indirect_question_frame",
+    "contextual_question_lead",
+    "adaptive_promotion"
+  ],
+  "responseJustifyingSignalGroups": [
+    ["semantic_question_shape", "answerable_object_focus"]
+  ],
+  "responseJustificationRules": [
+    {
+      "id": "actionable",
+      "requiresActionable": true
+    },
+    {
+      "id": "directed_to_user",
+      "requiresDirectedToUser": true
+    },
+    {
+      "id": "directed_to_group",
+      "requiresDirectedToGroup": true
+    },
+    {
+      "id": "informational",
+      "requiresInformational": true
+    },
+    {
+      "id": "response_type",
+      "questionTypes": [
+        "status_check",
+        "technical_explanation",
+        "technical_decision",
+        "deadline_or_estimate",
+        "ownership",
+        "risk_assessment",
+        "product_scope",
+        "business_context",
+        "clarification",
+        "approval_request",
+        "action_request",
+        "opinion_request",
+        "follow_up"
+      ]
+    },
+    {
+      "id": "response_signal",
+      "anySignals": [
+        "indirect_question_frame",
+        "adaptive_promotion"
+      ]
+    },
+    {
+      "id": "semantic_answerable_shape",
+      "allSignalGroups": [
+        ["semantic_question_shape", "answerable_object_focus"]
+      ]
+    },
+    {
+      "id": "multiqt_rescue",
+      "requiresMultiQTRescue": true
+    }
+  ],
+  "attentionRules": [
+    {
+      "id": "response_required_directed_to_user",
+      "requiresResponseNeeded": true,
+      "requiresDirectedToUser": true
+    },
+    {
+      "id": "response_required_priority",
+      "requiresResponseNeeded": true,
+      "priorities": ["urgent", "high"]
+    }
+  ],
+  "actionableMarkers": ["next", "proximo", "validate", "review", "confirm", "decide", "validar", "revisar", "confirmar", "me diz", "me fala", "確認", "レビュー", "決め"],
+  "informationalMarkers": ["what", "what is", "what's", "how", "why", "which", "do you know if", "any blockers", "qual", "quais", "quais sao", "quanto", "quanto e", "quantos", "quantas", "o que", "o que sao", "como", "por que", "sabe se", "sera que", "que es", "cual", "cuales", "cuales son", "cuanto", "cuanto es", "cuantos", "cuantas", "sabes si", "hay algun", "何", "どう", "なぜ", "capital", "hash", "python", "arvore", "tree", "system", "sistema", "scale", "escalar"],
+  "technicalObjectMarkers": ["api", "backend", "frontend", "auth", "authentication", "autenticacao", "login", "oauth", "jwt", "database", "cache", "queue", "python", "swift", "kotlin", "javascript", "typescript", "react", "node", "hash", "hashid", "code", "codigo", "código", "software", "programacao", "programming", "tree", "binary tree", "binary three", "binary dream", "algorithm", "algoritmo", "data structure", "service", "endpoint", "system", "sistema", "architecture", "arquitetura", "認証", "サービス"],
+  "technicalDecisionFrameMarkers": ["como vamos", "como devemos", "lidar com", "how should we", "how do we", "how would you", "scale this system", "escalaria"],
+  "technicalDecisionObjectMarkers": ["scale", "escalar", "escalaria", "disponivel", "available"],
+  "technicalExplanationFrameMarkers": ["what is", "what's", "how does", "how do", "which", "qual", "quais", "quais sao", "como", "o que e", "o que sao", "que es", "cual", "cuales", "cuales son", "どう", "説明"],
+  "technicalInferencePolicy": {
+    "appliesToAnyMeeting": true,
+    "appliesToMeetingTypes": [
+      "general",
+      "engineering",
+      "product",
+      "marketing",
+      "sales",
+      "interview",
+      "oneOnOne",
+      "incident",
+      "planning",
+      "retro",
+      "unknown"
+    ],
+    "decisionType": "technical_decision",
+    "explanationType": "technical_explanation",
+    "usesCodeIdentifierCharacters": true,
+    "identifierPatterns": [
+      "\\b[A-Z][A-Z0-9_]{2,}\\b",
+      "\\b[A-Za-z]+[A-Z0-9][A-Za-z0-9]*\\b"
+    ]
+  },
+  "multimodalPolicy": {
+    "textualConfidenceFloor": 0.05,
+    "textualConfidenceCeiling": 0.98,
+    "finalBonus": 0.05,
+    "partialStableThreshold": 0.82,
+    "partialStableBonus": 0.04,
+    "partialUnstablePenalty": 0.18,
+    "asrConfidentThreshold": 0.82,
+    "asrConfidentBonus": 0.03,
+    "lowASRConfidenceThreshold": 0.45,
+    "lowASRConfidencePenalty": 0.12,
+    "terminalPauseBonus": 0.03,
+    "minPlausibleDuration": 0.45,
+    "maxPlausibleDuration": 18,
+    "durationPlausibleBonus": 0.02,
+    "tooShortDuration": 0.30,
+    "tooShortPenalty": 0.10,
+    "tooLongDuration": 30,
+    "tooLongPenalty": 0.04,
+    "minEnergy": 0.002,
+    "maxEnergy": 0.35,
+    "energyPresentBonus": 0.02,
+    "nearSilenceEnergy": 0.001,
+    "nearSilencePenalty": 0.08,
+    "silencePenalty": 0.10,
+    "tooQuietPenalty": 0.08,
+    "clippingPenalty": 0.08,
+    "audioGapCountThreshold": 2,
+    "audioGapPenalty": 0.04,
+    "textualDecisionWeight": 0.65,
+    "multimodalDecisionWeight": 0.35,
+    "hardSuppressionSignalKeys": ["partialUnstable", "silence", "nearSilence"],
+    "signalLabels": {
+      "textOnly": "text_only",
+      "final": "final",
+      "partialStable": "partial_stable",
+      "partialUnstable": "partial_unstable",
+      "asrConfident": "asr_confident",
+      "lowASRConfidence": "low_asr_confidence",
+      "terminalPause": "terminal_pause",
+      "durationPlausible": "duration_plausible",
+      "tooShortAudio": "too_short_audio",
+      "tooLongAudio": "too_long_audio",
+      "energyPresent": "energy_present",
+      "nearSilence": "near_silence",
+      "silence": "silence",
+      "tooQuiet": "too_quiet",
+      "clipping": "clipping",
+      "audioGaps": "audio_gaps",
+      "neutral": "multimodal_neutral"
+    }
+  },
+  "decisionGatePolicy": {
+    "modeThresholds": {
+      "highPrecision": {
+        "confidenceThreshold": 0.82,
+        "partialConfidenceThreshold": 0.92,
+        "requiredStrongSignalCount": 2
+      },
+      "balanced": {
+        "confidenceThreshold": 0.74,
+        "partialConfidenceThreshold": 0.86,
+        "requiredStrongSignalCount": 1
+      },
+      "highCoverage": {
+        "confidenceThreshold": 0.66,
+        "partialConfidenceThreshold": 0.78,
+        "requiredStrongSignalCount": 1
+      }
+    },
+    "ignoredSignals": ["final_utterance"],
+    "partialStrictSignals": ["directed_to_user", "action_request_frame"],
+    "partialCompleteShapeSignals": ["interrogative_starter", "concrete_object"],
+    "partialCompleteShapeConfidenceDelta": 0.12,
+    "partialCompleteShapeMinimumConfidence": 0.70
+  },
+  "confidencePolicy": {
+    "terminalPunctuationBaseScore": 0.72,
+    "semanticShapeBaseScore": 0.58,
+    "directedToUserBonus": 0.14,
+    "typedQuestionBonus": 0.08,
+    "typeBonusTypes": [
+      "status_check",
+      "technical_explanation",
+      "technical_decision",
+      "deadline_or_estimate",
+      "ownership",
+      "risk_assessment",
+      "product_scope",
+      "business_context",
+      "clarification",
+      "approval_request",
+      "action_request",
+      "opinion_request",
+      "follow_up"
+    ],
+    "partialPenalty": 0.08,
+    "rhetoricalScore": 0.62,
+    "minimumScore": 0.05,
+    "maximumScore": 0.98,
+    "ignoredFilterConfidence": 0.28,
+    "rejectedGateConfidenceCeiling": 0.72
+  },
+  "answerStylePolicy": {
+    "defaultStyle": "concise",
+    "incompleteStyle": "ask_for_clarification",
+    "stylesByType": {
+      "technical_explanation": "technical",
+      "technical_decision": "technical",
+      "risk_assessment": "technical",
+      "deadline_or_estimate": "cautious",
+      "approval_request": "cautious",
+      "product_scope": "cautious",
+      "business_context": "executive",
+      "opinion_request": "diplomatic",
+      "action_request": "diplomatic"
+    }
+  },
+  "reasons": {
+    "multimodalRejectedTemplate": "Rejected by multimodal stability gate: {suppressionSignals}",
+    "localGateRejectedTemplate": "Rejected by high-precision local decision gate: {understandingReason}",
+    "multiQTRescued": "MultiQT rescued a model-positive question that the surface detector rejected."
+  }
+}

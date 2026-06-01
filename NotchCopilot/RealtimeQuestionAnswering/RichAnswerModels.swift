@@ -243,7 +243,10 @@ struct RichAnswerValidator {
         case RichAnswerBlockKind.metrics.rawValue:
             return copy.value?.isEmpty == false || copy.text?.isEmpty == false || !copy.items.isEmpty ? copy : nil
         case RichAnswerBlockKind.code.rawValue:
-            return copy.code?.isEmpty == false ? copy : nil
+            guard let code = copy.code, !code.isEmpty else { return nil }
+            let formattedCode = CodeBlockFormatter.formatted(code, language: copy.language)
+            copy.code = formattedCode.isEmpty ? code : formattedCode
+            return copy
         case RichAnswerBlockKind.actions.rawValue:
             return copy.actions.isEmpty ? nil : copy
         default:
@@ -299,32 +302,63 @@ enum RichAnswerFallbackBuilder {
         text rawText: String,
         format: CopilotAnswerFormat?,
         sources: [AnswerSource],
+        question: String = "",
         confidence: Double? = nil,
         riskLevel: AnswerRiskLevel? = nil,
         tone: AnswerStyle? = nil,
         caveats: [String] = [],
-        includeEvidence: Bool = true
+        includeEvidence: Bool = true,
+        policy: AnswerPresentationPolicy = .default
     ) -> RichAnswerPayload {
-        let format = format ?? .paragraph
+        let policy = policy.normalized()
+        let requestedFormat = format ?? .paragraph
         let text = RichAnswerTextSanitizer.removingRenderedSourceURLs(from: rawText, sources: sources)
+        let format = refinedFormat(requestedFormat, text: text, question: question, policy: policy)
         var blocks: [RichAnswerBlockPayload] = []
 
         switch format {
         case .plainShort, .reminderConfirmation:
-            blocks.append(lead(text: text, confidence: confidence, riskLevel: riskLevel, tone: tone))
+            if let metric = metricOverride(from: text, question: question, policy: policy) {
+                blocks.append(metric)
+            } else {
+                blocks.append(lead(text: text, confidence: confidence, riskLevel: riskLevel, tone: tone, policy: policy))
+            }
         case .calculation:
-            blocks.append(metric(from: text))
+            blocks.append(metric(from: text, policy: policy))
         case .steps:
-            blocks.append(listBlock(kind: .steps, title: "Steps", text: text))
+            blocks.append(
+                timelineBlock(from: text, question: question, policy: policy)
+                    ?? listBlock(kind: .steps, title: policy.richAnswerTitles.steps.nilIfEmptyRichAnswer, text: text)
+            )
         case .bullets:
-            blocks.append(listBlock(kind: .checklist, title: "Key points", text: text))
+            blocks.append(
+                timelineBlock(from: text, question: question, policy: policy)
+                    ?? listBlock(kind: .checklist, title: policy.richAnswerTitles.keyPoints.nilIfEmptyRichAnswer, text: text)
+            )
         case .newsWithSources:
             if !text.isEmpty {
-                blocks.append(RichAnswerBlockPayload(type: RichAnswerBlockKind.paragraph.rawValue, text: text))
+                let list = listItems(from: text)
+                if list.count >= 2 {
+                    blocks.append(
+                        RichAnswerBlockPayload(
+                            type: RichAnswerBlockKind.checklist.rawValue,
+                            title: policy.richAnswerTitles.highlights.nilIfEmptyRichAnswer,
+                            items: list
+                        )
+                    )
+                } else {
+                    blocks.append(RichAnswerBlockPayload(type: RichAnswerBlockKind.paragraph.rawValue, text: text))
+                }
             }
             let sourceIndexes = validDisplaySourceIndexes(in: sources)
             if !sourceIndexes.isEmpty {
-                blocks.append(RichAnswerBlockPayload(type: RichAnswerBlockKind.sourceCards.rawValue, title: "Sources", sourceIndexes: sourceIndexes))
+                blocks.append(
+                    RichAnswerBlockPayload(
+                        type: RichAnswerBlockKind.sourceCards.rawValue,
+                        title: policy.richAnswerTitles.sources.nilIfEmptyRichAnswer,
+                        sourceIndexes: sourceIndexes
+                    )
+                )
             }
         case .memoryResults:
             let items = sources.enumerated().compactMap { index, source -> RichAnswerItemPayload? in
@@ -332,21 +366,46 @@ enum RichAnswerFallbackBuilder {
                 return RichAnswerItemPayload(title: source.title, text: source.snippet ?? source.title, sourceIndex: index)
             }
             if !items.isEmpty {
-                blocks.append(RichAnswerBlockPayload(type: RichAnswerBlockKind.memoryResults.rawValue, title: "Context", items: items))
+                blocks.append(
+                    RichAnswerBlockPayload(
+                        type: RichAnswerBlockKind.memoryResults.rawValue,
+                        title: policy.richAnswerTitles.context.nilIfEmptyRichAnswer,
+                        items: items
+                    )
+                )
             } else if !text.isEmpty {
                 blocks.append(RichAnswerBlockPayload(type: RichAnswerBlockKind.paragraph.rawValue, text: text))
             }
         case .code:
             blocks.append(contentsOf: codeBlocks(from: text))
         case .errorState:
-            blocks.append(RichAnswerBlockPayload(type: RichAnswerBlockKind.warning.rawValue, title: "Could not complete", text: text, severity: "error"))
+            blocks.append(
+                RichAnswerBlockPayload(
+                    type: RichAnswerBlockKind.warning.rawValue,
+                    title: policy.richAnswerTitles.couldNotComplete.nilIfEmptyRichAnswer,
+                    text: text,
+                    severity: "error"
+                )
+            )
         case .paragraph:
-            blocks.append(RichAnswerBlockPayload(type: RichAnswerBlockKind.paragraph.rawValue, text: text))
+            if let timeline = timelineBlock(from: text, question: question, policy: policy) {
+                blocks.append(timeline)
+            } else if let metric = metricOverride(from: text, question: question, policy: policy) {
+                blocks.append(metric)
+            } else {
+                blocks.append(RichAnswerBlockPayload(type: RichAnswerBlockKind.paragraph.rawValue, text: text))
+            }
         }
 
-        let nonWebEvidence = includeEvidence ? evidenceItems(from: sources) : []
+        let nonWebEvidence = includeEvidence ? evidenceItems(from: sources, policy: policy) : []
         if !nonWebEvidence.isEmpty, format != .memoryResults {
-            blocks.append(RichAnswerBlockPayload(type: RichAnswerBlockKind.memoryResults.rawValue, title: "Evidence", items: nonWebEvidence))
+            blocks.append(
+                RichAnswerBlockPayload(
+                    type: RichAnswerBlockKind.memoryResults.rawValue,
+                    title: policy.richAnswerTitles.evidence.nilIfEmptyRichAnswer,
+                    items: nonWebEvidence
+                )
+            )
         }
         for caveat in caveats where !caveat.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             blocks.append(RichAnswerBlockPayload(type: RichAnswerBlockKind.warning.rawValue, text: caveat, severity: "caution"))
@@ -356,33 +415,123 @@ enum RichAnswerFallbackBuilder {
         return validated ?? RichAnswerPayload(blocks: [RichAnswerBlockPayload(type: RichAnswerBlockKind.paragraph.rawValue, text: text)])
     }
 
-    private static func lead(text: String, confidence: Double?, riskLevel: AnswerRiskLevel?, tone: AnswerStyle?) -> RichAnswerBlockPayload {
+    private static func refinedFormat(_ format: CopilotAnswerFormat, text: String, question: String, policy: AnswerPresentationPolicy) -> CopilotAnswerFormat {
+        guard format == .plainShort || format == .paragraph else { return format }
+        if metricOverride(from: text, question: question, policy: policy) != nil {
+            return .calculation
+        }
+        if timelineBlock(from: text, question: question, policy: policy) != nil {
+            return .steps
+        }
+        return format
+    }
+
+    private static func lead(
+        text: String,
+        confidence: Double?,
+        riskLevel: AnswerRiskLevel?,
+        tone: AnswerStyle?,
+        policy: AnswerPresentationPolicy
+    ) -> RichAnswerBlockPayload {
         let subtitleParts = [
-            tone.map { "Tone: \($0.rawValue.replacingOccurrences(of: "_", with: " "))" },
-            riskLevel.map { "Risk: \($0.rawValue.replacingOccurrences(of: "_", with: " "))" },
-            confidence.map { "Confidence: \(Int(($0 * 100).rounded()))%" }
+            tone.map { labeled(policy.richAnswerTitles.toneLabel, value: $0.rawValue.replacingOccurrences(of: "_", with: " ")) },
+            riskLevel.map { labeled(policy.richAnswerTitles.riskLabel, value: $0.rawValue.replacingOccurrences(of: "_", with: " ")) },
+            confidence.map { labeled(policy.richAnswerTitles.confidenceLabel, value: "\(Int(($0 * 100).rounded()))%") }
         ]
         .compactMap { $0 }
         return RichAnswerBlockPayload(type: RichAnswerBlockKind.lead.rawValue, subtitle: subtitleParts.joined(separator: " - "), text: text)
     }
 
-    private static func metric(from text: String) -> RichAnswerBlockPayload {
+    private static func labeled(_ label: String, value: String) -> String {
+        guard let label = label.nilIfEmptyRichAnswer else { return value }
+        return "\(label): \(value)"
+    }
+
+    private static func metric(from text: String, policy: AnswerPresentationPolicy) -> RichAnswerBlockPayload {
         let firstNumber = firstNumberLikeToken(in: text)
         return RichAnswerBlockPayload(
             type: RichAnswerBlockKind.metrics.rawValue,
-            title: "Result",
+            title: policy.richAnswerTitles.result.nilIfEmptyRichAnswer,
             text: firstNumber == nil ? text : nil,
-            label: firstNumber == nil ? nil : "Value",
+            label: firstNumber == nil ? nil : policy.richAnswerTitles.value.nilIfEmptyRichAnswer,
             value: firstNumber ?? text
         )
     }
 
-    private static func listBlock(kind: RichAnswerBlockKind, title: String, text: String) -> RichAnswerBlockPayload {
+    private static func metricOverride(from text: String, question: String, policy: AnswerPresentationPolicy) -> RichAnswerBlockPayload? {
+        guard firstNumberLikeToken(in: text) != nil else { return nil }
+        let normalizedQuestion = QuestionDetectionService.normalize(question)
+        guard matches(normalizedQuestion, pattern: policy.arithmeticQuestionPattern) else {
+            return nil
+        }
+        return metric(from: text, policy: policy)
+    }
+
+    private static func listBlock(kind: RichAnswerBlockKind, title: String?, text: String) -> RichAnswerBlockPayload {
         let items = listItems(from: text)
         if items.isEmpty {
             return RichAnswerBlockPayload(type: RichAnswerBlockKind.paragraph.rawValue, text: text)
         }
         return RichAnswerBlockPayload(type: kind.rawValue, title: title, items: items)
+    }
+
+    private static func timelineBlock(from text: String, question: String, policy: AnswerPresentationPolicy) -> RichAnswerBlockPayload? {
+        let normalizedQuestion = QuestionDetectionService.normalize(question)
+        let timelineRequested = policy.timelineQuestionMarkers.contains { marker in
+            QuestionIntentRulePack.default.textSegmentationPolicy.containsMarker(marker, in: normalizedQuestion)
+        }
+        let items = timelineItems(from: text, policy: policy)
+        guard items.count >= 2, timelineRequested || items.contains(where: { $0.title != nil }) else {
+            return nil
+        }
+        return RichAnswerBlockPayload(
+            type: RichAnswerBlockKind.timeline.rawValue,
+            title: policy.richAnswerTitles.timeline.nilIfEmptyRichAnswer,
+            items: items
+        )
+    }
+
+    private static func timelineItems(from text: String, policy: AnswerPresentationPolicy) -> [RichAnswerItemPayload] {
+        let lines = text.replacingOccurrences(of: "\r\n", with: "\n")
+            .components(separatedBy: "\n")
+            .flatMap { line -> [String] in
+                let trimmed = line.trimmingCharacters(in: .whitespacesAndNewlines)
+                guard !trimmed.isEmpty else { return [] }
+                if trimmed.hasPrefix("- ") || trimmed.hasPrefix("* ") || trimmed.range(of: #"^\d+\.\s+"#, options: .regularExpression) != nil {
+                    return [trimmed]
+                }
+                return trimmed.components(separatedBy: ". ")
+            }
+
+        return lines.compactMap { rawLine -> RichAnswerItemPayload? in
+            let line = strippedListMarker(rawLine).trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !line.isEmpty else { return nil }
+            let title = timelineTitle(in: line, policy: policy)
+            return RichAnswerItemPayload(title: title, text: line)
+        }
+        .prefix(policy.richTimelineMaximumItems)
+        .map { $0 }
+    }
+
+    private static func strippedListMarker(_ line: String) -> String {
+        let trimmed = line.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmed.hasPrefix("- ") || trimmed.hasPrefix("* ") {
+            return String(trimmed.dropFirst(2))
+        }
+        guard let range = trimmed.range(of: #"^\d+\.\s+"#, options: .regularExpression) else {
+            return trimmed
+        }
+        return String(trimmed[range.upperBound...])
+    }
+
+    private static func timelineTitle(in line: String, policy: AnswerPresentationPolicy) -> String? {
+        guard let regex = try? NSRegularExpression(pattern: policy.timelineTitlePattern),
+              let match = regex.firstMatch(in: line, range: NSRange(line.startIndex..., in: line)),
+              match.numberOfRanges > 1,
+              let range = Range(match.range(at: 1), in: line) else {
+            return nil
+        }
+        return String(line[range]).trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
     private static func listItems(from text: String) -> [RichAnswerItemPayload] {
@@ -418,14 +567,19 @@ enum RichAnswerFallbackBuilder {
             proseLines.removeAll()
         }
 
+        func flushCode() {
+            let code = codeLines.joined(separator: "\n").trimmingCharacters(in: .newlines)
+            let formattedCode = CodeBlockFormatter.formatted(code, language: language)
+            blocks.append(RichAnswerBlockPayload(type: RichAnswerBlockKind.code.rawValue, language: language, code: formattedCode))
+            codeLines.removeAll()
+            language = nil
+        }
+
         for line in text.replacingOccurrences(of: "\r\n", with: "\n").components(separatedBy: "\n") {
             let trimmed = line.trimmingCharacters(in: .whitespaces)
             if trimmed.hasPrefix("```") {
                 if isInCode {
-                    let code = codeLines.joined(separator: "\n").trimmingCharacters(in: .newlines)
-                    blocks.append(RichAnswerBlockPayload(type: RichAnswerBlockKind.code.rawValue, language: language, code: code))
-                    codeLines.removeAll()
-                    language = nil
+                    flushCode()
                     isInCode = false
                 } else {
                     flushProse()
@@ -441,7 +595,7 @@ enum RichAnswerFallbackBuilder {
             }
         }
         if isInCode {
-            blocks.append(RichAnswerBlockPayload(type: RichAnswerBlockKind.code.rawValue, language: language, code: codeLines.joined(separator: "\n").trimmingCharacters(in: .newlines)))
+            flushCode()
         }
         flushProse()
         if blocks.isEmpty {
@@ -450,13 +604,13 @@ enum RichAnswerFallbackBuilder {
         return blocks
     }
 
-    private static func evidenceItems(from sources: [AnswerSource]) -> [RichAnswerItemPayload] {
+    private static func evidenceItems(from sources: [AnswerSource], policy: AnswerPresentationPolicy) -> [RichAnswerItemPayload] {
         sources.enumerated().compactMap { index, source -> RichAnswerItemPayload? in
             guard source.type != .web else { return nil }
             let text = source.snippet?.collapsedRichAnswerWhitespace.nilIfEmptyRichAnswer ?? source.title
             return RichAnswerItemPayload(title: source.title, text: text, sourceIndex: index)
         }
-        .prefix(4)
+        .prefix(policy.richEvidenceMaximumItems)
         .map { $0 }
     }
 
@@ -475,6 +629,11 @@ enum RichAnswerFallbackBuilder {
             return nil
         }
         return String(text[range]).trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private static func matches(_ text: String, pattern: String) -> Bool {
+        guard !pattern.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return false }
+        return text.range(of: pattern, options: .regularExpression) != nil
     }
 }
 

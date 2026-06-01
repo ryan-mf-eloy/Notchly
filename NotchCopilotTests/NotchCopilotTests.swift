@@ -472,6 +472,84 @@ final class NotchCopilotTests: XCTestCase {
         XCTAssertEqual(negative.preferredTool, .unavailable)
     }
 
+    func testCopilotIntentClassifierPartialReadinessUsesPolicyTokenizationForCompactScripts() {
+        let classifier = CopilotIntentClassifier()
+        var preferences = AppPreferences()
+        preferences.qaPrecisionMode = .highCoverage
+        let text = "認証リスク移行計画レビュー方法は何ですか"
+        let policy = CopilotIntentPolicyStore.current
+        let textPolicy = QuestionIntentRulePack.default.textSegmentationPolicy
+
+        XCTAssertEqual(text.split(separator: " ").count, 1)
+        XCTAssertGreaterThanOrEqual(
+            textPolicy.lexicalTokenCount(in: text),
+            policy.thresholds(for: preferences.qaPrecisionMode).partialMinimumTokens
+        )
+        XCTAssertTrue(classifier.isPartialReadyForIntent(text, preferences: preferences))
+    }
+
+    func testPolicyDrivenIntentProviderScoresCompactScriptSurfaceTokens() {
+        let text = "認証リスク移行計画は何ですか"
+        let rulePack = QuestionIntentRulePack.default
+        let surface = QuestionSurfaceAnalyzer(rulePack: rulePack).analyze(
+            text: text,
+            normalized: QuestionDetectionService.normalize(text),
+            context: nil,
+            profile: nil,
+            isPartial: false,
+            isFinal: true
+        )
+        XCTAssertGreaterThanOrEqual(surface.meaningfulTokens.count, 2)
+
+        var policy = CopilotIntentPolicyStore.current
+        var structuralPolicy = CopilotStructuralSemanticPolicy.fallback(signals: policy.signals)
+        structuralPolicy.meaningfulTokenMinimumLength = 2
+        structuralPolicy.meaningfulTokenTargetCount = 2
+        structuralPolicy.numericPatterns = []
+        structuralPolicy.rules = [
+            CopilotStructuralSemanticRulePolicy(
+                label: nil,
+                kind: .answerableQuestion,
+                tool: .answerSynthesis,
+                requiresWeb: false,
+                reason: "compact_script_surface_content",
+                requiredSurfaceSignals: [],
+                requiresSurfaceNegativeSignals: false,
+                minimumSyntaxScore: nil,
+                maximumSyntaxScore: nil,
+                minimumContentScore: 0.75,
+                minimumNumericScore: nil,
+                confidenceBase: 0.70,
+                syntaxConfidenceWeight: 0,
+                contentConfidenceWeight: 0.10,
+                numericConfidenceWeight: 0,
+                minimumConfidence: 0,
+                maximumConfidence: 0.90,
+                signals: [policy.signals.semanticIntent, policy.signals.meaningfulContent],
+                propagateSurfaceNegativeSignals: true
+            )
+        ]
+        policy.structuralSemantic = structuralPolicy
+
+        let frame = CopilotIntentFrame(
+            rawText: text,
+            normalizedText: QuestionDetectionService.normalize(text),
+            cleanedText: QuestionDetectionService.normalize(text),
+            languageCode: "ja-JP",
+            source: .microphone,
+            context: nil,
+            profile: nil,
+            surface: surface,
+            isFinal: true,
+            asrConfidence: 0.95,
+            wakeWordDetected: false
+        )
+        let prediction = PolicyDrivenCopilotSemanticIntentProvider().prediction(for: frame, policy: policy)
+
+        XCTAssertEqual(prediction?.kind, .answerableQuestion)
+        XCTAssertEqual(prediction?.reason, "compact_script_surface_content")
+    }
+
     func testCopilotRuntimeHasNoDeterministicCalculatorOrFallbackAnswers() throws {
         let projectRoot = URL(fileURLWithPath: #filePath)
             .deletingLastPathComponent()
@@ -496,6 +574,32 @@ final class NotchCopilotTests: XCTestCase {
             XCTAssertFalse(decisionSource.contains("generateAnswer("))
             XCTAssertFalse(decisionSource.contains("PromptBuilder"))
         }
+    }
+
+    func testCopilotAnswerPersistenceIsNonBlockingAfterReadyAnswer() throws {
+        let projectRoot = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+        let sourceURL = projectRoot
+            .appendingPathComponent("NotchCopilot/Meetings/MeetingSessionManager.swift")
+        let source = try String(contentsOf: sourceURL, encoding: .utf8)
+        guard let generateStart = source.range(of: "private func generateAnswer(\n        candidate: QuestionCandidate,"),
+              let reloadStart = source.range(of: "\n    private func reloadHistory", range: generateStart.upperBound..<source.endIndex) else {
+            return XCTFail("Could not locate Notchly answer generation body")
+        }
+        let body = String(source[generateStart.lowerBound..<reloadStart.lowerBound])
+
+        XCTAssertTrue(body.contains("let persistedInteraction = persistCompletedCopilotInteraction"))
+        XCTAssertFalse(body.contains("try interactionStore().saveInteraction(interaction)"))
+        XCTAssertTrue(source.contains("private func persistCompletedCopilotInteraction"))
+        guard let answerUpdate = body.range(of: "appState.updateQueuedQuestionAnswer(candidate: candidate, answer: result.answer)"),
+              let persistence = body.range(of: "persistCompletedCopilotInteraction"),
+              let failureCatch = body.range(of: "} catch {") else {
+            return XCTFail("Could not locate answer update, persistence, and catch blocks")
+        }
+
+        XCTAssertLessThan(answerUpdate.lowerBound, persistence.lowerBound)
+        XCTAssertLessThan(persistence.lowerBound, failureCatch.lowerBound)
     }
 
     func testCopilotLLMStructuredReminderResponseDecodesNativeActionOnly() throws {
@@ -730,6 +834,72 @@ final class NotchCopilotTests: XCTestCase {
         XCTAssertFalse(result.decision.needsClarification)
         XCTAssertEqual(result.decision.resolvedIntent(fallback: .ambiguous), .answerableQuestion)
         XCTAssertEqual(result.decision.resolvedFormat(fallback: .paragraph), .steps)
+    }
+
+    func testCopilotClarificationPolicyUsesSharedPresentationPolicyForFallbackRouting() {
+        var policy = AnswerPresentationPolicy.default
+        policy.procedureQuestionMarkers = ["orbit steps"]
+        policy.comparisonQuestionMarkers = ["trade matrix"]
+        policy.commandQuestionMarkers = []
+        policy.structuredDataQuestionMarkers = ["schema packet"]
+        policy.codeQuestionMarkers = ["sample block"]
+        policy.freshNewsQuestionMarkers = ["market pulse"]
+        policy.webSearchQuestionMarkers = ["source hunt"]
+        policy.arithmeticQuestionPattern = #"(?i)orbital\s+sum"#
+
+        XCTAssertEqual(
+            CopilotClarificationPolicy.inferredFormat(for: "Need orbit steps for the rollout", presentationPolicy: policy),
+            .steps
+        )
+        XCTAssertEqual(
+            CopilotClarificationPolicy.inferredFormat(for: "Show the trade matrix", presentationPolicy: policy),
+            .bullets
+        )
+        XCTAssertEqual(
+            CopilotClarificationPolicy.inferredFormat(for: "Return a sample block", presentationPolicy: policy),
+            .code
+        )
+        XCTAssertEqual(
+            CopilotClarificationPolicy.inferredFormat(for: "What is the market pulse?", presentationPolicy: policy),
+            .newsWithSources
+        )
+        XCTAssertEqual(
+            CopilotClarificationPolicy.inferredFormat(for: "Run a source hunt", presentationPolicy: policy),
+            .newsWithSources
+        )
+        XCTAssertEqual(
+            CopilotClarificationPolicy.inferredFormat(for: "What is the orbital sum?", presentationPolicy: policy),
+            .calculation
+        )
+        XCTAssertEqual(
+            CopilotClarificationPolicy.inferredIntent(for: "What is the market pulse?", presentationPolicy: policy),
+            .newsSearch
+        )
+        XCTAssertEqual(
+            CopilotClarificationPolicy.inferredIntent(for: "Run a source hunt", presentationPolicy: policy),
+            .webSearch
+        )
+        XCTAssertEqual(
+            CopilotClarificationPolicy.inferredIntent(for: "What is the orbital sum?", presentationPolicy: policy),
+            .calculation
+        )
+
+        policy.procedureQuestionMarkers = []
+        policy.comparisonQuestionMarkers = []
+        policy.structuredDataQuestionMarkers = []
+        policy.codeQuestionMarkers = []
+        policy.freshNewsQuestionMarkers = []
+        policy.webSearchQuestionMarkers = []
+        policy.arithmeticQuestionPattern = ""
+
+        XCTAssertEqual(
+            CopilotClarificationPolicy.inferredFormat(for: "Latest headlines about AI", presentationPolicy: policy),
+            .paragraph
+        )
+        XCTAssertEqual(
+            CopilotClarificationPolicy.inferredIntent(for: "Latest headlines about AI", presentationPolicy: policy),
+            .answerableQuestion
+        )
     }
 
     func testCopilotDecisionKeepsClarificationForUnclearASR() async throws {
@@ -1118,6 +1288,10 @@ final class NotchCopilotTests: XCTestCase {
         XCTAssertTrue(policy.lowInformationWords.isEmpty)
         XCTAssertTrue(policy.numberWords.isEmpty)
         XCTAssertTrue(policy.operatorWords.isEmpty)
+        XCTAssertFalse(policy.structuralSemanticPolicy.rules.isEmpty)
+        XCTAssertTrue(policy.structuralSemanticPolicy.numericPatterns.contains { $0.score >= 0.94 })
+        XCTAssertTrue(policy.semanticLabels.first { $0.label == "answerable_question" }?.aliases?.contains("question") == true)
+        XCTAssertTrue(policy.negativeLabels.contains { $0.label == "ambiguous" })
         XCTAssertTrue((policy.semanticLabels + policy.toolLabels + policy.negativeLabels).allSatisfy { label in
             label.cues.isEmpty && (label.prefixCues ?? []).isEmpty
         })
@@ -1127,6 +1301,8 @@ final class NotchCopilotTests: XCTestCase {
             .appendingPathComponent("NotchCopilot/Resources/CopilotSpeechPolicy/default.json")
         let speechPolicy = try JSONDecoder().decode(CopilotSpeechPolicy.self, from: Data(contentsOf: speechPolicyURL))
         XCTAssertTrue(speechPolicy.clarificationRules.isEmpty)
+        XCTAssertTrue(speechPolicy.frameSelectionPolicy.domainBoostTerms.contains("notchly"))
+        XCTAssertTrue(speechPolicy.frameSelectionPolicy.trailingFragmentTerms.contains("sobre"))
 
         let fixtureURL = projectRoot
             .appendingPathComponent("NotchCopilotTests/Fixtures/copilot_intent_gold.jsonl")
@@ -1204,6 +1380,62 @@ final class NotchCopilotTests: XCTestCase {
         }
     }
 
+    func testCopilotStructuralSemanticProviderUsesPolicyDrivenRules() {
+        var policy = CopilotIntentPolicyStore.current
+        var structural = policy.structuralSemanticPolicy
+        structural.rules = [
+            CopilotStructuralSemanticRulePolicy(
+                label: nil,
+                kind: .memoryLookup,
+                tool: .localMemory,
+                requiresWeb: false,
+                reason: "test_policy_rule",
+                requiredSurfaceSignals: [QuestionUnderstandingSignal.interrogativeStarter.rawValue],
+                requiresSurfaceNegativeSignals: false,
+                minimumSyntaxScore: nil,
+                maximumSyntaxScore: nil,
+                minimumContentScore: 0,
+                minimumNumericScore: nil,
+                confidenceBase: 0.93,
+                syntaxConfidenceWeight: 0,
+                contentConfidenceWeight: 0,
+                numericConfidenceWeight: 0,
+                minimumConfidence: 0,
+                maximumConfidence: 0.97,
+                signals: ["custom_policy_signal"],
+                propagateSurfaceNegativeSignals: false
+            )
+        ]
+        policy.structuralSemantic = structural
+        let text = "Como funciona latency"
+        let surface = QuestionSurfaceAnalyzer().analyze(
+            text: text,
+            context: makeContext(text),
+            isPartial: false,
+            isFinal: true
+        )
+        let frame = CopilotIntentFrame(
+            rawText: text,
+            normalizedText: QuestionDetectionService.normalize(text),
+            cleanedText: QuestionDetectionService.normalize(text),
+            languageCode: "pt-BR",
+            source: .microphone,
+            context: makeContext(text),
+            profile: nil,
+            surface: surface,
+            isFinal: true,
+            asrConfidence: nil,
+            wakeWordDetected: false
+        )
+
+        let prediction = PolicyDrivenCopilotSemanticIntentProvider().prediction(for: frame, policy: policy)
+
+        XCTAssertEqual(prediction?.kind, .memoryLookup)
+        XCTAssertEqual(prediction?.tool, .localMemory)
+        XCTAssertEqual(prediction?.reason, "test_policy_rule")
+        XCTAssertTrue(prediction?.signals.contains("custom_policy_signal") == true)
+    }
+
     func testCopilotSpeechUnderstandingBuildsASRLatticeWithoutLocalClarification() {
         let segment = TranscriptSegment(
             meetingId: UUID(),
@@ -1265,6 +1497,32 @@ final class NotchCopilotTests: XCTestCase {
         let selected = CopilotSpeechFrameSelector.bestFrame(in: [partial, final], context: makeContext(final.text), preferences: preferences)
 
         XCTAssertEqual(selected?.text, final.text)
+    }
+
+    func testCopilotSpeechFrameSelectorUsesPolicyDrivenSourceBias() {
+        var policy = CopilotSpeechPolicyStore.current
+        var frameSelection = policy.frameSelectionPolicy
+        frameSelection.sourceBiases = [
+            SpeechCandidateSource.best.rawValue: 0,
+            SpeechCandidateSource.repair.rawValue: 1.0
+        ]
+        frameSelection.finalUtteranceBonus = 0
+        frameSelection.veryShortPenalty = 0
+        frameSelection.shortPenalty = 0
+        frameSelection.lowLanguageConfidencePenalty = 0
+        frameSelection.lowStabilityPenalty = 0
+        frameSelection.truncationPenalty = 0
+        frameSelection.dominantLanguageBonus = 0
+        frameSelection.contextOverlapMaxBonus = 0
+        policy.frameSelection = frameSelection
+        var best = makeSpeechFrame("Qual é a estratégia de cache", language: "pt-BR", confidence: 0.99, isFinal: true)
+        var repair = makeSpeechFrame("Qual é a estratégia de cache", language: "pt-BR", confidence: 0.50, isFinal: true)
+        best.source = .best
+        repair.source = .repair
+
+        let selected = CopilotSpeechFrameSelector.bestFrame(in: [best, repair], policy: policy)
+
+        XCTAssertEqual(selected?.source, .repair)
     }
 
     func testCopilotDecisionServiceUsesConservativeFrameSelector() async throws {
@@ -1562,6 +1820,111 @@ final class NotchCopilotTests: XCTestCase {
         XCTAssertTrue(news.text.contains("Fontes web indisponiveis"))
     }
 
+    func testCopilotAnswerPresenterUsesPolicyDrivenNewsAndCalculationRouting() throws {
+        let presenter = CopilotAnswerPresenter()
+        var policy = AnswerPresentationPolicy.default
+        policy.freshNewsQuestionMarkers = ["market pulse"]
+        policy.arithmeticQuestionPattern = #"(?i)orbital\s+sum"#
+
+        let newsQuestion = makeQuestion("What is the market pulse today?")
+        let news = try presenter.present(
+            text: "A concise update.",
+            candidate: newsQuestion,
+            classification: makeCopilotClassification(for: newsQuestion, intent: .answerableQuestion),
+            tool: .answerSynthesis,
+            intent: .answerableQuestion,
+            sources: [],
+            presentationPolicy: policy
+        )
+        XCTAssertEqual(news.format, .newsWithSources)
+
+        let calculationQuestion = makeQuestion("What is the orbital sum?")
+        let calculation = try presenter.present(
+            text: "42",
+            candidate: calculationQuestion,
+            classification: makeCopilotClassification(for: calculationQuestion, intent: .answerableQuestion),
+            tool: .answerSynthesis,
+            intent: .answerableQuestion,
+            sources: [],
+            presentationPolicy: policy
+        )
+        XCTAssertEqual(calculation.format, .calculation)
+
+        policy.freshNewsQuestionMarkers = []
+        policy.arithmeticQuestionPattern = ""
+
+        let oldHardcodedNewsQuestion = makeQuestion("Latest headlines about AI")
+        let oldHardcodedNews = try presenter.present(
+            text: "A compact answer.",
+            candidate: oldHardcodedNewsQuestion,
+            classification: makeCopilotClassification(for: oldHardcodedNewsQuestion, intent: .answerableQuestion),
+            tool: .answerSynthesis,
+            intent: .answerableQuestion,
+            sources: [],
+            presentationPolicy: policy
+        )
+        XCTAssertEqual(oldHardcodedNews.format, .plainShort)
+
+        let fallback = try presenter.present(
+            text: "42",
+            candidate: calculationQuestion,
+            classification: makeCopilotClassification(for: calculationQuestion, intent: .answerableQuestion),
+            tool: .answerSynthesis,
+            intent: .answerableQuestion,
+            sources: [],
+            presentationPolicy: policy
+        )
+        XCTAssertEqual(fallback.format, .plainShort)
+    }
+
+    func testCopilotAnswerPresenterUsesPresentationPolicyForGeneratedCodeBlocks() throws {
+        let presenter = CopilotAnswerPresenter()
+        let question = makeQuestion("Show the generated artifact")
+        let classification = makeCopilotClassification(for: question, intent: .answerableQuestion)
+        var policy = AnswerPresentationPolicy.default
+        policy.codeQuestionMarkers = []
+        policy.commandQuestionMarkers = []
+        policy.structuredDataQuestionMarkers = []
+        policy.codeLanguages = ["orbital"]
+
+        let code = try presenter.present(
+            text: """
+            ```orbital
+            orbit root
+            ```
+            """,
+            candidate: question,
+            classification: classification,
+            tool: .answerSynthesis,
+            intent: .answerableQuestion,
+            sources: [],
+            presentationPolicy: policy
+        )
+
+        XCTAssertEqual(code.format, .code)
+        XCTAssertTrue(code.text.contains("```orbital"))
+
+        policy.codeLanguages = []
+        policy.codeLinePattern = ""
+        policy.codeSymbolPattern = ""
+        let plain = try presenter.present(
+            text: """
+            ```orbital
+            orbit root
+            ```
+            """,
+            candidate: question,
+            classification: classification,
+            tool: .answerSynthesis,
+            intent: .answerableQuestion,
+            sources: [],
+            presentationPolicy: policy
+        )
+
+        XCTAssertEqual(plain.format, .plainShort)
+        XCTAssertFalse(plain.text.contains("```orbital"))
+    }
+
     func testSuggestedAnswerDecodesMissingRichAnswerAsNil() throws {
         let answer = SuggestedAnswer(
             questionId: UUID(),
@@ -1657,6 +2020,36 @@ final class NotchCopilotTests: XCTestCase {
         let validated = RichAnswerValidator().validated(payload, sources: sources)
 
         XCTAssertEqual(validated?.blocks.map(\.type), RichAnswerBlockKind.allCases.map(\.rawValue))
+    }
+
+    func testRichAnswerValidatorFormatsDirectCodeBlocks() {
+        let payload = RichAnswerPayload(blocks: [
+            RichAnswerBlockPayload(
+                type: RichAnswerBlockKind.code.rawValue,
+                language: "javascript",
+                code: "function invert(root){if(!root)return null;const tmp=root.left;root.left=root.right;root.right=tmp;invert(root.left);invert(root.right);return root;}"
+            )
+        ])
+
+        let validated = RichAnswerValidator().validated(payload, sources: [])
+
+        XCTAssertEqual(
+            validated?.blocks.first?.code,
+            """
+            function invert(root) {
+              if (!root) return null;
+
+              const tmp = root.left;
+              root.left = root.right;
+              root.right = tmp;
+
+              invert(root.left);
+              invert(root.right);
+
+              return root;
+            }
+            """
+        )
     }
 
     func testRichAnswerRendererSmokeRendersEverySupportedComponent() {
@@ -1778,6 +2171,29 @@ final class NotchCopilotTests: XCTestCase {
         XCTAssertEqual(codePayload.blocks.last?.language, "swift")
         XCTAssertEqual(codePayload.blocks.last?.code, "let total = 42")
 
+        let compactCodePayload = RichAnswerFallbackBuilder.payload(
+            text: "Use isto:\n```javascript\nfunction invert(root){if(!root)return null;const tmp=root.left;root.left=root.right;root.right=tmp;invert(root.left);invert(root.right);return root;}\n```",
+            format: .code,
+            sources: []
+        )
+        XCTAssertEqual(
+            compactCodePayload.blocks.last?.code,
+            """
+            function invert(root) {
+              if (!root) return null;
+
+              const tmp = root.left;
+              root.left = root.right;
+              root.right = tmp;
+
+              invert(root.left);
+              invert(root.right);
+
+              return root;
+            }
+            """
+        )
+
         let metricPayload = RichAnswerFallbackBuilder.payload(
             text: "O resultado e 42 kg.",
             format: .calculation,
@@ -1785,6 +2201,218 @@ final class NotchCopilotTests: XCTestCase {
         )
         XCTAssertEqual(metricPayload.blocks.first?.type, RichAnswerBlockKind.metrics.rawValue)
         XCTAssertEqual(metricPayload.blocks.first?.value, "42 kg")
+    }
+
+    func testRichAnswerFallbackInfersTimelineAndMetricShapes() {
+        let timelinePayload = RichAnswerFallbackBuilder.payload(
+            text: """
+            - Hoje: alinhar o escopo.
+            - Amanhã: validar com QA.
+            - Sexta: decidir o rollout.
+            """,
+            format: .paragraph,
+            sources: [],
+            question: "Qual é o cronograma?"
+        )
+
+        XCTAssertEqual(timelinePayload.blocks.first?.type, RichAnswerBlockKind.timeline.rawValue)
+        XCTAssertEqual(timelinePayload.blocks.first?.items.first?.title, "Hoje")
+
+        let metricPayload = RichAnswerFallbackBuilder.payload(
+            text: "4",
+            format: .plainShort,
+            sources: [],
+            question: "Quanto é 2 + 2?"
+        )
+
+        XCTAssertEqual(metricPayload.blocks.first?.type, RichAnswerBlockKind.metrics.rawValue)
+        XCTAssertEqual(metricPayload.blocks.first?.value, "4")
+    }
+
+    func testRichAnswerFallbackUsesPolicyDrivenTitlesPatternsAndLimits() {
+        var policy = AnswerPresentationPolicy.default
+        policy.timelineQuestionMarkers = ["sequencia customizada"]
+        policy.timelineTitlePattern = #"(?i)^((?:fase\s+\d+))(?:\s*[:\-–]\s*)"#
+        policy.arithmeticQuestionPattern = #"custom calc"#
+        policy.richTimelineMaximumItems = 2
+        policy.richEvidenceMaximumItems = 1
+        policy.richAnswerTitles = RichAnswerTitlePolicy(
+            steps: "Etapas",
+            keyPoints: "Pontos",
+            highlights: "Destaques",
+            sources: "Fontes",
+            context: "Contexto",
+            evidence: "Evidencias",
+            result: "Resultado",
+            value: "Valor",
+            timeline: "Sequencia",
+            couldNotComplete: "Falha",
+            toneLabel: "Tom",
+            riskLabel: "Risco",
+            confidenceLabel: "Confianca"
+        )
+
+        let timelinePayload = RichAnswerFallbackBuilder.payload(
+            text: """
+            - Fase 1: alinhar escopo.
+            - Fase 2: validar QA.
+            - Fase 3: liberar.
+            """,
+            format: .paragraph,
+            sources: [
+                AnswerSource(type: .transcript, title: "Transcript", snippet: "Evidencia 1", reference: nil),
+                AnswerSource(type: .rag, title: "Memory", snippet: "Evidencia 2", reference: nil)
+            ],
+            question: "Mostre a sequencia customizada",
+            policy: policy
+        )
+
+        XCTAssertEqual(timelinePayload.blocks.first?.type, RichAnswerBlockKind.timeline.rawValue)
+        XCTAssertEqual(timelinePayload.blocks.first?.title, "Sequencia")
+        XCTAssertEqual(timelinePayload.blocks.first?.items.count, 2)
+        XCTAssertEqual(timelinePayload.blocks.first?.items.first?.title, "Fase 1")
+        let evidence = timelinePayload.blocks.first { $0.type == RichAnswerBlockKind.memoryResults.rawValue }
+        XCTAssertEqual(evidence?.title, "Evidencias")
+        XCTAssertEqual(evidence?.items.count, 1)
+
+        let metricPayload = RichAnswerFallbackBuilder.payload(
+            text: "42",
+            format: .plainShort,
+            sources: [],
+            question: "custom calc",
+            policy: policy
+        )
+
+        XCTAssertEqual(metricPayload.blocks.first?.title, "Resultado")
+        XCTAssertEqual(metricPayload.blocks.first?.label, "Valor")
+    }
+
+    func testCopilotAnswerPresenterBuildsRichComponentsForRealtimeAnswers() throws {
+        let presenter = CopilotAnswerPresenter()
+        let codeQuestion = makeQuestion("Como inverter uma árvore binária em Python?")
+        let code = try presenter.present(
+            text: "Use recursão:\n```python\ndef invert_tree(root):\n    return root\n```",
+            candidate: codeQuestion,
+            classification: makeCopilotClassification(for: codeQuestion, intent: .actionRequest),
+            tool: .answerSynthesis,
+            intent: .answerableQuestion,
+            sources: []
+        )
+
+        XCTAssertEqual(code.format, .code)
+        XCTAssertTrue(code.richAnswer?.blocks.contains { $0.type == RichAnswerBlockKind.code.rawValue && $0.language == "python" } == true)
+
+        let newsQuestion = makeQuestion("Quais são as principais notícias de tecnologia hoje?")
+        let news = try presenter.present(
+            text: "- Novo modelo de IA foi anunciado.\n- Chips para IA seguem em alta.",
+            candidate: newsQuestion,
+            classification: makeCopilotClassification(for: newsQuestion, intent: .answerableQuestion),
+            tool: .answerSynthesis,
+            intent: .answerableQuestion,
+            sources: [AnswerSource(type: .web, title: "Tech News", snippet: "Resumo.", reference: "https://example.com/news")]
+        )
+
+        XCTAssertEqual(news.format, .newsWithSources)
+        XCTAssertTrue(news.richAnswer?.blocks.contains { $0.type == RichAnswerBlockKind.sourceCards.rawValue } == true)
+        XCTAssertTrue(news.richAnswer?.blocks.contains { $0.type == RichAnswerBlockKind.checklist.rawValue } == true)
+    }
+
+    func testTranscriptQuestionHighlighterMarksExactAndFallbackRanges() {
+        let segmentId = UUID()
+        let highlight = TranscriptQuestionHighlight(segmentIds: [segmentId], text: "capital do Brasil")
+        let exact = NSMutableAttributedString(string: "Qual é a capital do Brasil?")
+
+        TranscriptQuestionHighlighter.apply(
+            to: exact,
+            visibleText: exact.string,
+            visibleRange: NSRange(location: 0, length: (exact.string as NSString).length),
+            segmentId: segmentId,
+            highlight: highlight
+        )
+
+        let exactColor = exact.attribute(.backgroundColor, at: 9, effectiveRange: nil) as? NSColor
+        XCTAssertTrue(exactColor?.isEqual(TranscriptQuestionHighlighter.exactBackgroundColor) == true)
+        XCTAssertNil(exact.attribute(.backgroundColor, at: 0, effectiveRange: nil))
+
+        let fallback = NSMutableAttributedString(string: "Quanto é dois mais dois")
+        TranscriptQuestionHighlighter.apply(
+            to: fallback,
+            visibleText: fallback.string,
+            visibleRange: NSRange(location: 0, length: (fallback.string as NSString).length),
+            segmentId: segmentId,
+            highlight: TranscriptQuestionHighlight(segmentIds: [segmentId], text: "Quanto é 2 + 2")
+        )
+
+        let fallbackColor = fallback.attribute(.backgroundColor, at: 0, effectiveRange: nil) as? NSColor
+        XCTAssertTrue(fallbackColor?.isEqual(TranscriptQuestionHighlighter.fallbackBackgroundColor) == true)
+    }
+
+    func testTranscriptQuestionHighlighterPulsesWhileQuestionIsLoading() {
+        let segmentId = UUID()
+        let text = "Como inverter uma arvore binaria em JavaScript"
+        let firstPass = NSMutableAttributedString(string: text)
+        let secondPass = NSMutableAttributedString(string: text)
+
+        TranscriptQuestionHighlighter.apply(
+            to: firstPass,
+            visibleText: text,
+            visibleRange: NSRange(location: 0, length: (text as NSString).length),
+            segmentId: segmentId,
+            highlight: TranscriptQuestionHighlight(
+                segmentIds: [segmentId],
+                text: "arvore binaria",
+                isLoading: true,
+                loadingPhase: 0
+            )
+        )
+        TranscriptQuestionHighlighter.apply(
+            to: secondPass,
+            visibleText: text,
+            visibleRange: NSRange(location: 0, length: (text as NSString).length),
+            segmentId: segmentId,
+            highlight: TranscriptQuestionHighlight(
+                segmentIds: [segmentId],
+                text: "arvore binaria",
+                isLoading: true,
+                loadingPhase: .pi / 2
+            )
+        )
+
+        let firstColor = firstPass.attribute(.backgroundColor, at: 20, effectiveRange: nil) as? NSColor
+        let secondColor = secondPass.attribute(.backgroundColor, at: 20, effectiveRange: nil) as? NSColor
+        let firstAlpha = firstColor?.usingColorSpace(.deviceRGB)?.alphaComponent ?? firstColor?.alphaComponent ?? 0
+        let secondAlpha = secondColor?.usingColorSpace(.deviceRGB)?.alphaComponent ?? secondColor?.alphaComponent ?? 0
+
+        XCTAssertGreaterThan(abs(firstAlpha - secondAlpha), 0.02)
+    }
+
+    func testWhiprFlowQuestionAccentTurnsGreenOnlyWhenActive() {
+        let levels = Array(repeating: CGFloat(0.82), count: 18)
+        let neutral = WhiprFlowAudioMark.presentation(
+            for: levels,
+            isPaused: false,
+            seconds: 1,
+            reduceMotion: true,
+            accent: .neutral
+        )
+        let active = WhiprFlowAudioMark.presentation(
+            for: levels,
+            isPaused: false,
+            seconds: 1,
+            reduceMotion: true,
+            accent: .questionActive
+        )
+        let pausedActive = WhiprFlowAudioMark.presentation(
+            for: levels,
+            isPaused: true,
+            seconds: 1,
+            reduceMotion: true,
+            accent: .questionActive
+        )
+
+        XCTAssertGreaterThan(active.bars[6].tint.green, active.bars[6].tint.red)
+        XCTAssertLessThan(active.bars[6].tint.red, neutral.bars[6].tint.red)
+        XCTAssertEqual(pausedActive.bars[6].tint, WhiprFlowAudioTint(red: 0.48, green: 0.48, blue: 0.47))
     }
 
     func testWebLinkPreviewServiceParsesOpenGraphMetadata() {
@@ -2631,6 +3259,31 @@ final class NotchCopilotTests: XCTestCase {
         }
     }
 
+    func testCopilotActionBarsHideUnavailableControlsInsteadOfRenderingDisabledButtons() throws {
+        let source = try String(
+            contentsOf: sourceRootURL().appendingPathComponent("NotchCopilot/UI/MeetingPanelView.swift"),
+            encoding: .utf8
+        )
+
+        let quickActionsStart = try XCTUnwrap(source.range(of: "private var copilotQuickActions: some View")?.lowerBound)
+        let quickActionsEnd = try XCTUnwrap(source.range(of: "\n    private var canCopySelectedAnswer", range: quickActionsStart..<source.endIndex)?.lowerBound)
+        let quickActions = String(source[quickActionsStart..<quickActionsEnd])
+        XCTAssertTrue(quickActions.contains("if hasSourceLink"))
+        XCTAssertTrue(quickActions.contains("if canRegenerateSelectedAnswerWithWeb"))
+        XCTAssertFalse(quickActions.contains("hand.thumbsup"))
+        XCTAssertFalse(quickActions.contains("hand.thumbsdown"))
+        XCTAssertFalse(quickActions.contains("isDisabled: !hasSourceLink"))
+        XCTAssertFalse(quickActions.contains("isDisabled: appState.currentMeeting != nil"))
+
+        let actionStripStart = try XCTUnwrap(source.range(of: "private var actionStrip: some View")?.lowerBound)
+        let actionStripEnd = try XCTUnwrap(source.range(of: "\nprivate struct WebSourcePreviewView", range: actionStripStart..<source.endIndex)?.lowerBound)
+        let actionStrip = String(source[actionStripStart..<actionStripEnd])
+        XCTAssertTrue(actionStrip.contains("if entry.hasSourceLink"))
+        XCTAssertTrue(actionStrip.contains("if entry.interaction != nil"))
+        XCTAssertTrue(actionStrip.contains("if hasPrompt"))
+        XCTAssertFalse(actionStrip.contains("isDisabled:"))
+    }
+
     func testIslandWindowPlacementStaysPinnedToScreenTop() {
         let screenFrame = CGRect(x: 0, y: 0, width: 1512, height: 982)
         let size = CGSize(width: 640.4, height: 548.2)
@@ -2819,6 +3472,17 @@ final class NotchCopilotTests: XCTestCase {
         )
     }
 
+    func testSpeechVocabularyTermCollapsesAnyWhitespaceWithoutLiteralSpaceTokenization() {
+        let term = SpeechVocabularyTerm(
+            text: "  zero_auth\t\tworkaround\nflow  ",
+            locale: "en-US",
+            category: .technicalTerm
+        )
+
+        XCTAssertEqual(term.text, "zero auth workaround flow")
+        XCTAssertEqual(SpeechVocabularyTerm.cleaned("OAuth\u{00a0}\trollback"), "OAuth rollback")
+    }
+
     func testSpeechVocabularyContextBuilderUsesLocaleScopeAndWeights() {
         var preferences = AppPreferences()
         preferences.defaultLanguage = SupportedLanguage.portugueseBR.rawValue
@@ -2850,6 +3514,155 @@ final class NotchCopilotTests: XCTestCase {
         XCTAssertFalse(context.contextualStrings.contains("DisabledTerm"))
         XCTAssertLessThanOrEqual(context.contextualStrings.count, 100)
         XCTAssertEqual(context.status, "Custom vocabulary active")
+    }
+
+    func testSpeechVocabularyRuntimePolicyControlsSuggestionsAndContextWeights() throws {
+        var runtimePolicy = SpeechVocabularyRuntimePolicy.fallback
+        runtimePolicy.maxContextualStrings = 2
+        runtimePolicy.maxLanguageModelTerms = 3
+        runtimePolicy.suggestionTokenPreservedCharacters = "/-"
+        runtimePolicy.suggestedMinimumTokenLength = 2
+        runtimePolicy.suggestedPreferredMinimumTokenLength = 6
+        runtimePolicy.tokenizationStrategy = .scalarSplit
+        runtimePolicy.suggestedBoost = 2.1
+        runtimePolicy.suggestedNotes = "Policy suggested"
+        runtimePolicy.meetingTitleMinimumTermLength = 6
+        runtimePolicy.meetingTitleTermWeight = 2.0
+        runtimePolicy.scopedTermBoost = 0.5
+        runtimePolicy.titleMentionBoost = 0.25
+        runtimePolicy.useCountWeightDivisor = 4
+        runtimePolicy.useCountWeightMaximum = 1.0
+        runtimePolicy.correctionCountWeightDivisor = 2
+        runtimePolicy.correctionCountWeightMaximum = 1.5
+        runtimePolicy.maximumTermWeight = 5
+
+        let container = try DatabaseFactory.makeContainer(inMemory: true)
+        let store = SpeechVocabularyStore(container: container, cryptor: try testCryptor())
+        let segment = TranscriptSegment(meetingId: UUID(), speakerLabel: "Speaker", text: "Feature/API auth-service ordinary")
+        let suggestions = store.suggestedTerms(
+            from: [segment],
+            locale: "en-US",
+            limit: 5,
+            runtimePolicy: runtimePolicy
+        )
+
+        let featureAPI = try XCTUnwrap(suggestions.first { $0.text == "Feature/API" })
+        XCTAssertEqual(featureAPI.boost, 2.1, accuracy: 0.001)
+        XCTAssertEqual(featureAPI.notes, "Policy suggested")
+
+        var preferences = AppPreferences()
+        preferences.defaultLanguage = "en-US"
+        let session = MeetingSession(
+            title: "API LaunchPlan Go",
+            primaryLanguage: "en-US",
+            meetingType: .engineering
+        )
+        let context = SpeechVocabularyContextBuilder(runtimePolicy: runtimePolicy).build(
+            terms: [
+                SpeechVocabularyTerm(
+                    text: "API",
+                    locale: "en-US",
+                    category: .technicalTerm,
+                    boost: 1.0,
+                    scope: .meetingType,
+                    scopeValue: MeetingType.engineering.rawValue,
+                    correctionCount: 2,
+                    useCount: 4
+                )
+            ],
+            session: session,
+            preferences: preferences
+        )
+
+        let api = try XCTUnwrap(context.terms.first { $0.text == "API" })
+        XCTAssertEqual(api.weight, 3.75, accuracy: 0.001)
+        let titleTerm = try XCTUnwrap(context.terms.first { $0.text == "LaunchPlan" })
+        XCTAssertEqual(titleTerm.weight, 2.0, accuracy: 0.001)
+        XCTAssertLessThanOrEqual(context.contextualStrings.count, 2)
+        XCTAssertLessThanOrEqual(context.activeTermsForLanguageModel.count, 3)
+    }
+
+    func testSpeechVocabularyRuntimePolicyTokenizesCompactScriptsForSuggestionsAndTitles() throws {
+        var runtimePolicy = SpeechVocabularyRuntimePolicy.fallback
+        runtimePolicy.tokenizationStrategy = .automatic
+        runtimePolicy.suggestedMinimumTokenLength = 4
+        runtimePolicy.suggestedPreferredMinimumTokenLength = 8
+        runtimePolicy.meetingTitleMinimumTermLength = 4
+        runtimePolicy.compactScriptMinimumTermLength = 2
+
+        let container = try DatabaseFactory.makeContainer(inMemory: true)
+        let store = SpeechVocabularyStore(container: container, cryptor: try testCryptor())
+        let segment = TranscriptSegment(meetingId: UUID(), speakerLabel: "Speaker", text: "認証移行のリスク")
+        let suggestions = store.suggestedTerms(
+            from: [segment],
+            locale: "ja-JP",
+            limit: 8,
+            runtimePolicy: runtimePolicy
+        )
+
+        XCTAssertTrue(suggestions.contains { $0.text == "認証" })
+        XCTAssertTrue(suggestions.contains { $0.text == "移行" })
+        XCTAssertTrue(suggestions.contains { $0.text == "リスク" })
+
+        var preferences = AppPreferences()
+        preferences.defaultLanguage = "ja-JP"
+        let session = MeetingSession(
+            title: "認証移行レビュー",
+            primaryLanguage: "ja-JP",
+            meetingType: .engineering
+        )
+        let context = SpeechVocabularyContextBuilder(runtimePolicy: runtimePolicy).build(
+            terms: [],
+            session: session,
+            preferences: preferences
+        )
+
+        XCTAssertTrue(context.terms.contains { $0.text == "認証" && $0.source == "meeting" })
+        XCTAssertTrue(context.terms.contains { $0.text == "移行" && $0.source == "meeting" })
+        XCTAssertTrue(context.terms.contains { $0.text == "レビュー" && $0.source == "meeting" })
+    }
+
+    func testSpeechVocabularySuggestsDynamicMultiwordPhrases() throws {
+        var runtimePolicy = SpeechVocabularyRuntimePolicy.fallback
+        runtimePolicy.tokenizationStrategy = .scalarSplit
+        runtimePolicy.suggestedMinimumTokenLength = 3
+        runtimePolicy.suggestedPreferredMinimumTokenLength = 9
+        runtimePolicy.suggestedPhraseMinimumTokenCount = 2
+        runtimePolicy.suggestedPhraseMaximumTokenCount = 3
+        runtimePolicy.suggestedPhraseMinimumCharacterCount = 8
+
+        let container = try DatabaseFactory.makeContainer(inMemory: true)
+        let store = SpeechVocabularyStore(container: container, cryptor: try testCryptor())
+        let segment = TranscriptSegment(
+            meetingId: UUID(),
+            speakerLabel: "Speaker",
+            text: "linked list linked list binary tree auth-service rollback"
+        )
+        let suggestions = store.suggestedTerms(
+            from: [segment],
+            locale: "en-US",
+            limit: 8,
+            runtimePolicy: runtimePolicy
+        )
+
+        XCTAssertEqual(suggestions.first?.text, "linked list")
+        XCTAssertTrue(suggestions.contains { $0.text == "binary tree" })
+        XCTAssertTrue(suggestions.contains { $0.text == "auth-service rollback" })
+
+        var preferences = AppPreferences()
+        preferences.defaultLanguage = "en-US"
+        let session = MeetingSession(
+            title: "Binary Tree Parser Review",
+            primaryLanguage: "en-US",
+            meetingType: .engineering
+        )
+        let context = SpeechVocabularyContextBuilder(runtimePolicy: runtimePolicy).build(
+            terms: [],
+            session: session,
+            preferences: preferences
+        )
+
+        XCTAssertTrue(context.terms.contains { $0.text == "Binary Tree" && $0.source == "meeting" })
     }
 
     func testSpeechAudioTimelineClockUsesAccumulatedDurationsWhenTimestampsAreMissingOrRegressive() {
@@ -5999,6 +6812,2706 @@ final class NotchCopilotTests: XCTestCase {
         }
     }
 
+    func testRealtimeQADetectsScreenshotQuestionsWithoutPunctuation() async throws {
+        let cases = [
+            "Quais são as notícias de hoje",
+            "Quais as notícias de hoje",
+            "Qual a capital da França",
+            "Como funciona o algoritmo de duas formas",
+            "Como funciona uma Linked list",
+            "Como inverter uma árvore binária em Python",
+            "Como inverter uma árvore binária em Java script"
+        ]
+
+        let detector = QuestionDetectionService()
+        let classifier = QuestionClassifier()
+
+        for text in cases {
+            let segment = TranscriptSegment(meetingId: UUID(), speakerLabel: "Interviewer", text: text, originalLanguage: "pt-BR")
+            let context = TranscriptContext(recentTranscript: text, mediumTranscript: text, completeTranscript: text, dominantLanguage: "pt-BR", currentSegment: segment)
+            let candidates = detector.detectCandidates(from: segment, context: context)
+            XCTAssertFalse(candidates.isEmpty, "Expected surface detection for: \(text)")
+
+            let candidate = try XCTUnwrap(candidates.first)
+            XCTAssertTrue(
+                candidate.discovery.surfaceSignals.contains(QuestionUnderstandingSignal.answerableObjectFocus.rawValue),
+                "Expected dynamic object focus signal for: \(text)"
+            )
+            let classification = try await classifier.classifyQuestion(candidate: candidate, context: context, userProfile: makeProfile())
+            XCTAssertTrue(classification.responseNeeded, "Expected answer generation for \(text): \(classification.reason)")
+            XCTAssertTrue(classification.complete, "Expected complete question for: \(text)")
+            XCTAssertNotEqual(classification.priority, .low, "Expected surfaced priority for: \(text)")
+        }
+    }
+
+    func testRealtimeQADetectionUsesProfileForMultiTokenAddressedQuestion() throws {
+        let text = "Larissa Miyoshi can we ship OAuth by Friday"
+        let segment = TranscriptSegment(meetingId: UUID(), speakerLabel: "Speaker", text: text, originalLanguage: "en-US")
+        let context = TranscriptContext(recentTranscript: text, mediumTranscript: text, completeTranscript: text, dominantLanguage: "en-US", currentSegment: segment)
+        let profile = UserMeetingProfile(
+            userName: "Larissa Miyoshi",
+            userAliases: ["Larissa Miyoshi"],
+            userRole: "Engineer",
+            preferredStyle: .technical,
+            preferredLanguages: ["en-US"],
+            meetingType: .engineering
+        )
+        let detector = QuestionDetectionService()
+
+        XCTAssertTrue(detector.detectCandidates(from: segment, context: context).isEmpty)
+
+        let candidate = try XCTUnwrap(detector.detectCandidates(from: segment, context: context, profile: profile).first)
+        XCTAssertTrue(candidate.discovery.surfaceSignals.contains(QuestionUnderstandingSignal.modalQuestionFrame.rawValue))
+        XCTAssertTrue(candidate.discovery.surfaceSignals.contains(QuestionUnderstandingSignal.directedToUser.rawValue))
+    }
+
+    func testRealtimeQAClassifierCarriesProfileIntoIntentGateForAddressedQuestion() async throws {
+        let text = "Larissa Miyoshi can we ship OAuth by Friday"
+        let segment = TranscriptSegment(meetingId: UUID(), speakerLabel: "Speaker", text: text, originalLanguage: "en-US")
+        let context = TranscriptContext(recentTranscript: text, mediumTranscript: text, completeTranscript: text, dominantLanguage: "en-US", currentSegment: segment)
+        let profile = UserMeetingProfile(
+            userName: "Larissa Miyoshi",
+            userAliases: ["Larissa Miyoshi"],
+            userRole: "Engineer",
+            preferredStyle: .technical,
+            preferredLanguages: ["en-US"],
+            meetingType: .engineering
+        )
+        let candidate = try XCTUnwrap(QuestionDetectionService().detectCandidates(from: segment, context: context, profile: profile).first)
+
+        let intent = QuestionIntentGate().evaluate(candidate: candidate, context: context, profile: profile)
+        let classification = try await QuestionClassifier().classifyQuestion(candidate: candidate, context: context, userProfile: profile)
+
+        XCTAssertTrue(intent.isAnswerableQuestion, intent.reason)
+        XCTAssertTrue(classification.responseNeeded, classification.reason)
+        XCTAssertTrue(classification.directedToUser)
+        XCTAssertNotEqual(classification.priority, .low)
+    }
+
+    func testRealtimeQAIntentRulePackLoadsFromResourcePolicy() {
+        let rulePack = QuestionIntentRulePack.default
+
+        XCTAssertFalse(rulePack.directQuestionMarkers.isEmpty)
+        XCTAssertTrue(rulePack.directQuestionMarkers.contains("qual"))
+        XCTAssertTrue(rulePack.actionRequestMarkers.contains("please review"))
+        XCTAssertTrue(rulePack.discourseLeadPhrases.contains("quick question"))
+        XCTAssertTrue(rulePack.embeddedQuestionSplitPreambleMarkers.contains("quick question"))
+        XCTAssertTrue(rulePack.embeddedQuestionSplitContinuationLeadMarkers.contains("la duda es"))
+        XCTAssertGreaterThan(rulePack.embeddedQuestionSplitMaximumPreambleTokens, 0)
+        XCTAssertTrue(rulePack.groupAddressMarkers.contains("team"))
+        XCTAssertFalse(rulePack.groupAddressMarkers.contains("ryan"))
+        XCTAssertTrue(rulePack.numericWords.contains("two"))
+        XCTAssertTrue(rulePack.numericOperatorMarkers.contains("mais"))
+        XCTAssertFalse(rulePack.stopWords.isEmpty)
+    }
+
+    func testQuestionIntentRulePackResourceJSONDecodesDirectly() throws {
+        let resourceURL = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .appendingPathComponent("NotchCopilot/Resources/CopilotIntentPolicy/question-intent-rulepack.json")
+        let data = try Data(contentsOf: resourceURL)
+        let decoded = try JSONDecoder().decode(QuestionIntentRulePack.self, from: data)
+
+        XCTAssertFalse(decoded.directQuestionMarkers.isEmpty)
+        XCTAssertFalse(decoded.embeddedQuestionSplitPreambleMarkers.isEmpty)
+        XCTAssertFalse(decoded.embeddedQuestionSplitContinuationLeadMarkers.isEmpty)
+        XCTAssertGreaterThan(decoded.embeddedQuestionSplitMaximumPreambleTokens, 0)
+        XCTAssertNotNil(decoded.surfaceScoring)
+        XCTAssertNotNil(decoded.surfaceCandidate)
+        XCTAssertNotNil(decoded.gateScoring)
+        XCTAssertNotNil(decoded.textSegmentation)
+        XCTAssertNotNil(decoded.contextualCue)
+    }
+
+    func testQuestionIntentRulePackDefaultsArePolicyOwned() throws {
+        let decoded = try JSONDecoder().decode(QuestionIntentRulePack.self, from: Data("{}".utf8))
+
+        XCTAssertTrue(decoded.directQuestionMarkers.isEmpty)
+        XCTAssertTrue(decoded.indirectQuestionMarkers.isEmpty)
+        XCTAssertTrue(decoded.actionRequestMarkers.isEmpty)
+        XCTAssertTrue(decoded.modalQuestionStarters.isEmpty)
+        XCTAssertTrue(decoded.domainHintMarkers.isEmpty)
+        XCTAssertTrue(decoded.embeddedQuestionSplitPreambleMarkers.isEmpty)
+        XCTAssertTrue(decoded.embeddedQuestionSplitContinuationLeadMarkers.isEmpty)
+        XCTAssertEqual(decoded.embeddedQuestionSplitMaximumPreambleTokens, 0)
+        XCTAssertTrue(decoded.stopWords.isEmpty)
+        XCTAssertTrue(decoded.hardSuppressionSignals.isEmpty)
+        XCTAssertNil(decoded.surfaceCandidate)
+        XCTAssertNil(decoded.surfaceScoring)
+        XCTAssertNil(decoded.gateScoring)
+        XCTAssertNil(decoded.textSegmentation)
+        XCTAssertNil(decoded.contextualCue)
+        XCTAssertEqual(decoded.answerableScoreThreshold, 1.45, accuracy: 0.001)
+        XCTAssertEqual(decoded.partialQuestionPenalty, 0.2, accuracy: 0.001)
+    }
+
+    func testQuestionIntentRulePackPartialDecodePreservesPolicyValues() throws {
+        let decoded = try JSONDecoder().decode(
+            QuestionIntentRulePack.self,
+            from: Data(
+                """
+                {
+                  "directQuestionMarkers": ["como"],
+                  "signalLabels": { "fragment": "frag" },
+                  "reasons": { "answerable": "ok" },
+                  "surfaceScoring": {
+                    "questionInterrogativeScore": 0.91,
+                    "insufficientSurfaceConfidenceCeiling": 0.39
+                  },
+                  "surfaceCandidate": {
+                    "punctuatedAnySignals": ["terminal_question_mark"]
+                  },
+                  "gateScoring": { "directQuestionMarkerWeight": 0.33 },
+                  "textSegmentation": { "minimumFrameCharacters": 7 },
+                  "contextualCue": { "minimumSingleTokenObservations": 4 }
+                }
+                """.utf8
+            )
+        )
+
+        XCTAssertEqual(decoded.directQuestionMarkers, ["como"])
+        XCTAssertTrue(decoded.actionRequestMarkers.isEmpty)
+        XCTAssertTrue(decoded.modalQuestionStarters.isEmpty)
+        XCTAssertTrue(decoded.embeddedQuestionSplitPreambleMarkers.isEmpty)
+        XCTAssertTrue(decoded.embeddedQuestionSplitContinuationLeadMarkers.isEmpty)
+        XCTAssertEqual(decoded.embeddedQuestionSplitMaximumPreambleTokens, 0)
+        XCTAssertTrue(decoded.hardSuppressionSignals.isEmpty)
+        XCTAssertEqual(decoded.signalLabels.fragment, "frag")
+        XCTAssertEqual(decoded.signalLabels.empty, QuestionIntentSignalLabels.fallback.empty)
+        XCTAssertEqual(decoded.reasons.answerable, "ok")
+        XCTAssertEqual(decoded.reasons.rhetorical, QuestionIntentReasonPolicy.fallback.rhetorical)
+        XCTAssertEqual(decoded.surfaceScoringPolicy.questionInterrogativeScore, 0.91, accuracy: 0.001)
+        XCTAssertEqual(decoded.surfaceScoringPolicy.insufficientSurfaceConfidenceCeiling, 0.39, accuracy: 0.001)
+        XCTAssertEqual(decoded.surfaceScoringPolicy.questionModalScore, QuestionSurfaceScoringPolicy.fallback.questionModalScore, accuracy: 0.001)
+        XCTAssertEqual(decoded.surfaceCandidatePolicy.punctuatedAnySignals, [.terminalQuestionMark])
+        XCTAssertTrue(decoded.surfaceCandidatePolicy.unpunctuatedGroups.isEmpty)
+        XCTAssertTrue(decoded.surfaceCandidatePolicy.weakQuestionWordOnlySignals.isEmpty)
+        XCTAssertEqual(decoded.gateScoringPolicy.directQuestionMarkerWeight, 0.33, accuracy: 0.001)
+        XCTAssertEqual(decoded.gateScoringPolicy.actionRequestMarkerWeight, QuestionIntentGateScoringPolicy.fallback.actionRequestMarkerWeight, accuracy: 0.001)
+        XCTAssertEqual(decoded.textSegmentationPolicy.minimumFrameCharacters, 7)
+        XCTAssertTrue(decoded.textSegmentationPolicy.codeIdentifierPatterns.isEmpty)
+        XCTAssertEqual(decoded.contextualCuePolicy.minimumSingleTokenObservations, 4)
+        XCTAssertEqual(decoded.contextualCuePolicy.maximumLeadTokenCount, QuestionContextualCuePolicy.fallback.maximumLeadTokenCount)
+    }
+
+    func testQuestionClassificationDefaultsArePolicyOwned() throws {
+        let decoded = try JSONDecoder().decode(QuestionClassificationRulePack.self, from: Data("{}".utf8))
+
+        XCTAssertTrue(decoded.typeRules.isEmpty)
+        XCTAssertTrue(decoded.selfSpeakerLabels.isEmpty)
+        XCTAssertTrue(decoded.directedToUserMarkers.isEmpty)
+        XCTAssertTrue(decoded.directedToGroupMarkers.isEmpty)
+        XCTAssertTrue(decoded.actionableMarkers.isEmpty)
+        XCTAssertTrue(decoded.informationalMarkers.isEmpty)
+        XCTAssertTrue(decoded.technicalObjectMarkers.isEmpty)
+        XCTAssertTrue(decoded.technicalDecisionFrameMarkers.isEmpty)
+        XCTAssertTrue(decoded.technicalDecisionObjectMarkers.isEmpty)
+        XCTAssertTrue(decoded.technicalExplanationFrameMarkers.isEmpty)
+        XCTAssertTrue(decoded.responseJustificationRules.isEmpty)
+        XCTAssertTrue(decoded.attentionRules.isEmpty)
+        XCTAssertTrue(decoded.multimodalPolicy.hardSuppressionSignals.isEmpty)
+        XCTAssertTrue(decoded.multimodalPolicy.hardSuppressionSignalKeys.isEmpty)
+        XCTAssertTrue(decoded.multimodalPolicy.effectiveHardSuppressionSignals.isEmpty)
+        XCTAssertNil(decoded.decisionGatePolicy)
+        XCTAssertTrue(decoded.confidencePolicy.typeBonusTypes.isEmpty)
+        XCTAssertTrue(decoded.answerStylePolicy.stylesByType.isEmpty)
+        XCTAssertFalse(decoded.technicalInferencePolicy.applies(to: .engineering))
+        XCTAssertFalse(decoded.technicalInferencePolicy.usesCodeIdentifierCharacters)
+        XCTAssertTrue(decoded.technicalInferencePolicy.identifierPatterns.isEmpty)
+        XCTAssertTrue(QuestionClassificationConfidencePolicy.fallback.typeBonusTypes.isEmpty)
+        XCTAssertTrue(QuestionAnswerStylePolicy.fallback.stylesByType.isEmpty)
+        XCTAssertFalse(QuestionTechnicalInferencePolicy.fallback.applies(to: .engineering))
+        XCTAssertFalse(QuestionTechnicalInferencePolicy.fallback.usesCodeIdentifierCharacters)
+        XCTAssertTrue(QuestionTechnicalInferencePolicy.fallback.identifierPatterns.isEmpty)
+    }
+
+    func testQuestionClassificationNestedPoliciesDecodePartialsWithoutSemanticFallbacks() throws {
+        let decoded = try JSONDecoder().decode(
+            QuestionClassificationRulePack.self,
+            from: Data(
+                """
+                {
+                  "multimodalPolicy": {
+                    "partialStableThreshold": 0.73,
+                    "hardSuppressionSignalKeys": ["partialUnstable"],
+                    "signalLabels": { "partialUnstable": "unstable_custom" }
+                  },
+                  "decisionGatePolicy": {
+                    "modeThresholds": {
+                      "balanced": { "requiredStrongSignalCount": 3 }
+                    },
+                    "partialCompleteShapeConfidenceDelta": 0.2
+                  },
+                  "confidencePolicy": {
+                    "typedQuestionBonus": 0.2,
+                    "ignoredFilterConfidence": 0.31,
+                    "rejectedGateConfidenceCeiling": 0.41
+                  },
+                  "answerStylePolicy": { "defaultStyle": "technical" },
+                  "technicalInferencePolicy": { "usesCodeIdentifierCharacters": true }
+                }
+                """.utf8
+            )
+        )
+
+        XCTAssertEqual(decoded.multimodalPolicy.partialStableThreshold, 0.73, accuracy: 0.001)
+        XCTAssertTrue(decoded.multimodalPolicy.hardSuppressionSignals.isEmpty)
+        XCTAssertEqual(decoded.multimodalPolicy.hardSuppressionSignalKeys, [.partialUnstable])
+        XCTAssertEqual(decoded.multimodalPolicy.effectiveHardSuppressionSignals, ["unstable_custom"])
+        XCTAssertEqual(decoded.multimodalPolicy.signalLabels.partialUnstable, "unstable_custom")
+        XCTAssertEqual(decoded.multimodalPolicy.signalLabels.silence, QuestionMultimodalSignalLabels.fallback.silence)
+
+        let decisionGate = try XCTUnwrap(decoded.decisionGatePolicy)
+        XCTAssertEqual(decisionGate.modeThresholds["balanced"]?.requiredStrongSignalCount, 3)
+        XCTAssertTrue(decisionGate.ignoredSignals.isEmpty)
+        XCTAssertTrue(decisionGate.partialStrictSignals.isEmpty)
+        XCTAssertTrue(decisionGate.partialCompleteShapeSignals.isEmpty)
+
+        XCTAssertEqual(decoded.confidencePolicy.typedQuestionBonus, 0.2, accuracy: 0.001)
+        XCTAssertEqual(decoded.confidencePolicy.ignoredFilterConfidence, 0.31, accuracy: 0.001)
+        XCTAssertEqual(decoded.confidencePolicy.rejectedGateConfidenceCeiling, 0.41, accuracy: 0.001)
+        XCTAssertTrue(decoded.confidencePolicy.typeBonusTypes.isEmpty)
+        XCTAssertEqual(decoded.answerStylePolicy.defaultStyle, .technical)
+        XCTAssertTrue(decoded.answerStylePolicy.stylesByType.isEmpty)
+        XCTAssertFalse(decoded.technicalInferencePolicy.applies(to: .engineering))
+        XCTAssertTrue(decoded.technicalInferencePolicy.usesCodeIdentifierCharacters)
+        XCTAssertTrue(decoded.technicalInferencePolicy.identifierPatterns.isEmpty)
+    }
+
+    func testQuestionTechnicalInferenceOmittedFieldsArePolicyOwned() throws {
+        let decoded = try JSONDecoder().decode(QuestionTechnicalInferencePolicy.self, from: Data("{}".utf8))
+
+        XCTAssertFalse(decoded.applies(to: .engineering))
+        XCTAssertFalse(decoded.usesCodeIdentifierCharacters)
+        XCTAssertTrue(decoded.appliesToMeetingTypes.isEmpty)
+        XCTAssertTrue(decoded.identifierPatterns.isEmpty)
+        XCTAssertEqual(decoded.decisionType, .technicalDecision)
+        XCTAssertEqual(decoded.explanationType, .technicalExplanation)
+    }
+
+    func testQuestionPriorityDefaultsArePolicyOwned() throws {
+        let decoded = try JSONDecoder().decode(QuestionPriorityPolicy.self, from: Data("{}".utf8))
+
+        XCTAssertTrue(decoded.priorityRules.isEmpty)
+        XCTAssertTrue(decoded.urgentMarkers.isEmpty)
+        XCTAssertTrue(decoded.directedHighPriorityTypes.isEmpty)
+        XCTAssertTrue(decoded.highPriorityTypes.isEmpty)
+        XCTAssertTrue(decoded.mediumPriorityTypes.isEmpty)
+        XCTAssertEqual(decoded.directedToUserFloor, .low)
+        XCTAssertEqual(decoded.directedToGroupFloor, .low)
+        XCTAssertEqual(decoded.actionableFloor, .low)
+
+        let candidate = makeQuestion("Ryan, this security incident is blocking production")
+        XCTAssertEqual(
+            QuestionPriorityScorer(policy: decoded).priority(
+                for: candidate,
+                type: .riskAssessment,
+                directedToUser: true,
+                directedToGroup: true,
+                actionable: true,
+                responseNeeded: true
+            ),
+            .low
+        )
+    }
+
+    func testQuestionPriorityScorerUsesPolicyDrivenRules() throws {
+        let policy = try JSONDecoder().decode(
+            QuestionPriorityPolicy.self,
+            from: Data(
+                """
+                {
+                  "priorityRules": [
+                    {
+                      "id": "custom_action_urgent",
+                      "priority": "urgent",
+                      "questionTypes": ["general_question"],
+                      "markers": ["policy marker"],
+                      "requiresActionable": true
+                    },
+                    {
+                      "id": "custom_directed_medium",
+                      "priority": "medium",
+                      "requiresDirectedToUser": true
+                    },
+                    {
+                      "id": "custom_signal_high",
+                      "priority": "high",
+                      "allSignals": ["semantic_question_shape"],
+                      "anySignals": ["domain_object", "answerable_object_focus"]
+                    }
+                  ]
+                }
+                """.utf8
+            )
+        )
+        let scorer = QuestionPriorityScorer(policy: policy)
+        let candidate = makeQuestion("Can you check this policy marker")
+
+        XCTAssertEqual(
+            scorer.priority(
+                for: candidate,
+                type: .generalQuestion,
+                directedToUser: true,
+                directedToGroup: false,
+                actionable: true,
+                responseNeeded: true
+            ),
+            .urgent
+        )
+        XCTAssertEqual(
+            scorer.priority(
+                for: makeQuestion("Ryan, this security incident is blocking production"),
+                type: .riskAssessment,
+                directedToUser: true,
+                directedToGroup: true,
+                actionable: true,
+                responseNeeded: true
+            ),
+            .medium
+        )
+        XCTAssertEqual(
+            scorer.priority(
+                for: makeQuestion("Could we evaluate this architecture"),
+                type: .generalQuestion,
+                directedToUser: false,
+                directedToGroup: false,
+                actionable: false,
+                signals: [.semanticQuestionShape, .domainObject],
+                responseNeeded: true
+            ),
+            .high
+        )
+        XCTAssertEqual(
+            scorer.priority(
+                for: makeQuestion("Could we evaluate this architecture"),
+                type: .generalQuestion,
+                directedToUser: false,
+                directedToGroup: false,
+                actionable: false,
+                signals: [.semanticQuestionShape],
+                responseNeeded: true
+            ),
+            .low
+        )
+        XCTAssertEqual(
+            scorer.priority(
+                for: candidate,
+                type: .generalQuestion,
+                directedToUser: true,
+                directedToGroup: false,
+                actionable: true,
+                responseNeeded: false
+            ),
+            .low
+        )
+    }
+
+    func testQuestionPriorityScorerDerivesLegacyFieldsAsPolicyRules() throws {
+        let scorer = QuestionPriorityScorer(policy: QuestionPriorityPolicy(
+            urgentMarkers: ["customer down"],
+            directedHighPriorityTypes: [.technicalDecision],
+            highPriorityTypes: [.riskAssessment],
+            mediumPriorityTypes: [.generalQuestion],
+            directedToUserFloor: .medium,
+            directedToGroupFloor: .medium,
+            actionableFloor: .medium
+        ))
+
+        XCTAssertEqual(
+            scorer.priority(
+                for: makeQuestion("Ryan, customer down in production"),
+                type: .generalQuestion,
+                directedToUser: true,
+                directedToGroup: false,
+                actionable: false,
+                responseNeeded: true
+            ),
+            .urgent
+        )
+        XCTAssertEqual(
+            scorer.priority(
+                for: makeQuestion("Should we keep this architecture?"),
+                type: .technicalDecision,
+                directedToUser: true,
+                directedToGroup: false,
+                actionable: false,
+                responseNeeded: true
+            ),
+            .high
+        )
+        XCTAssertEqual(
+            scorer.priority(
+                for: makeQuestion("Could we review this?"),
+                type: .generalQuestion,
+                directedToUser: false,
+                directedToGroup: false,
+                actionable: true,
+                responseNeeded: true
+            ),
+            .medium
+        )
+        XCTAssertEqual(
+            scorer.priority(
+                for: makeQuestion("Customer down in production"),
+                type: .generalQuestion,
+                directedToUser: false,
+                directedToGroup: false,
+                actionable: false,
+                responseNeeded: true
+            ),
+            .medium
+        )
+    }
+
+    func testQuestionClassifierPassesUnderstandingSignalsIntoPriorityScorer() async throws {
+        let text = "How do we invert a binary tree in Python?"
+        let candidate = makeQuestion(text)
+        let priorityScorer = QuestionPriorityScorer(policy: QuestionPriorityPolicy(
+            priorityRules: [
+                QuestionPriorityRule(
+                    id: "semantic_object_signal_priority",
+                    priority: .high,
+                    anySignals: [.domainObject, .concreteObject, .answerableObjectFocus]
+                )
+            ]
+        ))
+
+        let classification = try await QuestionClassifier(
+            priorityScorer: priorityScorer,
+            precisionMode: .balanced
+        )
+        .classifyQuestion(candidate: candidate, context: makeContext(text), userProfile: makeProfile())
+
+        XCTAssertEqual(classification.priority, .high)
+        XCTAssertTrue(classification.responseNeeded)
+    }
+
+    func testRealtimeQAClassificationPriorityRAGAndSpeechPoliciesLoadFromResources() {
+        let classificationRulePack = QuestionClassificationRulePack.default
+        XCTAssertFalse(classificationRulePack.typeRules.isEmpty)
+        XCTAssertTrue(classificationRulePack.technicalObjectMarkers.contains("python"))
+        XCTAssertTrue(classificationRulePack.technicalExplanationFrameMarkers.contains("como"))
+        XCTAssertTrue(classificationRulePack.typeRules.contains {
+            $0.type == .actionRequest
+                && $0.markers.isEmpty
+                && $0.anySignals.contains(.actionRequestFrame)
+        })
+
+        let priorityPolicy = QuestionPriorityPolicy.default
+        XCTAssertTrue(priorityPolicy.priorityRules.contains { $0.id == "directed_urgent_marker" && $0.priority == .urgent })
+        XCTAssertTrue(priorityPolicy.priorityRules.contains {
+            $0.id == "answerable_action_signal"
+                && $0.allSignals.contains(.actionRequestFrame)
+                && $0.anySignals.contains(.answerableObjectFocus)
+        })
+        XCTAssertTrue(priorityPolicy.priorityRules.contains { $0.id == "medium_priority_type" && $0.questionTypes.contains(.generalQuestion) })
+        XCTAssertTrue(priorityPolicy.urgentMarkers.contains("security"))
+        XCTAssertTrue(priorityPolicy.highPriorityTypes.contains(.riskAssessment))
+        let urgentCandidate = makeQuestion("Ryan, this security incident is blocking production")
+        XCTAssertEqual(
+            QuestionPriorityScorer().priority(
+                for: urgentCandidate,
+                type: .riskAssessment,
+                directedToUser: true,
+                directedToGroup: false,
+                actionable: true,
+                responseNeeded: true
+            ),
+            .urgent
+        )
+
+        let ragPolicy = RAGQuestionContextPolicy.default
+        XCTAssertTrue(ragPolicy.expansionTerms(for: .riskAssessment).contains("rollback"))
+        XCTAssertTrue(ragPolicy.lowInformationWords.contains("what"))
+        XCTAssertEqual(ragPolicy.minimumExtractedTermLength, 3)
+        XCTAssertTrue(ragPolicy.extractedTermPreservedCharacters.contains("/"))
+        XCTAssertTrue(ragPolicy.dynamicEntityExtractionEnabled)
+        XCTAssertEqual(ragPolicy.maxDynamicPhrases, 8)
+        XCTAssertTrue(ragPolicy.dynamicPhrasePreservedCharacters.contains("."))
+        XCTAssertEqual(ragPolicy.tokenizationStrategy, .automatic)
+        XCTAssertEqual(ragPolicy.compactScriptMinimumTermLength, 2)
+        let riskClassification = QuestionClassification(
+            isQuestion: true,
+            rhetorical: false,
+            complete: true,
+            actionable: true,
+            responseNeeded: true,
+            userAttentionNeeded: true,
+            directedToUser: true,
+            directedToGroup: false,
+            questionType: .riskAssessment,
+            priority: .high,
+            confidence: 0.90,
+            reason: "test",
+            extractedQuestion: "Does login auth migration create production risk?",
+            expectedAnswerStyle: .technical
+        )
+        let ragQuery = RAGQuestionContextBuilder().query(
+            for: makeQuestion("Does login auth migration create production risk?"),
+            classification: riskClassification
+        )
+        XCTAssertTrue(ragQuery.contains("rollback"))
+        XCTAssertTrue(ragQuery.contains("login"))
+
+        let speechPolicy = SpeechVocabularySeedPolicy.default
+        XCTAssertEqual(speechPolicy.ambientSessionTitle, "Notchly")
+        XCTAssertTrue(speechPolicy.ambientSystemTerms.contains("Notchly"))
+        XCTAssertTrue(speechPolicy.technicalTerms.contains("Realtime API"))
+        XCTAssertEqual(speechPolicy.userNameBoost, 1.7, accuracy: 0.001)
+        XCTAssertEqual(speechPolicy.appTermBoost, 1.25, accuracy: 0.001)
+        XCTAssertEqual(speechPolicy.technicalTermBoost, 1.35, accuracy: 0.001)
+        XCTAssertEqual(speechPolicy.runtimePolicy.tokenizationStrategy, .automatic)
+        XCTAssertEqual(speechPolicy.runtimePolicy.compactScriptMinimumTermLength, 2)
+        XCTAssertEqual(speechPolicy.runtimePolicy.maxLanguageModelTerms, 400)
+        XCTAssertEqual(speechPolicy.runtimePolicy.suggestionTokenPreservedCharacters, "-")
+        XCTAssertEqual(speechPolicy.runtimePolicy.rescoreLowConfidenceThreshold, 0.88, accuracy: 0.001)
+
+        let realtimePolicy = RealtimeQuestionAnsweringPolicy.default
+        XCTAssertTrue(realtimePolicy.answerResolutionMarkers.contains("yes"))
+        XCTAssertTrue(realtimePolicy.incompleteActionFrames.contains("can you explain"))
+        XCTAssertTrue(realtimePolicy.danglingPartialTokens.contains("about"))
+        XCTAssertEqual(realtimePolicy.selfAnswerWindowSeconds, 20)
+        XCTAssertEqual(realtimePolicy.answerMaxSentences, 3)
+        XCTAssertFalse(realtimePolicy.answerAllowCommitments)
+        XCTAssertEqual(realtimePolicy.runtimeLabels.questionDismissedMessage, "Question dismissed.")
+        XCTAssertEqual(realtimePolicy.runtimeLabels.shadowIgnoredIntentGate, "ignored_intent_gate")
+        XCTAssertEqual(realtimePolicy.runtimeLabels.cloudDisabledFailureMessage, "Local-only mode is on and cloud answers are disabled.")
+        XCTAssertEqual(realtimePolicy.partialStabilityPolicy.similarityStableThreshold, 0.72)
+        XCTAssertEqual(realtimePolicy.partialStabilityPolicy.stableMinimumTokens, 4)
+        XCTAssertEqual(realtimePolicy.deferredPartialDetectionPolicy.deferredDetectionDelayMilliseconds, 950)
+        XCTAssertEqual(realtimePolicy.deferredPartialDetectionPolicy.minimumConfidence, 0.45)
+        XCTAssertEqual(realtimePolicy.multiqtRescuePolicy.minimumCandidateScore, 0.55)
+        XCTAssertEqual(realtimePolicy.multiqtRescuePolicy.partialMinimumStability, 0.82)
+        XCTAssertEqual(realtimePolicy.answerGenerationGatePolicy.allowedPriorities, Set([QuestionPriority.medium, .high, .urgent]))
+        XCTAssertTrue(realtimePolicy.answerGenerationGatePolicy.requiresResponseNeeded)
+        XCTAssertTrue(realtimePolicy.answerGenerationGatePolicy.requiresComplete)
+        XCTAssertTrue(realtimePolicy.answerGenerationGatePolicy.suppressesRhetorical)
+
+        let intentPolicy = QuestionIntentRulePack.default
+        XCTAssertTrue(intentPolicy.embeddedQuestionSplitMarkers.contains("can"))
+        XCTAssertTrue(intentPolicy.embeddedQuestionSplitPreambleMarkers.contains("quick question"))
+        XCTAssertTrue(intentPolicy.embeddedQuestionSplitContinuationLeadMarkers.contains("la duda es"))
+        XCTAssertEqual(intentPolicy.embeddedQuestionSplitMaximumPreambleTokens, 4)
+        XCTAssertTrue(intentPolicy.hardSuppressionSignals.contains(intentPolicy.signalLabels.fragment))
+        XCTAssertFalse(intentPolicy.reasons.highPrecisionInsufficient.isEmpty)
+        XCTAssertTrue(intentPolicy.rhetoricalSuffixLeadSeparators.contains("—"))
+        XCTAssertEqual(intentPolicy.rhetoricalSuffixMinimumLeadTokens, 3)
+        XCTAssertEqual(intentPolicy.surfaceScoringPolicy.cjkMinimumCharacters, 5)
+        XCTAssertEqual(intentPolicy.surfaceScoringPolicy.insufficientSurfaceConfidenceCeiling, 0.48, accuracy: 0.001)
+        XCTAssertGreaterThan(intentPolicy.surfaceScoringPolicy.questionInterrogativeScore, 0)
+        XCTAssertTrue(intentPolicy.surfaceCandidatePolicy.punctuatedAnySignals.contains(.interrogativeStarter))
+        XCTAssertTrue(intentPolicy.surfaceCandidatePolicy.weakQuestionWordOnlySignals.contains(.finalUtterance))
+        XCTAssertTrue(intentPolicy.surfaceCandidatePolicy.unpunctuatedGroups.contains { group in
+            group.all.contains(.adaptivePromotion) && group.minObjectFocusScore == 0.35
+        })
+        XCTAssertTrue(intentPolicy.surfaceCandidatePolicy.unpunctuatedGroups.contains { group in
+            group.all.contains(.contextualQuestionLead) && group.any.contains(.answerableObjectFocus)
+        })
+        XCTAssertEqual(intentPolicy.gateScoringPolicy.concreteObjectCJKMinimumCharacters, 4)
+        XCTAssertGreaterThan(intentPolicy.gateScoringPolicy.directQuestionMarkerWeight, 0)
+        XCTAssertEqual(intentPolicy.textSegmentationPolicy.minimumFrameCharacters, 4)
+        XCTAssertTrue(intentPolicy.textSegmentationPolicy.sentenceBoundaryCharacters.contains("؟"))
+        XCTAssertTrue(intentPolicy.textSegmentationPolicy.questionPunctuationCharacters.contains("؟"))
+        XCTAssertTrue(intentPolicy.textSegmentationPolicy.fragmentTerminalMarkers.contains("…"))
+        XCTAssertEqual(intentPolicy.textSegmentationPolicy.numericPayloadMinimumCount, 2)
+        XCTAssertTrue(intentPolicy.textSegmentationPolicy.codeIdentifierPatterns.contains(#"[A-Za-z]+[A-Z0-9][A-Za-z0-9]*"#))
+        XCTAssertEqual(intentPolicy.textSegmentationPolicy.tokenizationStrategy, .automatic)
+        XCTAssertEqual(intentPolicy.textSegmentationPolicy.compactScriptMinimumMeaningfulTokenLength, 2)
+        XCTAssertEqual(intentPolicy.textSegmentationPolicy.namedEntityRecognitionStrategy, .automatic)
+        XCTAssertTrue(intentPolicy.textSegmentationPolicy.containsCompactScript(in: "한국어"))
+        XCTAssertTrue(intentPolicy.textSegmentationPolicy.containsCompactScript(in: "ภาษาไทย"))
+        XCTAssertEqual(intentPolicy.contextualCuePolicy.minimumSingleTokenObservations, 2)
+        XCTAssertEqual(intentPolicy.contextualCuePolicy.maximumLeadTokenCount, 3)
+
+        let answerGenerationPolicy = AnswerGenerationPolicy.default
+        XCTAssertFalse(answerGenerationPolicy.noExternalSourceAssumption.isEmpty)
+        XCTAssertFalse(answerGenerationPolicy.caveats(for: .riskAssessment).isEmpty)
+        XCTAssertEqual(answerGenerationPolicy.defaultCopilotIntent, .answerableQuestion)
+        XCTAssertEqual(answerGenerationPolicy.copilotIntent(for: .actionRequest), .actionRequest)
+        XCTAssertTrue(answerGenerationPolicy.immediateDraftPriorities.contains(.urgent))
+        XCTAssertTrue(answerGenerationPolicy.emitImmediateDraftWhenRAGAvailable)
+        XCTAssertFalse(answerGenerationPolicy.provisionalDraft(for: "pt-BR")?.isEmpty ?? true)
+
+        let presentationPolicy = AnswerPresentationPolicy.default
+        XCTAssertTrue(presentationPolicy.codeQuestionMarkers.contains("python"))
+        XCTAssertTrue(presentationPolicy.commandLanguages.contains("shell"))
+        XCTAssertTrue(presentationPolicy.shortFactQuestionMarkers.contains("qual a"))
+        XCTAssertTrue(presentationPolicy.freshNewsQuestionMarkers.contains("news"))
+        XCTAssertTrue(presentationPolicy.comparisonQuestionTypes.contains(.riskAssessment))
+        XCTAssertTrue(presentationPolicy.shortFactQuestionTypes.contains(.generalQuestion))
+        XCTAssertEqual(presentationPolicy.decisionReasons.codeRequest, "code_request")
+        XCTAssertEqual(presentationPolicy.codeFenceMarker, "```")
+        XCTAssertTrue(presentationPolicy.sentenceTerminatorCharacters.contains("。"))
+        XCTAssertTrue(presentationPolicy.sentenceTerminatorCharacters.contains("؟"))
+        XCTAssertEqual(presentationPolicy.shortAnswerMaximumSentences, 2)
+        XCTAssertEqual(presentationPolicy.shortAnswerSentenceSeparator, " ")
+        XCTAssertEqual(presentationPolicy.shortAnswerDefaultTerminator, ".")
+        XCTAssertEqual(presentationPolicy.compactScriptShortAnswerDefaultTerminator, "。")
+        XCTAssertEqual(presentationPolicy.duplicateTokenOverlapThreshold, 0.85, accuracy: 0.001)
+        XCTAssertEqual(presentationPolicy.structuredDataWrapperPairs, ["{}", "[]"])
+
+        let classificationPolicy = QuestionClassificationRulePack.default
+        XCTAssertTrue(classificationPolicy.selfSpeakerLabels.contains("you"))
+        XCTAssertTrue(classificationPolicy.intrinsicallyActionableTypes.contains(.riskAssessment))
+        XCTAssertTrue(classificationPolicy.responseJustifyingTypes.contains(.technicalExplanation))
+        XCTAssertTrue(classificationPolicy.responseJustifyingSignals.contains(.indirectQuestionFrame))
+        XCTAssertTrue(classificationPolicy.responseJustifyingSignalGroups.contains { group in
+            Set(group) == Set([QuestionUnderstandingSignal.semanticQuestionShape, .answerableObjectFocus])
+        })
+        XCTAssertTrue(classificationPolicy.responseJustificationRules.contains { rule in
+            rule.id == "response_type" && rule.questionTypes.contains(.technicalExplanation)
+        })
+        XCTAssertTrue(classificationPolicy.responseJustificationRules.contains { rule in
+            rule.id == "semantic_answerable_shape"
+                && rule.allSignalGroups.contains { Set($0) == Set([QuestionUnderstandingSignal.semanticQuestionShape, .answerableObjectFocus]) }
+        })
+        XCTAssertTrue(classificationPolicy.attentionRules.contains { rule in
+            rule.id == "response_required_directed_to_user"
+                && rule.requiresResponseNeeded == true
+                && rule.requiresDirectedToUser == true
+        })
+        XCTAssertTrue(classificationPolicy.attentionRules.contains { rule in
+            rule.id == "response_required_priority"
+                && rule.requiresResponseNeeded == true
+                && rule.priorities == Set([QuestionPriority.urgent, .high])
+        })
+        XCTAssertEqual(classificationPolicy.confidencePolicy.typedQuestionBonus, 0.08, accuracy: 0.001)
+        XCTAssertEqual(classificationPolicy.confidencePolicy.ignoredFilterConfidence, 0.28, accuracy: 0.001)
+        XCTAssertEqual(classificationPolicy.confidencePolicy.rejectedGateConfidenceCeiling, 0.72, accuracy: 0.001)
+        XCTAssertTrue(classificationPolicy.confidencePolicy.typeBonusTypes.contains(.technicalExplanation))
+        XCTAssertEqual(classificationPolicy.answerStylePolicy.defaultStyle, .concise)
+        XCTAssertEqual(classificationPolicy.answerStylePolicy.style(for: .technicalExplanation, complete: true), .technical)
+        XCTAssertEqual(classificationPolicy.answerStylePolicy.style(for: .approvalRequest, complete: true), .cautious)
+        XCTAssertEqual(classificationPolicy.answerStylePolicy.style(for: .generalQuestion, complete: false), .askForClarification)
+        XCTAssertTrue(classificationPolicy.technicalInferencePolicy.applies(to: .sales))
+        XCTAssertEqual(classificationPolicy.technicalInferencePolicy.explanationType, .technicalExplanation)
+        XCTAssertTrue(classificationPolicy.technicalInferencePolicy.usesCodeIdentifierCharacters)
+        XCTAssertTrue(classificationPolicy.technicalInferencePolicy.identifierPatterns.contains(#"\b[A-Za-z]+[A-Z0-9][A-Za-z0-9]*\b"#))
+        XCTAssertEqual(classificationPolicy.multimodalPolicy.signalLabels.partialUnstable, "partial_unstable")
+        XCTAssertEqual(classificationPolicy.multimodalPolicy.hardSuppressionSignalKeys, [.partialUnstable, .silence, .nearSilence])
+        XCTAssertTrue(classificationPolicy.multimodalPolicy.effectiveHardSuppressionSignals.contains("partial_unstable"))
+        XCTAssertTrue(classificationPolicy.multimodalPolicy.effectiveHardSuppressionSignals.contains("near_silence"))
+        XCTAssertEqual(classificationPolicy.decisionGatePolicy?.thresholds(for: .highPrecision).requiredStrongSignalCount, 2)
+        XCTAssertTrue(classificationPolicy.decisionGatePolicy?.partialCompleteShapeSignals.contains(.concreteObject) == true)
+        XCTAssertFalse(classificationPolicy.reasons.localGateRejectedTemplate.isEmpty)
+
+        let promptPolicy = QuestionAnswerPromptPolicy.default
+        XCTAssertTrue(promptPolicy.classificationFields.contains { $0.value == .candidateRawText })
+        XCTAssertTrue(promptPolicy.answerInstructions.contains { $0.contains("fenced code") })
+        XCTAssertTrue(promptPolicy.answerReturnInstructions.contains { $0.contains("shouldAskClarification") })
+    }
+
+    func testQuestionClassificationResponseJustificationDefaultsArePolicyOwned() throws {
+        let encoded = try JSONEncoder().encode(QuestionClassificationRulePack.default)
+        var object = try XCTUnwrap(JSONSerialization.jsonObject(with: encoded) as? [String: Any])
+        object.removeValue(forKey: "intrinsicallyActionableTypes")
+        object.removeValue(forKey: "responseJustifyingTypes")
+        object.removeValue(forKey: "responseJustifyingSignals")
+        object.removeValue(forKey: "responseJustifyingSignalGroups")
+        object.removeValue(forKey: "responseJustificationRules")
+        object.removeValue(forKey: "attentionRules")
+        if var technicalInference = object["technicalInferencePolicy"] as? [String: Any] {
+            technicalInference.removeValue(forKey: "identifierPatterns")
+            object["technicalInferencePolicy"] = technicalInference
+        }
+
+        let stripped = try JSONSerialization.data(withJSONObject: object)
+        let decoded = try JSONDecoder().decode(QuestionClassificationRulePack.self, from: stripped)
+
+        XCTAssertTrue(decoded.intrinsicallyActionableTypes.isEmpty)
+        XCTAssertTrue(decoded.responseJustifyingTypes.isEmpty)
+        XCTAssertTrue(decoded.responseJustifyingSignals.isEmpty)
+        XCTAssertTrue(decoded.responseJustifyingSignalGroups.isEmpty)
+        XCTAssertTrue(decoded.responseJustificationRules.isEmpty)
+        XCTAssertTrue(decoded.attentionRules.isEmpty)
+        XCTAssertTrue(decoded.technicalInferencePolicy.identifierPatterns.isEmpty)
+    }
+
+    func testQuestionAnswerPromptPolicyDefaultsArePolicyOwned() throws {
+        let decoded = try JSONDecoder().decode(QuestionAnswerPromptPolicy.self, from: Data("{}".utf8))
+
+        XCTAssertTrue(decoded.classificationIntroLines.isEmpty)
+        XCTAssertTrue(decoded.classificationFields.isEmpty)
+        XCTAssertTrue(decoded.classificationSchemaHeading.isEmpty)
+        XCTAssertTrue(decoded.classificationSchema.isEmpty)
+        XCTAssertTrue(decoded.answerIntroLines.isEmpty)
+        XCTAssertTrue(decoded.answerInstructions.isEmpty)
+        XCTAssertTrue(decoded.answerReturnInstructions.isEmpty)
+        XCTAssertTrue(decoded.classificationSummaryTemplate.isEmpty)
+        XCTAssertTrue(decoded.sourceItemTemplate.isEmpty)
+        XCTAssertTrue(decoded.listItemTemplate.isEmpty)
+
+        let partial = try JSONDecoder().decode(
+            QuestionAnswerPromptPolicy.self,
+            from: Data(#"{"answerInstructions":["Use context only."],"listItemTemplate":"* {item}"}"#.utf8)
+        )
+        XCTAssertEqual(partial.answerInstructions, ["Use context only."])
+        XCTAssertEqual(partial.listItemTemplate, "* {item}")
+        XCTAssertTrue(partial.classificationIntroLines.isEmpty)
+        XCTAssertTrue(partial.answerReturnInstructions.isEmpty)
+    }
+
+    func testRealtimeQuestionPolicyPartialSubpoliciesDecodeWithoutGlobalFallback() throws {
+        let decoded = try JSONDecoder().decode(
+            RealtimeQuestionAnsweringPolicy.self,
+            from: Data(
+                """
+                {
+                  "partialStability": { "stableMinimumTokens": 9 },
+                  "deferredPartialDetection": { "minimumConfidence": 0.66 },
+                  "multiqtRescue": { "minimumCandidateScore": 0.77 },
+                  "answerGenerationGate": { "allowedPriorities": ["low"], "requiresComplete": false }
+                }
+                """.utf8
+            )
+        )
+
+        XCTAssertTrue(decoded.answerResolutionMarkers.isEmpty)
+        XCTAssertTrue(decoded.incompleteActionFrames.isEmpty)
+        XCTAssertTrue(decoded.danglingPartialTokens.isEmpty)
+        XCTAssertEqual(decoded.partialStabilityPolicy.stableMinimumTokens, 9)
+        XCTAssertEqual(decoded.partialStabilityPolicy.similarityStableThreshold, RealtimePartialStabilityPolicy.fallback.similarityStableThreshold)
+        XCTAssertEqual(decoded.deferredPartialDetectionPolicy.minimumConfidence, 0.66, accuracy: 0.001)
+        XCTAssertEqual(
+            decoded.deferredPartialDetectionPolicy.deferredDetectionDelayMilliseconds,
+            RealtimeDeferredPartialDetectionPolicy.fallback.deferredDetectionDelayMilliseconds
+        )
+        XCTAssertEqual(decoded.multiqtRescuePolicy.minimumCandidateScore, 0.77, accuracy: 0.001)
+        XCTAssertEqual(
+            decoded.multiqtRescuePolicy.minimumResponseMargin,
+            RealtimeMultiQTRescuePolicy.fallback.minimumResponseMargin,
+            accuracy: 0.001
+        )
+        XCTAssertEqual(decoded.answerGenerationGatePolicy.allowedPriorities, Set([QuestionPriority.low]))
+        XCTAssertFalse(decoded.answerGenerationGatePolicy.requiresComplete)
+        XCTAssertTrue(decoded.answerGenerationGatePolicy.requiresResponseNeeded)
+    }
+
+    func testRealtimeQuestionRuntimeLabelsDefaultsArePolicyOwned() throws {
+        let empty = try JSONDecoder().decode(RealtimeQuestionAnsweringPolicy.self, from: Data("{}".utf8))
+        XCTAssertTrue(empty.runtimeLabels.questionDismissedMessage.isEmpty)
+        XCTAssertTrue(empty.runtimeLabels.urgentQuestionSupersededMessage.isEmpty)
+        XCTAssertTrue(empty.runtimeLabels.cloudDisabledFailureMessage.isEmpty)
+        XCTAssertTrue(empty.runtimeLabels.localAnswerFailureMessage.isEmpty)
+        XCTAssertTrue(empty.runtimeLabels.selfAnsweredCancellationMessage.isEmpty)
+        XCTAssertTrue(empty.runtimeLabels.shadowIgnoredHardSuppression.isEmpty)
+        XCTAssertTrue(empty.runtimeLabels.shadowIgnoredIntentGate.isEmpty)
+        XCTAssertTrue(empty.runtimeLabels.shadowAccepted.isEmpty)
+        XCTAssertTrue(empty.runtimeLabels.shadowIgnoredClassifier.isEmpty)
+
+        let partial = try JSONDecoder().decode(
+            RealtimeQuestionAnsweringPolicy.self,
+            from: Data(
+                """
+                {
+                  "runtimeLabels": {
+                    "questionDismissedMessage": "Policy dismissed.",
+                    "shadowAccepted": "policy_accepted"
+                  }
+                }
+                """.utf8
+            )
+        )
+
+        XCTAssertEqual(partial.runtimeLabels.questionDismissedMessage, "Policy dismissed.")
+        XCTAssertEqual(partial.runtimeLabels.shadowAccepted, "policy_accepted")
+        XCTAssertTrue(partial.runtimeLabels.shadowIgnoredIntentGate.isEmpty)
+        XCTAssertTrue(partial.runtimeLabels.localAnswerFailureMessage.isEmpty)
+    }
+
+    func testSpeechVocabularySeedPolicyDefaultsArePolicyOwned() throws {
+        let empty = try JSONDecoder().decode(SpeechVocabularySeedPolicy.self, from: Data("{}".utf8))
+        XCTAssertTrue(empty.ambientSessionTitle.isEmpty)
+        XCTAssertTrue(empty.ambientSystemTerms.isEmpty)
+        XCTAssertTrue(empty.technicalTerms.isEmpty)
+        XCTAssertEqual(empty.userNameBoost, 0, accuracy: 0.001)
+        XCTAssertEqual(empty.appTermBoost, 0, accuracy: 0.001)
+        XCTAssertEqual(empty.technicalTermBoost, 0, accuracy: 0.001)
+        XCTAssertNil(empty.runtime)
+
+        let partial = try JSONDecoder().decode(
+            SpeechVocabularySeedPolicy.self,
+            from: Data(
+                """
+                {
+                  "ambientSessionTitle": "Notchly Ambient",
+                  "ambientSystemTerms": ["Notchly"],
+                  "userNameBoost": 1.9,
+                  "appTermBoost": 1.4,
+                  "technicalTermBoost": 1.6,
+                  "runtime": { "maxContextualStrings": 12 }
+                }
+                """.utf8
+            )
+        )
+
+        XCTAssertEqual(partial.ambientSessionTitle, "Notchly Ambient")
+        XCTAssertEqual(partial.ambientSystemTerms, ["Notchly"])
+        XCTAssertTrue(partial.technicalTerms.isEmpty)
+        XCTAssertEqual(partial.userNameBoost, 1.9, accuracy: 0.001)
+        XCTAssertEqual(partial.appTermBoost, 1.4, accuracy: 0.001)
+        XCTAssertEqual(partial.technicalTermBoost, 1.6, accuracy: 0.001)
+        XCTAssertEqual(partial.runtimePolicy.maxContextualStrings, 12)
+        XCTAssertEqual(partial.runtimePolicy.maxLanguageModelTerms, SpeechVocabularyRuntimePolicy.fallback.maxLanguageModelTerms)
+        XCTAssertEqual(partial.runtimePolicy.tokenizationStrategy, SpeechVocabularyRuntimePolicy.fallback.tokenizationStrategy)
+    }
+
+    func testSpeechVocabularyRuntimePolicyPartialDecodePreservesProvidedValues() throws {
+        let decoded = try JSONDecoder().decode(
+            SpeechVocabularyRuntimePolicy.self,
+            from: Data(
+                """
+                {
+                  "suggestionTokenPreservedCharacters": "/-",
+                  "rescoreLowConfidenceThreshold": 0.71
+                }
+                """.utf8
+            )
+        )
+
+        XCTAssertEqual(decoded.suggestionTokenPreservedCharacters, "/-")
+        XCTAssertEqual(decoded.rescoreLowConfidenceThreshold, 0.71, accuracy: 0.001)
+        XCTAssertEqual(decoded.maxContextualStrings, SpeechVocabularyRuntimePolicy.fallback.maxContextualStrings)
+        XCTAssertEqual(decoded.suggestedNotes, SpeechVocabularyRuntimePolicy.fallback.suggestedNotes)
+        XCTAssertEqual(decoded.tokenizationStrategy, SpeechVocabularyRuntimePolicy.fallback.tokenizationStrategy)
+        XCTAssertEqual(decoded.compactScriptMinimumTermLength, SpeechVocabularyRuntimePolicy.fallback.compactScriptMinimumTermLength)
+        XCTAssertEqual(decoded.suggestedPhraseMinimumTokenCount, SpeechVocabularyRuntimePolicy.fallback.suggestedPhraseMinimumTokenCount)
+        XCTAssertEqual(decoded.suggestedPhraseMaximumTokenCount, SpeechVocabularyRuntimePolicy.fallback.suggestedPhraseMaximumTokenCount)
+        XCTAssertEqual(decoded.suggestedPhraseMinimumCharacterCount, SpeechVocabularyRuntimePolicy.fallback.suggestedPhraseMinimumCharacterCount)
+    }
+
+    func testQuestionIntentCodeIdentifierPatternsArePolicyOwned() throws {
+        let encoded = try JSONEncoder().encode(QuestionIntentRulePack.default)
+        var object = try XCTUnwrap(JSONSerialization.jsonObject(with: encoded) as? [String: Any])
+        var textSegmentation = try XCTUnwrap(object["textSegmentation"] as? [String: Any])
+        textSegmentation.removeValue(forKey: "codeIdentifierPatterns")
+        textSegmentation.removeValue(forKey: "tokenizationStrategy")
+        textSegmentation.removeValue(forKey: "compactScriptMinimumMeaningfulTokenLength")
+        object["textSegmentation"] = textSegmentation
+
+        let stripped = try JSONSerialization.data(withJSONObject: object)
+        let decoded = try JSONDecoder().decode(QuestionIntentRulePack.self, from: stripped)
+
+        XCTAssertTrue(decoded.textSegmentationPolicy.codeIdentifierPatterns.isEmpty)
+        XCTAssertEqual(decoded.textSegmentationPolicy.tokenizationStrategy, .automatic)
+        XCTAssertEqual(decoded.textSegmentationPolicy.compactScriptMinimumMeaningfulTokenLength, 2)
+    }
+
+    func testQuestionDetectionSurfaceCandidateGroupsArePolicyDriven() {
+        let text = "Como inverter uma árvore binária em Python"
+        let weakSignals: Set<QuestionUnderstandingSignal> = [.interrogativeStarter, .concreteObject, .finalUtterance]
+        var blockedRulePack = QuestionIntentRulePack.default
+        blockedRulePack.surfaceCandidate = QuestionSurfaceCandidatePolicy(
+            punctuatedAnySignals: [.terminalQuestionMark],
+            unpunctuatedGroups: [],
+            weakQuestionWordOnlySignals: weakSignals
+        )
+
+        let blockedAnalyzer = QuestionSurfaceAnalyzer(rulePack: blockedRulePack)
+        let blockedAnalysis = blockedAnalyzer.analyze(
+            text: text,
+            context: nil,
+            isPartial: false,
+            isFinal: true
+        )
+        XCTAssertTrue(blockedAnalysis.strongSignals.contains(.interrogativeStarter))
+        XCTAssertFalse(blockedAnalyzer.isCandidateSurface(blockedAnalysis, precisionMode: .highPrecision))
+
+        var allowedRulePack = blockedRulePack
+        allowedRulePack.surfaceCandidate = QuestionSurfaceCandidatePolicy(
+            punctuatedAnySignals: [.terminalQuestionMark],
+            unpunctuatedGroups: [
+                QuestionSignalGroupPolicy(
+                    all: [.interrogativeStarter],
+                    requiresInterrogativeObject: true
+                )
+            ],
+            weakQuestionWordOnlySignals: weakSignals
+        )
+
+        let allowedAnalyzer = QuestionSurfaceAnalyzer(rulePack: allowedRulePack)
+        let allowedAnalysis = allowedAnalyzer.analyze(
+            text: text,
+            context: nil,
+            isPartial: false,
+            isFinal: true
+        )
+        XCTAssertTrue(allowedAnalyzer.isCandidateSurface(allowedAnalysis, precisionMode: .highPrecision))
+    }
+
+    func testQuestionDetectionLeadMarkerMatchingUsesPolicyBoundaries() {
+        let policy = QuestionIntentRulePack.default.textSegmentationPolicy
+
+        XCTAssertTrue(policy.matchesLeadMarker("como", in: "como: inverter uma arvore binaria"))
+        XCTAssertTrue(policy.matchesLeadMarker("qual", in: "qual, a capital da franca"))
+        XCTAssertFalse(policy.matchesLeadMarker("como", in: "comorbidade no rollout"))
+        XCTAssertTrue(policy.matchesLeadOrCompactMarker("ですか", in: "このAPIの状態はどうですか"))
+    }
+
+    func testQuestionDetectionBoundedMarkerMatchingAvoidsEmbeddedSubstrings() {
+        let policy = QuestionIntentRulePack.default.textSegmentationPolicy
+
+        XCTAssertTrue(policy.containsBoundedMarker("can you hear me", in: "ok can you hear me now"))
+        XCTAssertTrue(policy.containsBoundedMarker("como vai voce", in: "entao, como vai voce hoje"))
+        XCTAssertFalse(policy.containsBoundedMarker("can you hear me", in: "scan you hear memo"))
+        XCTAssertFalse(policy.containsBoundedMarker("como", in: "comorbidade no rollout"))
+    }
+
+    func testQuestionIntentPlainTextSeparatorPolicyHandlesQuestionMarksAndBrackets() {
+        let policy = QuestionIntentRulePack.default.textSegmentationPolicy
+
+        XCTAssertEqual(
+            QuestionIntentGate.plainQuestionText("How are you?", textPolicy: policy),
+            "How are you"
+        )
+        XCTAssertEqual(
+            QuestionIntentGate.plainQuestionText("[Como vai voce?]", textPolicy: policy),
+            "Como vai voce"
+        )
+    }
+
+    func testQuestionDetectionHandlesPunctuatedLeadMarkersWithoutQuestionMark() {
+        let cases = [
+            "Como: inverter uma árvore binária em Python",
+            "Qual, a capital da França",
+            "Consegue: revisar o plano de rollout"
+        ]
+        let detector = QuestionDetectionService()
+
+        for text in cases {
+            let segment = TranscriptSegment(meetingId: UUID(), speakerLabel: "Interviewer", text: text, originalLanguage: "pt-BR")
+            let context = TranscriptContext(recentTranscript: text, mediumTranscript: text, completeTranscript: text, dominantLanguage: "pt-BR", currentSegment: segment)
+
+            XCTAssertFalse(
+                detector.detectCandidates(from: segment, context: context).isEmpty,
+                "Expected policy lead marker detection for: \(text)"
+            )
+        }
+    }
+
+    func testQuestionDetectionServiceLikelyQuestionRespectsPrecisionMode() {
+        var rulePack = QuestionIntentRulePack.default
+        rulePack.surfaceCandidate = QuestionSurfaceCandidatePolicy(
+            punctuatedAnySignals: [],
+            unpunctuatedGroups: [],
+            weakQuestionWordOnlySignals: Set(QuestionUnderstandingSignal.allCases)
+        )
+        rulePack.fragmentPhrases = []
+        rulePack.fragmentPrefixes = []
+
+        let text = "como"
+        let analyzer = QuestionSurfaceAnalyzer(rulePack: rulePack)
+        let analysis = analyzer.analyze(
+            text: text,
+            context: nil,
+            isPartial: false,
+            isFinal: true
+        )
+
+        XCTAssertFalse(analysis.strongSignals.isEmpty)
+        XCTAssertTrue(analysis.hasWeakQuestionWordOnly)
+        XCTAssertFalse(
+            QuestionDetectionService(rulePack: rulePack, precisionMode: .highPrecision)
+                .isLikelyQuestion(text)
+        )
+        XCTAssertTrue(
+            QuestionDetectionService(rulePack: rulePack, precisionMode: .highCoverage)
+                .isLikelyQuestion(text)
+        )
+    }
+
+    func testRejectedFrameHardSuppressionUsesDetectionRulePack() throws {
+        let text = "Como deploy service"
+        var rulePack = QuestionIntentRulePack.default
+        rulePack.signalLabels.adaptiveSuppressed = "custom_policy_suppressed"
+        rulePack.hardSuppressionSignals = [rulePack.signalLabels.adaptiveSuppressed]
+
+        var adaptiveProfile = QuestionAnsweringAdaptiveProfile()
+        adaptiveProfile.suppressedPhrases[QuestionDetectionService.normalize(text)] = 2
+
+        let segment = TranscriptSegment(
+            meetingId: UUID(),
+            speakerLabel: "Speaker",
+            text: text,
+            originalLanguage: "pt-BR",
+            confidence: 0.95,
+            isFinal: true
+        )
+        let context = TranscriptContext(
+            recentTranscript: text,
+            mediumTranscript: text,
+            completeTranscript: text,
+            dominantLanguage: "pt-BR",
+            currentSegment: segment
+        )
+
+        let detection = QuestionDetectionService(
+            rulePack: rulePack,
+            adaptiveProfile: adaptiveProfile,
+            precisionMode: .highPrecision
+        ).detect(from: segment, context: context)
+
+        XCTAssertTrue(detection.surfaceCandidates.isEmpty)
+        let rejected = try XCTUnwrap(detection.rejectedFrames.first)
+        XCTAssertTrue(rejected.suppressionSignals.contains("custom_policy_suppressed"))
+        XCTAssertEqual(rejected.hardSuppressionSignals, ["custom_policy_suppressed"])
+        XCTAssertTrue(rejected.hasHardSuppression)
+    }
+
+    func testRealtimeQAPolicyDrivenSpanCleanupAndNumericPayloads() {
+        let extractor = QuestionSpanExtractor()
+        XCTAssertEqual(
+            extractor.extractedQuestion(from: "Team, quick question how do we rollback login?", language: "en-US"),
+            "how do we rollback login?"
+        )
+        XCTAssertEqual(
+            extractor.extractedQuestion(from: "Mariana, quick question how do we rollback login?", language: "en-US"),
+            "how do we rollback login?"
+        )
+        XCTAssertEqual(
+            extractor.extractedQuestion(from: "André consegue revisar o PR hoje?", language: "pt-BR"),
+            "consegue revisar o PR hoje?"
+        )
+        XCTAssertEqual(
+            extractor.extractedQuestion(from: "Please review this?", language: "en-US"),
+            "Please review this?"
+        )
+        XCTAssertEqual(
+            extractor.extractedQuestion(from: "Python, como inverter uma árvore binária?", language: "pt-BR"),
+            "Python, como inverter uma árvore binária?"
+        )
+
+        XCTAssertTrue(QuestionDetectionService.hasNumericQuestionPayload("quanto e dois mais dois"))
+        XCTAssertTrue(QuestionDetectionService.hasNumericQuestionPayload("what is two plus two"))
+    }
+
+    func testQuestionTextSegmentationPolicyControlsFramesAndNumericPayloads() {
+        var textPolicy = QuestionTextSegmentationPolicy.fallback
+        textPolicy.minimumFrameCharacters = 3
+        textPolicy.sentenceBoundaryCharacters = "#"
+        textPolicy.lineBoundaryCharacters = "|"
+        let segment = TranscriptSegment(meetingId: UUID(), speakerLabel: "Speaker", text: "abc#de|fghi")
+        let context = TranscriptContext(recentTranscript: segment.text, mediumTranscript: segment.text, dominantLanguage: "en-US", currentSegment: segment)
+        let frames = UtteranceFrameBuilder(textPolicy: textPolicy).frames(from: segment, context: context)
+        XCTAssertEqual(frames.map(\.rawText), ["abc#", "fghi"])
+
+        var rulePack = QuestionIntentRulePack.default
+        var numericPolicy = QuestionTextSegmentationPolicy.fallback
+        numericPolicy.numericPayloadMinimumCount = 3
+        rulePack.textSegmentation = numericPolicy
+        XCTAssertFalse(QuestionDetectionService.hasNumericQuestionPayload("one plus two", rulePack: rulePack))
+
+        numericPolicy.numericPayloadMinimumCount = 2
+        rulePack.textSegmentation = numericPolicy
+        XCTAssertTrue(QuestionDetectionService.hasNumericQuestionPayload("one plus two", rulePack: rulePack))
+
+        var compactScriptPolicy = QuestionTextSegmentationPolicy.fallback
+        compactScriptPolicy.compactScriptScalarRanges = [
+            QuestionUnicodeScalarRangePolicy(lowerBound: 64, upperBound: 64)
+        ]
+        XCTAssertTrue(compactScriptPolicy.containsCompactScript(in: "deploy@risk"))
+        XCTAssertEqual(compactScriptPolicy.compactScriptCharacterCount(in: "@@plain"), 2)
+        XCTAssertFalse(compactScriptPolicy.containsCompactScript(in: "plain"))
+        XCTAssertEqual(QuestionTextSegmentationPolicy.fallback.lexicalTokens(in: "auth/service risk?"), ["auth/service", "risk"])
+        XCTAssertGreaterThanOrEqual(
+            QuestionTextSegmentationPolicy.fallback.lexicalTokens(in: "認証リスクは何ですか").count,
+            2
+        )
+        XCTAssertEqual(QuestionTextSegmentationPolicy.fallback.meaningfulTokenMinimumLength(for: "認証"), 2)
+
+        let normalizedAccentQuestion = QuestionDetectionService.normalize("Qual ação devemos tomar")
+        XCTAssertTrue(QuestionTextSegmentationPolicy.fallback.containsMarker("ação", in: normalizedAccentQuestion))
+        XCTAssertFalse(
+            QuestionTextSegmentationPolicy.fallback.containsMarker(
+                "ação",
+                in: QuestionDetectionService.normalize("Qual reação devemos tomar")
+            )
+        )
+        XCTAssertFalse(QuestionTextSegmentationPolicy.fallback.containsMarker("api", in: "παapiβ"))
+        XCTAssertTrue(QuestionTextSegmentationPolicy.fallback.containsMarker("リスク", in: "これはリスクですか"))
+        XCTAssertTrue(QuestionDetectionService.hasNumericQuestionPayload("quanto e 2+2"))
+
+        var fragmentRulePack = QuestionIntentRulePack.default
+        var fragmentTextPolicy = QuestionTextSegmentationPolicy.fallback
+        fragmentTextPolicy.fragmentTerminalMarkers = ["~~"]
+        fragmentRulePack.textSegmentation = fragmentTextPolicy
+        let fragmentFilter = RhetoricalQuestionFilter(rulePack: fragmentRulePack)
+        XCTAssertTrue(fragmentFilter.isIncomplete("what about auth~~"))
+        XCTAssertFalse(fragmentFilter.isIncomplete("what about auth..."))
+        XCTAssertTrue(RhetoricalQuestionFilter().isIncomplete("what about auth…"))
+    }
+
+    func testRealtimeQADetectsPolicyDrivenQuestionPunctuationAndCompactScripts() async throws {
+        let cases = [
+            ("ما مخاطر نشر المصادقة؟", "ar-SA"),
+            ("인증 배포 위험은 무엇인가요?", "ko-KR"),
+            ("認証リスクは何ですか？", "ja-JP"),
+            ("เราควรย้อนกลับดีไหม?", "th-TH")
+        ]
+        let detector = QuestionDetectionService()
+
+        for (text, language) in cases {
+            let segment = TranscriptSegment(meetingId: UUID(), speakerLabel: "Speaker", text: text, originalLanguage: language)
+            let context = TranscriptContext(recentTranscript: text, mediumTranscript: text, completeTranscript: text, dominantLanguage: language, currentSegment: segment)
+            let candidates = detector.detectCandidates(from: segment, context: context)
+            XCTAssertFalse(candidates.isEmpty, "Expected policy-driven detection for: \(text)")
+        }
+    }
+
+    func testRAGQuestionContextBuilderUsesPolicyDrivenTokenFiltering() {
+        let policy = RAGQuestionContextPolicy(
+            queryExpansions: [:],
+            entityMarkers: [],
+            stopWords: ["what", "is"],
+            lowInformationWords: ["status"],
+            maxExtractedTerms: 4,
+            maxFallbackTerms: 4,
+            minimumExtractedTermLength: 4,
+            minimumFallbackTermLength: 1,
+            extractedTermPreservedCharacters: ["/"],
+            fallbackTermPreservedCharacters: []
+        )
+        let question = makeQuestion("What is auth/service v2 status")
+        let classification = makeClassification(for: question, type: .generalQuestion)
+
+        let query = RAGQuestionContextBuilder(policy: policy).query(for: question, classification: classification)
+
+        XCTAssertEqual(query, "auth/service")
+    }
+
+    func testRAGQuestionContextBuilderExtractsDynamicCompoundTerms() {
+        let policy = RAGQuestionContextPolicy(
+            queryExpansions: [:],
+            entityMarkers: [],
+            stopWords: ["como", "uma", "em"],
+            lowInformationWords: [],
+            maxExtractedTerms: 2,
+            maxFallbackTerms: 4,
+            minimumExtractedTermLength: 4,
+            minimumFallbackTermLength: 1,
+            extractedTermPreservedCharacters: [],
+            fallbackTermPreservedCharacters: [],
+            dynamicEntityExtractionEnabled: false,
+            maxDynamicEntities: 0,
+            maxDynamicPhrases: 6,
+            dynamicPhraseMinimumTokenLength: 3,
+            dynamicPhraseMinimumTokenCount: 2,
+            dynamicPhraseMaximumTokenCount: 3,
+            dynamicPhrasePreservedCharacters: []
+        )
+        let question = makeQuestion("Como inverter uma árvore binária em Python")
+        let classification = makeClassification(for: question, type: .technicalExplanation)
+
+        let query = RAGQuestionContextBuilder(policy: policy).query(for: question, classification: classification)
+
+        XCTAssertTrue(query.contains("arvore binaria"))
+        XCTAssertTrue(query.contains("binaria python"))
+        XCTAssertTrue(query.contains("inverter arvore binaria"))
+    }
+
+    func testRAGQuestionContextBuilderUsesPolicyTokenizationForCompactScripts() {
+        let policy = RAGQuestionContextPolicy(
+            queryExpansions: [:],
+            entityMarkers: [],
+            stopWords: ["の", "は", "です", "か", "何"],
+            lowInformationWords: [],
+            maxExtractedTerms: 6,
+            maxFallbackTerms: 4,
+            minimumExtractedTermLength: 4,
+            minimumFallbackTermLength: 1,
+            extractedTermPreservedCharacters: [],
+            fallbackTermPreservedCharacters: [],
+            dynamicEntityExtractionEnabled: false,
+            maxDynamicEntities: 0,
+            maxDynamicPhrases: 0,
+            tokenizationStrategy: .automatic,
+            compactScriptMinimumTermLength: 2
+        )
+        let question = makeQuestion("認証移行のリスクは何ですか")
+        let classification = makeClassification(for: question, type: .riskAssessment)
+
+        let query = RAGQuestionContextBuilder(policy: policy).query(for: question, classification: classification)
+        let terms = Set(query.split(separator: " ").map(String.init))
+
+        XCTAssertTrue(terms.contains("認証"))
+        XCTAssertTrue(terms.contains("移行"))
+        XCTAssertTrue(terms.contains("リスク"))
+        XCTAssertFalse(terms.contains("何"))
+    }
+
+    func testRAGQuestionContextBuilderUsesExtractedQuestionAndContextCarryover() {
+        let policy = RAGQuestionContextPolicy(
+            queryExpansions: [:],
+            entityMarkers: [],
+            stopWords: ["como", "isso"],
+            lowInformationWords: ["funciona"],
+            maxExtractedTerms: 4,
+            maxFallbackTerms: 4,
+            minimumExtractedTermLength: 3,
+            minimumFallbackTermLength: 1,
+            extractedTermPreservedCharacters: [],
+            fallbackTermPreservedCharacters: [],
+            dynamicEntityExtractionEnabled: false,
+            maxDynamicEntities: 0,
+            maxDynamicPhrases: 4,
+            dynamicPhraseMinimumTokenLength: 3,
+            dynamicPhraseMinimumTokenCount: 2,
+            dynamicPhraseMaximumTokenCount: 3,
+            dynamicPhrasePreservedCharacters: [],
+            contextualCarryoverEnabled: true,
+            maxContextualCarryoverTerms: 6,
+            contextualCarryoverMinimumQuestionTerms: 1,
+            contextualCarryoverMinimumTermLength: 3,
+            contextualCarryoverPreservedCharacters: []
+        )
+        let question = makeQuestion("Larissa, como funciona isso")
+        let classification = QuestionClassification(
+            isQuestion: true,
+            rhetorical: false,
+            complete: true,
+            actionable: false,
+            responseNeeded: true,
+            userAttentionNeeded: false,
+            directedToUser: false,
+            directedToGroup: false,
+            questionType: .generalQuestion,
+            priority: .medium,
+            confidence: 0.90,
+            reason: "test",
+            extractedQuestion: "como funciona isso",
+            expectedAnswerStyle: .concise
+        )
+        let segment = TranscriptSegment(meetingId: question.meetingId, speakerLabel: "Interviewer", text: question.rawText)
+        let transcript = """
+        [Microphone] Architect: OAuth token exchange refresh flow
+        [Microphone] Interviewer: \(question.rawText)
+        """
+        let context = TranscriptContext(
+            recentTranscript: transcript,
+            mediumTranscript: transcript,
+            completeTranscript: transcript,
+            dominantLanguage: "pt-BR",
+            currentSegment: segment
+        )
+
+        let query = RAGQuestionContextBuilder(policy: policy).query(
+            for: question,
+            classification: classification,
+            context: context
+        )
+
+        XCTAssertFalse(query.contains("larissa"))
+        XCTAssertTrue(query.contains("oauth token"), query)
+        XCTAssertTrue(query.contains("refresh flow"), query)
+    }
+
+    func testRAGQuestionContextBuilderDoesNotPullCarryoverForSpecificQuestion() {
+        let policy = RAGQuestionContextPolicy(
+            queryExpansions: [:],
+            entityMarkers: [],
+            stopWords: ["como"],
+            lowInformationWords: ["funciona"],
+            maxExtractedTerms: 4,
+            maxFallbackTerms: 4,
+            minimumExtractedTermLength: 3,
+            minimumFallbackTermLength: 1,
+            extractedTermPreservedCharacters: [],
+            fallbackTermPreservedCharacters: [],
+            dynamicEntityExtractionEnabled: false,
+            maxDynamicEntities: 0,
+            maxDynamicPhrases: 4,
+            dynamicPhraseMinimumTokenLength: 3,
+            dynamicPhraseMinimumTokenCount: 2,
+            dynamicPhraseMaximumTokenCount: 3,
+            dynamicPhrasePreservedCharacters: [],
+            contextualCarryoverEnabled: true,
+            maxContextualCarryoverTerms: 6,
+            contextualCarryoverMinimumQuestionTerms: 1,
+            contextualCarryoverMinimumTermLength: 3,
+            contextualCarryoverPreservedCharacters: []
+        )
+        let question = makeQuestion("Como funciona Binary Tree")
+        let classification = makeClassification(for: question, type: .technicalExplanation)
+        let context = TranscriptContext(
+            recentTranscript: "[Microphone] Architect: OAuth token exchange refresh flow",
+            mediumTranscript: "[Microphone] Architect: OAuth token exchange refresh flow",
+            completeTranscript: "[Microphone] Architect: OAuth token exchange refresh flow",
+            dominantLanguage: "pt-BR",
+            currentSegment: nil
+        )
+
+        let query = RAGQuestionContextBuilder(policy: policy).query(
+            for: question,
+            classification: classification,
+            context: context
+        )
+
+        XCTAssertTrue(query.contains("binary tree"), query)
+        XCTAssertFalse(query.contains("oauth"), query)
+        XCTAssertFalse(query.contains("refresh"), query)
+    }
+
+    func testRAGQuestionContextPreservedCharactersArePolicyOwned() throws {
+        let encoded = try JSONEncoder().encode(RAGQuestionContextPolicy.default)
+        var object = try XCTUnwrap(JSONSerialization.jsonObject(with: encoded) as? [String: Any])
+        object.removeValue(forKey: "extractedTermPreservedCharacters")
+        object.removeValue(forKey: "dynamicEntityExtractionEnabled")
+        object.removeValue(forKey: "maxDynamicEntities")
+        object.removeValue(forKey: "maxDynamicPhrases")
+        object.removeValue(forKey: "dynamicPhrasePreservedCharacters")
+        object.removeValue(forKey: "tokenizationStrategy")
+        object.removeValue(forKey: "compactScriptMinimumTermLength")
+        object.removeValue(forKey: "contextualCarryoverEnabled")
+        object.removeValue(forKey: "maxContextualCarryoverTerms")
+        object.removeValue(forKey: "contextualCarryoverMinimumQuestionTerms")
+        object.removeValue(forKey: "contextualCarryoverMinimumTermLength")
+        object.removeValue(forKey: "contextualCarryoverPreservedCharacters")
+
+        let stripped = try JSONSerialization.data(withJSONObject: object)
+        let decoded = try JSONDecoder().decode(RAGQuestionContextPolicy.self, from: stripped)
+
+        XCTAssertTrue(decoded.extractedTermPreservedCharacters.isEmpty)
+        XCTAssertFalse(decoded.dynamicEntityExtractionEnabled)
+        XCTAssertEqual(decoded.maxDynamicEntities, 0)
+        XCTAssertEqual(decoded.maxDynamicPhrases, 0)
+        XCTAssertTrue(decoded.dynamicPhrasePreservedCharacters.isEmpty)
+        XCTAssertEqual(decoded.tokenizationStrategy, .scalarSplit)
+        XCTAssertEqual(decoded.compactScriptMinimumTermLength, 2)
+        XCTAssertFalse(decoded.contextualCarryoverEnabled)
+        XCTAssertEqual(decoded.maxContextualCarryoverTerms, 0)
+        XCTAssertEqual(decoded.contextualCarryoverMinimumQuestionTerms, 1)
+        XCTAssertEqual(decoded.contextualCarryoverMinimumTermLength, 3)
+        XCTAssertTrue(decoded.contextualCarryoverPreservedCharacters.isEmpty)
+    }
+
+    func testAnswerPresentationDecisionUsesResourcePolicy() {
+        let codeQuestion = makeQuestion("Como inverter uma árvore binária em Python?")
+        let codeDecision = AnswerPresentationFormatter.presentationDecision(
+            for: codeQuestion,
+            classification: makeClassification(for: codeQuestion, type: .technicalExplanation),
+            generatedText: "Use recursion."
+        )
+        XCTAssertEqual(codeDecision.format, .code)
+        XCTAssertTrue(codeDecision.preservesCodeBlocks)
+
+        let factQuestion = makeQuestion("Qual a capital da França?")
+        let factDecision = AnswerPresentationFormatter.presentationDecision(
+            for: factQuestion,
+            classification: makeClassification(for: factQuestion, type: .generalQuestion),
+            generatedText: "Paris."
+        )
+        XCTAssertEqual(factDecision.format, .plainText)
+        XCTAssertFalse(factDecision.preservesCodeBlocks)
+    }
+
+    func testAnswerPresentationDecisionPreservesStructuralCodeWithoutQuestionMarkers() {
+        var policy = AnswerPresentationPolicy.default
+        policy.codeQuestionMarkers = []
+
+        let neutralQuestion = makeQuestion("Mostre uma alternativa elegante")
+        let decision = AnswerPresentationFormatter.presentationDecision(
+            for: neutralQuestion,
+            classification: makeClassification(for: neutralQuestion, type: .generalQuestion),
+            generatedText: """
+            Uma opção:
+            ```python
+            def invert(root):
+                if root is None:
+                    return None
+                root.left, root.right = root.right, root.left
+                return root
+            ```
+            """,
+            policy: policy
+        )
+
+        XCTAssertEqual(decision.format, .code)
+        XCTAssertTrue(decision.preservesCodeBlocks)
+
+        let formatted = AnswerPresentationFormatter.normalizedGeneratedText(
+            """
+            Uma opção:
+            ```python
+            def invert(root):
+                if root is None:
+                    return None
+                root.left, root.right = root.right, root.left
+                return root
+            ```
+            """,
+            question: neutralQuestion,
+            classification: makeClassification(for: neutralQuestion, type: .generalQuestion),
+            policy: policy
+        )
+
+        XCTAssertTrue(formatted.contains("```python"))
+        XCTAssertTrue(formatted.contains("def invert(root):"))
+    }
+
+    func testAnswerPresentationStructuredWrappersArePolicyOwned() throws {
+        let encoded = try JSONEncoder().encode(AnswerPresentationPolicy.default)
+        var object = try XCTUnwrap(JSONSerialization.jsonObject(with: encoded) as? [String: Any])
+        object.removeValue(forKey: "structuredDataWrapperPairs")
+
+        let stripped = try JSONSerialization.data(withJSONObject: object)
+        let decoded = try JSONDecoder().decode(AnswerPresentationPolicy.self, from: stripped)
+
+        XCTAssertTrue(decoded.structuredDataWrapperPairs.isEmpty)
+    }
+
+    func testAnswerGenerationPolicyDefaultsArePolicyOwned() throws {
+        let partial = try JSONDecoder().decode(
+            AnswerGenerationPolicy.self,
+            from: Data(#"{"noExternalSourceAssumption":"Use retrieved context only."}"#.utf8)
+        )
+
+        XCTAssertEqual(partial.noExternalSourceAssumption, "Use retrieved context only.")
+        XCTAssertTrue(partial.caveatsByQuestionType.isEmpty)
+        XCTAssertTrue(partial.defaultClarifyingQuestion.isEmpty)
+        XCTAssertTrue(partial.copilotIntentByQuestionType.isEmpty)
+        XCTAssertNil(partial.defaultCopilotIntent)
+        XCTAssertTrue(partial.immediateDraftPriorities.isEmpty)
+        XCTAssertFalse(partial.emitImmediateDraftWhenRAGAvailable)
+        XCTAssertTrue(partial.defaultProvisionalDraft.isEmpty)
+        XCTAssertTrue(partial.provisionalDraftByLanguage.isEmpty)
+
+        let empty = try JSONDecoder().decode(AnswerGenerationPolicy.self, from: Data("{}".utf8))
+        XCTAssertTrue(empty.noExternalSourceAssumption.isEmpty)
+        XCTAssertTrue(empty.caveatsByQuestionType.isEmpty)
+        XCTAssertTrue(empty.defaultClarifyingQuestion.isEmpty)
+        XCTAssertEqual(empty.copilotIntent(for: .actionRequest), .answerableQuestion)
+        XCTAssertFalse(empty.shouldEmitImmediateDraft(
+            for: QuestionClassification(
+                isQuestion: true,
+                rhetorical: false,
+                complete: true,
+                actionable: true,
+                responseNeeded: true,
+                userAttentionNeeded: true,
+                directedToUser: true,
+                directedToGroup: false,
+                questionType: .actionRequest,
+                priority: .urgent,
+                confidence: 0.90,
+                reason: "test",
+                extractedQuestion: "Please review this?",
+                expectedAnswerStyle: .concise
+            ),
+            context: AnswerContext(
+                meetingTitle: "Policy",
+                transcriptWindow: "Please review this?",
+                ragContext: "context",
+                userRole: "Engineer",
+                responseStyle: .concise,
+                languageCode: "en-US"
+            )
+        ))
+    }
+
+    func testAnswerPresentationSemanticDefaultsArePolicyOwned() throws {
+        let decoded = try JSONDecoder().decode(AnswerPresentationPolicy.self, from: Data("{}".utf8))
+
+        XCTAssertTrue(decoded.codeQuestionMarkers.isEmpty)
+        XCTAssertTrue(decoded.commandQuestionMarkers.isEmpty)
+        XCTAssertTrue(decoded.structuredDataQuestionMarkers.isEmpty)
+        XCTAssertTrue(decoded.procedureQuestionMarkers.isEmpty)
+        XCTAssertTrue(decoded.comparisonQuestionMarkers.isEmpty)
+        XCTAssertTrue(decoded.shortFactQuestionMarkers.isEmpty)
+        XCTAssertTrue(decoded.comparisonQuestionTypes.isEmpty)
+        XCTAssertTrue(decoded.shortFactQuestionTypes.isEmpty)
+        XCTAssertTrue(decoded.decisionReasons.commandOrShellRequest.isEmpty)
+        XCTAssertTrue(decoded.decisionReasons.structuredDataRequest.isEmpty)
+        XCTAssertTrue(decoded.decisionReasons.codeRequest.isEmpty)
+        XCTAssertTrue(decoded.decisionReasons.procedureRequest.isEmpty)
+        XCTAssertTrue(decoded.decisionReasons.comparisonOrDecision.isEmpty)
+        XCTAssertTrue(decoded.decisionReasons.shortFact.isEmpty)
+        XCTAssertTrue(decoded.decisionReasons.defaultMeetingAnswer.isEmpty)
+        XCTAssertTrue(decoded.plainTextLanguages.isEmpty)
+        XCTAssertTrue(decoded.structuredDataLanguages.isEmpty)
+        XCTAssertTrue(decoded.codeLanguages.isEmpty)
+        XCTAssertTrue(decoded.commandLanguages.isEmpty)
+        XCTAssertTrue(decoded.codeLinePattern.isEmpty)
+        XCTAssertTrue(decoded.codeSymbolPattern.isEmpty)
+        XCTAssertTrue(decoded.commandLinePattern.isEmpty)
+        XCTAssertTrue(decoded.structuredDataLinePattern.isEmpty)
+        XCTAssertTrue(decoded.structuredDataWrapperPairs.isEmpty)
+        XCTAssertTrue(decoded.freshNewsQuestionMarkers.isEmpty)
+        XCTAssertTrue(decoded.webSearchQuestionMarkers.isEmpty)
+    }
+
+    func testAnswerPresentationPolicyControlsTypeRoutingAndReasonLabels() throws {
+        let policy = try JSONDecoder().decode(
+            AnswerPresentationPolicy.self,
+            from: Data(
+                """
+                {
+                  "comparisonQuestionTypes": ["risk_assessment"],
+                  "shortFactQuestionTypes": ["general_question"],
+                  "shortFactQuestionMarkers": ["neutral"],
+                  "decisionReasons": {
+                    "comparisonOrDecision": "policy_comparison",
+                    "shortFact": "policy_fact",
+                    "defaultMeetingAnswer": "policy_default"
+                  }
+                }
+                """.utf8
+            )
+        )
+
+        let riskQuestion = makeQuestion("Neutral planning topic")
+        let riskDecision = AnswerPresentationFormatter.presentationDecision(
+            for: riskQuestion,
+            classification: makeClassification(for: riskQuestion, type: .riskAssessment),
+            generatedText: "Review the trade-off.",
+            policy: policy
+        )
+        XCTAssertEqual(riskDecision.format, .bullets)
+        XCTAssertEqual(riskDecision.reason, "policy_comparison")
+
+        let factQuestion = makeQuestion("Neutral fact")
+        let factDecision = AnswerPresentationFormatter.presentationDecision(
+            for: factQuestion,
+            classification: makeClassification(for: factQuestion, type: .generalQuestion),
+            generatedText: "A compact answer.",
+            policy: policy
+        )
+        XCTAssertEqual(factDecision.format, .plainText)
+        XCTAssertEqual(factDecision.reason, "policy_fact")
+
+        let emptyRoutingPolicy = try JSONDecoder().decode(
+            AnswerPresentationPolicy.self,
+            from: Data(#"{"decisionReasons":{"defaultMeetingAnswer":"policy_default"}}"#.utf8)
+        )
+        let mixedDecision = AnswerPresentationFormatter.presentationDecision(
+            for: riskQuestion,
+            classification: makeClassification(for: riskQuestion, type: .riskAssessment),
+            generatedText: "Review the trade-off.",
+            policy: emptyRoutingPolicy
+        )
+        XCTAssertEqual(mixedDecision.format, .mixed)
+        XCTAssertEqual(mixedDecision.reason, "policy_default")
+    }
+
+    func testAnswerPresentationPolicyControlsFenceParsingAndSummary() {
+        var policy = AnswerPresentationPolicy.default
+        policy.codeFenceMarker = "~~~"
+        policy.shortAnswerMaximumSentences = 1
+        policy.maximumConsecutiveBlankLines = 0
+        policy.duplicateTokenOverlapThreshold = 0.50
+
+        let factQuestion = makeQuestion("Qual a capital da França?")
+        let formatted = AnswerPresentationFormatter.normalizedGeneratedText(
+            """
+            A capital da França é Paris.
+
+            ~~~text
+            Paris
+            ~~~
+            """,
+            question: factQuestion,
+            classification: makeClassification(for: factQuestion, type: .generalQuestion),
+            policy: policy
+        )
+
+        XCTAssertEqual(formatted, "A capital da França é Paris.")
+        XCTAssertEqual(
+            AnswerPresentationFormatter.shortAnswer(from: "Primeira! Segunda? Terceira.", policy: policy),
+            "Primeira!"
+        )
+
+        policy.shortAnswerMaximumSentences = 2
+        policy.shortAnswerSentenceSeparator = " | "
+        XCTAssertEqual(
+            AnswerPresentationFormatter.shortAnswer(from: "Primeira! Segunda? Terceira.", policy: policy),
+            "Primeira! | Segunda?"
+        )
+
+        let codeQuestion = makeQuestion("Como inverter uma árvore binária em Python?")
+        let codeFormatted = AnswerPresentationFormatter.normalizedGeneratedText(
+            """
+            Use:
+            ~~~python
+            def invert(root):
+                return root
+            ~~~
+            """,
+            question: codeQuestion,
+            classification: makeClassification(for: codeQuestion, type: .technicalExplanation),
+            policy: policy
+        )
+        XCTAssertTrue(codeFormatted.contains("```python"))
+        XCTAssertTrue(codeFormatted.contains("def invert"))
+    }
+
+    func testAnswerPresentationDuplicateDetectionUsesPolicyTokenizationForCompactScripts() {
+        var policy = AnswerPresentationPolicy.default
+        policy.duplicateTokenOverlapThreshold = 0.50
+
+        let question = makeQuestion("認証リスクは何ですか")
+        let formatted = AnswerPresentationFormatter.normalizedGeneratedText(
+            """
+            認証リスクを確認します。
+
+            ```text
+            認証リスク確認
+            ```
+            """,
+            question: question,
+            classification: makeClassification(for: question, type: .generalQuestion),
+            policy: policy
+        )
+
+        XCTAssertEqual(formatted, "認証リスクを確認します。")
+    }
+
+    func testAnswerPresentationShortAnswerUsesPolicyTerminatorsAcrossScripts() {
+        var policy = AnswerPresentationPolicy.default
+        policy.sentenceTerminatorCharacters = ".!?؟。"
+        policy.shortAnswerMaximumSentences = 1
+        policy.shortAnswerDefaultTerminator = "!"
+        policy.compactScriptShortAnswerDefaultTerminator = "。"
+
+        XCTAssertEqual(
+            AnswerPresentationFormatter.shortAnswer(from: "答えは東京です。明日は大阪です。", policy: policy),
+            "答えは東京です。"
+        )
+        XCTAssertEqual(
+            AnswerPresentationFormatter.shortAnswer(from: "答えは東京です", policy: policy),
+            "答えは東京です。"
+        )
+        XCTAssertEqual(
+            AnswerPresentationFormatter.shortAnswer(from: "نعم؟ لا.", policy: policy),
+            "نعم؟"
+        )
+        XCTAssertEqual(
+            AnswerPresentationFormatter.shortAnswer(from: "Primeira resposta", policy: policy),
+            "Primeira resposta!"
+        )
+    }
+
+    func testQuestionAnswerPromptBuilderUsesResourcePolicyForPromptTextAndCodeRules() {
+        let question = makeQuestion("Como inverter uma árvore binária em JavaScript?")
+        let transcript = TranscriptContext(
+            recentTranscript: "Estamos avaliando estruturas de dados.",
+            mediumTranscript: "Estamos avaliando estruturas de dados.",
+            dominantLanguage: "pt-BR",
+            currentSegment: nil
+        )
+        let profile = makeProfile()
+        let classification = makeClassification(for: question, type: .technicalExplanation)
+        let builder = QuestionAnswerPromptBuilder(policy: .default)
+
+        let classificationPrompt = builder.classificationPrompt(candidate: question, context: transcript, profile: profile)
+        XCTAssertTrue(classificationPrompt.contains("Segmento atual: Como inverter uma árvore binária em JavaScript?"))
+        XCTAssertTrue(classificationPrompt.contains(QuestionAnswerPromptPolicy.default.classificationSchema))
+
+        let answerContext = AnswerContext(
+            meetingTitle: "Interview",
+            transcriptWindow: transcript.recentTranscript,
+            ragContext: "Trees can be inverted recursively.",
+            userRole: profile.userRole,
+            responseStyle: .technical,
+            languageCode: "pt-BR",
+            retrievedSources: [
+                AnswerSource(type: .web, title: "MDN Trees", snippet: "Binary tree traversal reference.", reference: nil)
+            ],
+            shortTermMemory: nil
+        )
+        let answerPrompt = builder.answerPrompt(
+            question: question,
+            classification: classification,
+            context: answerContext,
+            profile: profile
+        )
+
+        XCTAssertTrue(answerPrompt.contains("fence de abertura com linguagem"))
+        XCTAssertTrue(answerPrompt.contains("Classificação:\ntechnical_explanation, priority=medium, style=concise"))
+        XCTAssertTrue(answerPrompt.contains("- MDN Trees: Binary tree traversal reference."))
+        XCTAssertTrue(answerPrompt.contains("Use Markdown compacto sem blocos de código para texto comum"))
+    }
+
+    func testQuestionIntentGateUsesPolicyDrivenEmbeddedQuestionSplits() {
+        var rulePack = QuestionIntentRulePack.default
+        rulePack.quotedOrExplainingMarkers = ["context says"]
+        rulePack.embeddedQuestionSplitMarkers = ["please explain"]
+        rulePack.actionRequestMarkers = ["please explain"]
+        rulePack.domainHintMarkers = ["latency"]
+        rulePack.answerableScoreThreshold = 1.1
+        let context = TranscriptContext(
+            recentTranscript: "The team is reviewing latency.",
+            mediumTranscript: "The team is reviewing latency.",
+            dominantLanguage: "en-US",
+            currentSegment: nil
+        )
+        let candidate = makeQuestion("Context says please explain latency?")
+
+        let suppression = QuestionIntentGate(rulePack: rulePack).hardSuppression(candidate: candidate, context: context)
+
+        XCTAssertNil(suppression)
+    }
+
+    func testRhetoricalSuffixesUsePolicyDrivenLeadContext() {
+        var rulePack = QuestionIntentRulePack.default
+        rulePack.rhetoricalMarkers = []
+        rulePack.rhetoricalSuffixes = ["right?"]
+        rulePack.rhetoricalSuffixLeadSeparators = ["~"]
+        rulePack.rhetoricalSuffixMinimumLeadTokens = 3
+        let filter = RhetoricalQuestionFilter(rulePack: rulePack)
+
+        XCTAssertFalse(filter.isRhetorical("is this right?"))
+        XCTAssertFalse(filter.isRhetorical("ship,right?"))
+        XCTAssertTrue(filter.isRhetorical("we can ship this right?"))
+        XCTAssertTrue(filter.isRhetorical("ship~right?"))
+    }
+
+    func testQuestionSurfaceAnalyzerUsesPolicyDrivenScoringWeights() {
+        var rulePack = QuestionIntentRulePack.default
+        var scoring = rulePack.surfaceScoringPolicy
+        scoring.confidenceBase = 0.10
+        scoring.questionPunctuationConfidence = 0
+        scoring.interrogativeConfidence = 0.50
+        scoring.modalConfidence = 0
+        scoring.indirectConfidence = 0
+        scoring.actionConfidence = 0
+        scoring.directedUserConfidence = 0
+        scoring.directedGroupConfidence = 0
+        scoring.concreteObjectConfidence = 0
+        scoring.domainObjectConfidence = 0
+        scoring.semanticShapeConfidenceMax = 0
+        scoring.semanticShapeConfidenceWeight = 0
+        scoring.answerableFocusConfidenceMax = 0
+        scoring.answerableFocusConfidenceWeight = 0
+        scoring.adaptivePromotionConfidence = 0
+        scoring.contextualCarryoverConfidence = 0
+        scoring.finalUtteranceConfidence = 0
+        scoring.weakQuestionWordPenalty = 0
+        scoring.partialHighPrecisionPenalty = 0
+        scoring.partialStandardPenalty = 0
+        scoring.minConfidence = 0
+        scoring.maxConfidence = 1
+        rulePack.surfaceScoring = scoring
+        let analyzer = QuestionSurfaceAnalyzer(rulePack: rulePack)
+        let analysis = analyzer.analyze(
+            text: "Qual latency",
+            context: makeContext("Qual latency"),
+            isPartial: false,
+            isFinal: true
+        )
+
+        XCTAssertTrue(analysis.strongSignals.contains(.interrogativeStarter))
+        XCTAssertEqual(
+            analyzer.confidence(for: analysis, isPartial: false, precisionMode: .balanced),
+            0.60,
+            accuracy: 0.001
+        )
+    }
+
+    func testQuestionSurfaceAnalyzerUsesNaturalLanguageNamedEntitySignal() {
+        var naturalRulePack = QuestionIntentRulePack.default
+        var naturalTextPolicy = naturalRulePack.textSegmentationPolicy
+        naturalTextPolicy.namedEntityRecognitionStrategy = .naturalLanguage
+        naturalRulePack.textSegmentation = naturalTextPolicy
+        var naturalScoring = naturalRulePack.surfaceScoringPolicy
+        naturalScoring.objectMeaningfulTokenWeight = 0
+        naturalScoring.objectMeaningfulTokenMax = 0
+        naturalScoring.objectDensityWeight = 0
+        naturalScoring.objectDensityMax = 0
+        naturalScoring.objectNumericPayloadBonus = 0
+        naturalScoring.objectDomainBonus = 0
+        naturalScoring.objectContextOverlapBonus = 0
+        naturalScoring.objectNamedEntityBonus = 0.40
+        naturalScoring.objectCJKBonus = 0
+        naturalRulePack.surfaceScoring = naturalScoring
+
+        let text = "What did Barack Obama announce in Paris?"
+        let naturalAnalysis = QuestionSurfaceAnalyzer(rulePack: naturalRulePack).analyze(
+            text: text,
+            context: makeContext(text),
+            isPartial: false,
+            isFinal: true
+        )
+
+        XCTAssertEqual(naturalAnalysis.objectFocusScore, 0.40, accuracy: 0.001)
+
+        var heuristicRulePack = naturalRulePack
+        var heuristicTextPolicy = heuristicRulePack.textSegmentationPolicy
+        heuristicTextPolicy.namedEntityRecognitionStrategy = .heuristic
+        heuristicTextPolicy.minimumNamedEntityTokenLength = 99
+        heuristicRulePack.textSegmentation = heuristicTextPolicy
+        let heuristicAnalysis = QuestionSurfaceAnalyzer(rulePack: heuristicRulePack).analyze(
+            text: text,
+            context: makeContext(text),
+            isPartial: false,
+            isFinal: true
+        )
+
+        XCTAssertEqual(heuristicAnalysis.objectFocusScore, 0, accuracy: 0.001)
+    }
+
+    func testQuestionSurfaceAnalyzerAutomaticNamedEntityFallsBackToNaturalLanguage() {
+        var rulePack = QuestionIntentRulePack.default
+        var textPolicy = rulePack.textSegmentationPolicy
+        textPolicy.namedEntityRecognitionStrategy = .automatic
+        textPolicy.minimumNamedEntityTokenLength = 99
+        rulePack.textSegmentation = textPolicy
+
+        var scoring = rulePack.surfaceScoringPolicy
+        scoring.objectMeaningfulTokenWeight = 0
+        scoring.objectMeaningfulTokenMax = 0
+        scoring.objectDensityWeight = 0
+        scoring.objectDensityMax = 0
+        scoring.objectNumericPayloadBonus = 0
+        scoring.objectDomainBonus = 0
+        scoring.objectContextOverlapBonus = 0
+        scoring.objectNamedEntityBonus = 0.40
+        scoring.objectCJKBonus = 0
+        rulePack.surfaceScoring = scoring
+
+        let text = "What did Barack Obama announce in Paris?"
+        let analysis = QuestionSurfaceAnalyzer(rulePack: rulePack).analyze(
+            text: text,
+            context: makeContext(text),
+            isPartial: false,
+            isFinal: true
+        )
+
+        XCTAssertEqual(analysis.objectFocusScore, 0.40, accuracy: 0.001)
+    }
+
+    func testLocalUnderstandingUsesPolicyDrivenInsufficientSurfaceConfidenceCeiling() {
+        var rulePack = QuestionIntentRulePack.default
+        var scoring = rulePack.surfaceScoringPolicy
+        scoring.insufficientSurfaceConfidenceCeiling = 0.33
+        rulePack.surfaceScoring = scoring
+
+        let candidate = makeQuestion("latency endpoint rollout")
+        let understanding = LocalQuestionUnderstandingProvider(
+            rulePack: rulePack,
+            precisionMode: .highPrecision
+        )
+        .understand(
+            candidate: candidate,
+            context: makeContext(candidate.rawText),
+            userProfile: makeProfile()
+        )
+
+        XCTAssertFalse(understanding.intent.isQuestionLike)
+        XCTAssertEqual(understanding.confidence, 0.33, accuracy: 0.001)
+        XCTAssertEqual(understanding.reason, rulePack.reasons.highPrecisionInsufficient)
+    }
+
+    func testQuestionIntentGateUsesPolicyDrivenAnswerabilityWeights() {
+        var rulePack = QuestionIntentRulePack.default
+        var scoring = rulePack.gateScoringPolicy
+        scoring.questionPunctuationWeight = 0
+        scoring.directQuestionMarkerWeight = 0
+        scoring.indirectQuestionMarkerWeight = 0
+        scoring.actionRequestMarkerWeight = 0
+        scoring.modalQuestionStarterWeight = 0
+        scoring.domainHintWeight = 0
+        scoring.numericPayloadWeight = 0
+        scoring.meaningfulTokenWeight = 0
+        scoring.meaningfulTokenMaximum = 0
+        scoring.codeIdentifierWeight = 0
+        scoring.cjkWeight = 0
+        scoring.contextualCarryoverWeight = 0
+        scoring.surfaceSemanticShapeBonus = 0
+        scoring.surfaceAnswerableObjectBonus = 0
+        scoring.surfaceAdaptivePromotionBonus = 0
+        scoring.answerableThresholdMinimum = 0
+        scoring.answerableThresholdMaximum = 10
+        rulePack.gateScoring = scoring
+        rulePack.answerableScoreThreshold = 0.5
+
+        let candidate = makeQuestion("Qual latency?")
+        let context = makeContext(candidate.rawText)
+        let rejected = QuestionIntentGate(rulePack: rulePack).evaluate(candidate: candidate, context: context)
+        XCTAssertFalse(rejected.isAnswerableQuestion)
+
+        scoring.directQuestionMarkerWeight = 0.6
+        rulePack.gateScoring = scoring
+        let accepted = QuestionIntentGate(rulePack: rulePack).evaluate(candidate: candidate, context: context)
+        XCTAssertTrue(accepted.isAnswerableQuestion)
+    }
+
+    func testQuestionIntentGateUsesPolicyDrivenCodeIdentifierPatterns() {
+        var rulePack = QuestionIntentRulePack.default
+        var scoring = rulePack.gateScoringPolicy
+        scoring.questionPunctuationWeight = 0
+        scoring.directQuestionMarkerWeight = 0
+        scoring.indirectQuestionMarkerWeight = 0
+        scoring.actionRequestMarkerWeight = 0
+        scoring.modalQuestionStarterWeight = 0
+        scoring.domainHintWeight = 0
+        scoring.numericPayloadWeight = 0
+        scoring.meaningfulTokenWeight = 0
+        scoring.meaningfulTokenMaximum = 0
+        scoring.codeIdentifierWeight = 1
+        scoring.cjkWeight = 0
+        scoring.contextualCarryoverWeight = 0
+        scoring.surfaceSemanticShapeBonus = 0
+        scoring.surfaceAnswerableObjectBonus = 0
+        scoring.surfaceAdaptivePromotionBonus = 0
+        scoring.answerableThresholdMinimum = 0
+        scoring.answerableThresholdMaximum = 10
+        rulePack.gateScoring = scoring
+        rulePack.answerableScoreThreshold = 0.5
+
+        var textPolicy = rulePack.textSegmentationPolicy
+        textPolicy.codeIdentifierCharacters = ""
+        textPolicy.codeIdentifierPatterns = [#"[A-Za-z]+[A-Z0-9][A-Za-z0-9]*"#]
+        rulePack.textSegmentation = textPolicy
+
+        let candidate = makeQuestion("How does PaymentRetryCoordinator work")
+        let context = makeContext(candidate.rawText)
+        let accepted = QuestionIntentGate(rulePack: rulePack).evaluate(candidate: candidate, context: context)
+        XCTAssertTrue(accepted.isAnswerableQuestion)
+
+        textPolicy.codeIdentifierPatterns = []
+        rulePack.textSegmentation = textPolicy
+        let rejected = QuestionIntentGate(rulePack: rulePack).evaluate(candidate: candidate, context: context)
+        XCTAssertFalse(rejected.isAnswerableQuestion)
+    }
+
+    func testQuestionClassifierUsesPolicyDrivenSelfSpeakerLabels() async throws {
+        var classificationRulePack = QuestionClassificationRulePack.default
+        classificationRulePack.selfSpeakerLabels = ["host"]
+        let classifier = QuestionClassifier(
+            classificationRulePack: classificationRulePack,
+            precisionMode: .balanced
+        )
+        let candidate = QuestionCandidate(
+            meetingId: UUID(),
+            rawText: "Can you explain latency?",
+            normalizedText: QuestionDetectionService.normalize("Can you explain latency?"),
+            language: "en-US",
+            speakerLabel: "Host",
+            startTime: 0,
+            endTime: 1,
+            sourceSegmentIds: [UUID()],
+            isPartial: false
+        )
+        let context = TranscriptContext(
+            recentTranscript: candidate.rawText,
+            mediumTranscript: candidate.rawText,
+            dominantLanguage: "en-US",
+            currentSegment: nil
+        )
+
+        let classification = try await classifier.classifyQuestion(
+            candidate: candidate,
+            context: context,
+            userProfile: makeProfile()
+        )
+
+        XCTAssertTrue(classification.responseNeeded)
+        XCTAssertFalse(classification.directedToUser)
+    }
+
+    func testQuestionClassifierUsesUnicodeAwarePolicyMarkerMatching() async throws {
+        var classificationRulePack = QuestionClassificationRulePack.default
+        classificationRulePack.typeRules = [
+            QuestionTypeRule(type: .businessContext, markers: ["ação"])
+        ]
+        let classifier = QuestionClassifier(
+            classificationRulePack: classificationRulePack,
+            precisionMode: .balanced
+        )
+
+        let matchedQuestion = makeQuestion("Qual ação devemos tomar?")
+        let matched = try await classifier.classifyQuestion(
+            candidate: matchedQuestion,
+            context: makeContext(matchedQuestion.rawText),
+            userProfile: makeProfile()
+        )
+        XCTAssertEqual(matched.questionType, .businessContext)
+
+        let embeddedQuestion = makeQuestion("Qual reação devemos tomar?")
+        let embedded = try await classifier.classifyQuestion(
+            candidate: embeddedQuestion,
+            context: makeContext(embeddedQuestion.rawText),
+            userProfile: makeProfile()
+        )
+        XCTAssertNotEqual(embedded.questionType, .businessContext)
+    }
+
+    func testQuestionClassifierUsesPolicyDrivenTypeSignals() async throws {
+        var classificationRulePack = QuestionClassificationRulePack.default
+        classificationRulePack.typeRules = [
+            QuestionTypeRule(type: .productScope, anySignals: [.actionRequestFrame])
+        ]
+        let classifier = QuestionClassifier(
+            classificationRulePack: classificationRulePack,
+            precisionMode: .balanced
+        )
+        let candidate = makeQuestion("Can you review the release plan today?")
+
+        let classification = try await classifier.classifyQuestion(
+            candidate: candidate,
+            context: makeContext(candidate.rawText),
+            userProfile: makeProfile()
+        )
+
+        XCTAssertEqual(classification.questionType, .productScope)
+        XCTAssertTrue(classification.responseNeeded)
+    }
+
+    func testQuestionClassifierDoesNotTreatSelfSpeakerLabelAsSubstring() async throws {
+        var classificationRulePack = QuestionClassificationRulePack.default
+        classificationRulePack.selfSpeakerLabels = ["me"]
+        let classifier = QuestionClassifier(
+            classificationRulePack: classificationRulePack,
+            precisionMode: .balanced
+        )
+        let candidate = QuestionCandidate(
+            meetingId: UUID(),
+            rawText: "Can you explain latency?",
+            normalizedText: QuestionDetectionService.normalize("Can you explain latency?"),
+            language: "en-US",
+            speakerLabel: "Megan",
+            startTime: 0,
+            endTime: 1,
+            sourceSegmentIds: [UUID()],
+            isPartial: false
+        )
+
+        let classification = try await classifier.classifyQuestion(
+            candidate: candidate,
+            context: makeContext(candidate.rawText),
+            userProfile: makeProfile()
+        )
+
+        XCTAssertTrue(classification.directedToUser)
+    }
+
+    func testQuestionClassifierUsesPolicyDrivenAnswerStyle() async throws {
+        let rawText = "Como inverter uma árvore binária em Python?"
+        let candidate = QuestionCandidate(
+            meetingId: UUID(),
+            rawText: rawText,
+            normalizedText: QuestionDetectionService.normalize(rawText),
+            language: "pt-BR",
+            speakerLabel: "Interviewer",
+            startTime: 0,
+            endTime: 1,
+            sourceSegmentIds: [UUID()],
+            isPartial: false
+        )
+        let context = TranscriptContext(
+            recentTranscript: rawText,
+            mediumTranscript: rawText,
+            dominantLanguage: "pt-BR",
+            currentSegment: nil
+        )
+
+        var rulePack = QuestionClassificationRulePack.default
+        rulePack.answerStylePolicy = QuestionAnswerStylePolicy(
+            defaultStyle: .concise,
+            incompleteStyle: .askForClarification,
+            stylesByType: [QuestionType.technicalExplanation.rawValue: .executive]
+        )
+
+        let classification = try await QuestionClassifier(
+            classificationRulePack: rulePack,
+            precisionMode: .balanced
+        )
+        .classifyQuestion(candidate: candidate, context: context, userProfile: makeProfile())
+
+        XCTAssertEqual(classification.questionType, .technicalExplanation)
+        XCTAssertEqual(classification.expectedAnswerStyle, .executive)
+    }
+
+    func testQuestionClassifierInfersTechnicalQuestionsOutsideEngineeringMeetingsFromPolicy() async throws {
+        let rawText = "How does PaymentRetryCoordinator work?"
+        let candidate = QuestionCandidate(
+            meetingId: UUID(),
+            rawText: rawText,
+            normalizedText: QuestionDetectionService.normalize(rawText),
+            language: "en-US",
+            speakerLabel: "Interviewer",
+            startTime: 0,
+            endTime: 1,
+            sourceSegmentIds: [UUID()],
+            isPartial: false
+        )
+        let context = TranscriptContext(
+            recentTranscript: rawText,
+            mediumTranscript: rawText,
+            dominantLanguage: "en-US",
+            currentSegment: nil
+        )
+        var profile = makeProfile()
+        profile.meetingType = .sales
+
+        var broadRulePack = QuestionClassificationRulePack.default
+        broadRulePack.typeRules = []
+        broadRulePack.technicalInferencePolicy = QuestionTechnicalInferencePolicy(
+            appliesToAnyMeeting: true,
+            appliesToMeetingTypes: [],
+            decisionType: .technicalDecision,
+            explanationType: .technicalExplanation,
+            identifierPatterns: [#"\b[A-Za-z]+[A-Z0-9][A-Za-z0-9]*\b"#]
+        )
+        let broadClassification = try await QuestionClassifier(
+            classificationRulePack: broadRulePack,
+            precisionMode: .balanced
+        )
+        .classifyQuestion(candidate: candidate, context: context, userProfile: profile)
+        XCTAssertEqual(broadClassification.questionType, .technicalExplanation)
+
+        var noIdentifierRulePack = broadRulePack
+        noIdentifierRulePack.technicalInferencePolicy = QuestionTechnicalInferencePolicy(
+            appliesToAnyMeeting: true,
+            appliesToMeetingTypes: [],
+            decisionType: .technicalDecision,
+            explanationType: .technicalExplanation,
+            usesCodeIdentifierCharacters: false,
+            identifierPatterns: []
+        )
+        let noIdentifierClassification = try await QuestionClassifier(
+            classificationRulePack: noIdentifierRulePack,
+            precisionMode: .balanced
+        )
+        .classifyQuestion(candidate: candidate, context: context, userProfile: profile)
+        XCTAssertEqual(noIdentifierClassification.questionType, .generalQuestion)
+
+        var restrictedRulePack = broadRulePack
+        restrictedRulePack.technicalInferencePolicy = QuestionTechnicalInferencePolicy(
+            appliesToAnyMeeting: false,
+            appliesToMeetingTypes: [.engineering],
+            decisionType: .technicalDecision,
+            explanationType: .technicalExplanation
+        )
+        let restrictedClassification = try await QuestionClassifier(
+            classificationRulePack: restrictedRulePack,
+            precisionMode: .balanced
+        )
+        .classifyQuestion(candidate: candidate, context: context, userProfile: profile)
+        XCTAssertEqual(restrictedClassification.questionType, .generalQuestion)
+    }
+
+    func testQuestionClassifierUsesPolicyDrivenResponseJustification() async throws {
+        let rawText = "Como inverter uma árvore binária em Python?"
+        let candidate = QuestionCandidate(
+            meetingId: UUID(),
+            rawText: rawText,
+            normalizedText: QuestionDetectionService.normalize(rawText),
+            language: "pt-BR",
+            speakerLabel: "Interviewer",
+            startTime: 0,
+            endTime: 1,
+            sourceSegmentIds: [UUID()],
+            isPartial: false
+        )
+        let context = TranscriptContext(
+            recentTranscript: rawText,
+            mediumTranscript: rawText,
+            dominantLanguage: "pt-BR",
+            currentSegment: nil
+        )
+
+        var rulePack = QuestionClassificationRulePack.default
+        rulePack.intrinsicallyActionableTypes = []
+        rulePack.responseJustifyingTypes = []
+        rulePack.responseJustifyingSignals = []
+        rulePack.responseJustifyingSignalGroups = []
+        rulePack.responseJustificationRules = []
+        rulePack.actionableMarkers = []
+        rulePack.informationalMarkers = []
+
+        let suppressed = try await QuestionClassifier(
+            classificationRulePack: rulePack,
+            precisionMode: .balanced
+        )
+        .classifyQuestion(candidate: candidate, context: context, userProfile: makeProfile())
+        XCTAssertEqual(suppressed.questionType, .technicalExplanation)
+        XCTAssertFalse(suppressed.responseNeeded)
+
+        rulePack.responseJustificationRules = [
+            QuestionResponseJustificationRule(
+                id: "policy_type_allows_response",
+                questionTypes: [.technicalExplanation]
+            )
+        ]
+        let allowed = try await QuestionClassifier(
+            classificationRulePack: rulePack,
+            precisionMode: .balanced
+        )
+        .classifyQuestion(candidate: candidate, context: context, userProfile: makeProfile())
+        XCTAssertEqual(allowed.questionType, .technicalExplanation)
+        XCTAssertTrue(allowed.responseNeeded)
+    }
+
+    func testQuestionClassifierUsesPolicyDrivenAttentionRules() async throws {
+        let rawText = "Como inverter uma árvore binária em Python?"
+        let candidate = QuestionCandidate(
+            meetingId: UUID(),
+            rawText: rawText,
+            normalizedText: QuestionDetectionService.normalize(rawText),
+            language: "pt-BR",
+            speakerLabel: "Interviewer",
+            startTime: 0,
+            endTime: 1,
+            sourceSegmentIds: [UUID()],
+            isPartial: false
+        )
+        let context = TranscriptContext(
+            recentTranscript: rawText,
+            mediumTranscript: rawText,
+            dominantLanguage: "pt-BR",
+            currentSegment: nil
+        )
+        let priorityScorer = QuestionPriorityScorer(policy: QuestionPriorityPolicy(
+            priorityRules: [
+                QuestionPriorityRule(
+                    id: "high_technical_explanation",
+                    priority: .high,
+                    questionTypes: [.technicalExplanation]
+                )
+            ]
+        ))
+
+        var rulePack = QuestionClassificationRulePack.default
+        rulePack.attentionRules = [
+            QuestionAttentionRule(
+                id: "only_directed_user_questions_need_attention",
+                requiresResponseNeeded: true,
+                requiresDirectedToUser: true
+            )
+        ]
+
+        let suppressed = try await QuestionClassifier(
+            classificationRulePack: rulePack,
+            priorityScorer: priorityScorer,
+            precisionMode: .balanced
+        )
+        .classifyQuestion(candidate: candidate, context: context, userProfile: makeProfile())
+        XCTAssertEqual(suppressed.priority, .high)
+        XCTAssertTrue(suppressed.responseNeeded)
+        XCTAssertFalse(suppressed.directedToUser)
+        XCTAssertFalse(suppressed.userAttentionNeeded)
+
+        rulePack.attentionRules = [
+            QuestionAttentionRule(
+                id: "high_priority_answers_need_attention",
+                priorities: [.high],
+                requiresResponseNeeded: true
+            )
+        ]
+        let allowed = try await QuestionClassifier(
+            classificationRulePack: rulePack,
+            priorityScorer: priorityScorer,
+            precisionMode: .balanced
+        )
+        .classifyQuestion(candidate: candidate, context: context, userProfile: makeProfile())
+        XCTAssertEqual(allowed.priority, .high)
+        XCTAssertTrue(allowed.userAttentionNeeded)
+    }
+
+    func testQuestionDecisionGateUsesPolicyDrivenThresholdsAndPartialSignals() {
+        let understanding = LocalQuestionUnderstanding(
+            intent: .answerableQuestion,
+            confidence: 0.90,
+            strongSignals: [.interrogativeStarter, .concreteObject, .directedToUser],
+            negativeSignals: [],
+            reason: "test",
+            extractedQuestion: "Can you explain auth?"
+        )
+        var policy = QuestionDecisionGatePolicy.fallback
+        policy.modeThresholds[QAPrecisionMode.highPrecision.rawValue] = QuestionDecisionGateModePolicy(
+            confidenceThreshold: 0.89,
+            partialConfidenceThreshold: 0.88,
+            requiredStrongSignalCount: 1
+        )
+        policy.partialStrictSignals = [.domainObject]
+        policy.partialCompleteShapeSignals = [.interrogativeStarter, .domainObject]
+
+        XCTAssertTrue(
+            QuestionDecisionGate(policy: policy).shouldAccept(
+                understanding: understanding,
+                precisionMode: .highPrecision,
+                isPartial: false
+            )
+        )
+        XCTAssertFalse(
+            QuestionDecisionGate(policy: policy).shouldAccept(
+                understanding: understanding,
+                precisionMode: .highPrecision,
+                isPartial: true
+            )
+        )
+
+        var tunedPolicy = policy
+        tunedPolicy.partialStrictSignals = [.directedToUser]
+        XCTAssertTrue(
+            QuestionDecisionGate(policy: tunedPolicy).shouldAccept(
+                understanding: understanding,
+                precisionMode: .highPrecision,
+                isPartial: true
+            )
+        )
+    }
+
+    func testQuestionMultimodalScorerUsesPolicyDrivenSignalLabelsAndSuppression() {
+        var policy = QuestionMultimodalPolicy.fallback
+        policy.signalLabels.partialUnstable = "custom_partial_unstable"
+        policy.hardSuppressionSignals = []
+        policy.hardSuppressionSignalKeys = [.partialUnstable]
+        let understanding = LocalQuestionUnderstanding(
+            intent: .answerableQuestion,
+            confidence: 0.92,
+            strongSignals: [.terminalQuestionMark, .interrogativeStarter, .concreteObject],
+            negativeSignals: [],
+            reason: "test",
+            extractedQuestion: "Can we ship?"
+        )
+        let signal = QuestionMultimodalSignal(
+            isFinal: false,
+            isPartial: true,
+            duration: 1,
+            hasTerminalPause: false,
+            partialStability: 0.2
+        )
+
+        let decision = QuestionMultimodalScorer(policy: policy).score(
+            understanding: understanding,
+            signal: signal,
+            precisionMode: .balanced,
+            isPartial: true
+        )
+
+        XCTAssertFalse(decision.shouldAllow)
+        XCTAssertTrue(decision.suppressionSignals.contains("custom_partial_unstable"))
+        XCTAssertEqual(policy.effectiveHardSuppressionSignals, ["custom_partial_unstable"])
+    }
+
+    func testRealtimeQADetectsLineSeparatedScreenshotQuestionsIndividually() async throws {
+        let text = """
+        Quais as notícias de hoje
+        Qual a capital da França
+        Como inverter uma árvore binária em Python
+        Como inverter uma árvore binária em Java script
+        """
+        let segment = TranscriptSegment(meetingId: UUID(), speakerLabel: "Interviewer", text: text, originalLanguage: "pt-BR")
+        let context = TranscriptContext(recentTranscript: text, mediumTranscript: text, completeTranscript: text, dominantLanguage: "pt-BR", currentSegment: segment)
+        let candidates = QuestionDetectionService().detectCandidates(from: segment, context: context)
+
+        XCTAssertEqual(
+            candidates.map(\.rawText),
+            [
+                "Quais as notícias de hoje",
+                "Qual a capital da França",
+                "Como inverter uma árvore binária em Python",
+                "Como inverter uma árvore binária em Java script"
+            ]
+        )
+    }
+
+    func testRealtimeQADetectsCollapsedScreenshotQuestionBurstIndividually() throws {
+        let text = "Quais são as notícias de hoje Como funciona o algoritmo de duas formas Como funciona uma Linked list Como inverter uma árvore binária em Python"
+        let segment = TranscriptSegment(meetingId: UUID(), speakerLabel: "Interviewer", text: text, originalLanguage: "pt-BR")
+        let context = TranscriptContext(recentTranscript: text, mediumTranscript: text, completeTranscript: text, dominantLanguage: "pt-BR", currentSegment: segment)
+        let candidates = QuestionDetectionService().detectCandidates(from: segment, context: context)
+
+        XCTAssertEqual(
+            candidates.map(\.rawText),
+            [
+                "Quais são as notícias de hoje",
+                "Como funciona o algoritmo de duas formas",
+                "Como funciona uma Linked list",
+                "Como inverter uma árvore binária em Python"
+            ]
+        )
+    }
+
+    func testRealtimeQADetectsCollapsedQuestionBurstAfterPolicyPreamble() throws {
+        let text = "Então quais são as notícias de hoje Como funciona o algoritmo de duas formas Como funciona uma Linked list Como inverter uma árvore binária em Python"
+        let segment = TranscriptSegment(meetingId: UUID(), speakerLabel: "Interviewer", text: text, originalLanguage: "pt-BR")
+        let context = TranscriptContext(recentTranscript: text, mediumTranscript: text, completeTranscript: text, dominantLanguage: "pt-BR", currentSegment: segment)
+        let candidates = QuestionDetectionService().detectCandidates(from: segment, context: context)
+
+        XCTAssertEqual(
+            candidates.map(\.rawText),
+            [
+                "quais são as notícias de hoje",
+                "Como funciona o algoritmo de duas formas",
+                "Como funciona uma Linked list",
+                "Como inverter uma árvore binária em Python"
+            ]
+        )
+    }
+
+    func testRealtimeQADoesNotSplitReportedQuestionAsFreshQuestion() async throws {
+        let text = "Como eu disse, o sistema pergunta como vamos escalar quando cresce"
+        let detector = QuestionDetectionService(precisionMode: .highPrecision)
+        let classifier = QuestionClassifier(precisionMode: .highPrecision)
+
+        let prediction = try await qaPrediction(
+            for: text,
+            language: "pt-BR",
+            detector: detector,
+            classifier: classifier
+        )
+
+        XCTAssertFalse(
+            prediction.responseNeeded,
+            "Reported question should not be surfaced as fresh QA. reason=\(prediction.classification?.reason ?? "no_candidate")"
+        )
+    }
+
+    func testRealtimeQARecognizesSpanishGoldFixtureQuestions() async throws {
+        let detector = QuestionDetectionService(precisionMode: .highPrecision)
+        let classifier = QuestionClassifier(precisionMode: .highPrecision)
+        let cases = [
+            "La duda es si vale la pena meter esto en el MVP.",
+            "La duda es si vale la pena meter esto en el MVP. #3",
+            "Puedes validar el riesgo de migracion?",
+            "Puedes validar el riesgo de migracion? #4",
+            "Puedes validar el riesgo de migracion? #10"
+        ]
+
+        for text in cases {
+            let prediction = try await qaPrediction(
+                for: text,
+                language: "es-ES",
+                detector: detector,
+                classifier: classifier
+            )
+            XCTAssertTrue(
+                prediction.responseNeeded,
+                "Expected Spanish fixture question to need a response: \(text). candidate=\(prediction.candidate?.rawText ?? "nil") signals=\(prediction.candidate?.discovery.surfaceSignals.joined(separator: ",") ?? "nil") reason=\(prediction.classification?.reason ?? "no_candidate") confidence=\(prediction.classification?.confidence ?? 0)"
+            )
+        }
+    }
+
+    func testRealtimeQABurstSplitterUsesRulePackMarkersInsteadOfHardcodedTerms() throws {
+        var rulePack = QuestionIntentRulePack.default
+        rulePack.directQuestionMarkers = ["orbit"]
+        rulePack.embeddedQuestionSplitMarkers = []
+        rulePack.embeddedQuestionSplitPreambleMarkers = []
+        rulePack.embeddedQuestionSplitMaximumPreambleTokens = 0
+        rulePack.fragmentPhrases = []
+        rulePack.fragmentPrefixes = []
+        rulePack.stopWords = []
+        rulePack.lowInformationWords = []
+
+        let text = "orbit alpha orbit beta"
+        let segment = TranscriptSegment(meetingId: UUID(), speakerLabel: "Interviewer", text: text, originalLanguage: "en-US")
+        let context = TranscriptContext(recentTranscript: text, mediumTranscript: text, completeTranscript: text, dominantLanguage: "en-US", currentSegment: segment)
+        let candidates = QuestionDetectionService(rulePack: rulePack).detectCandidates(from: segment, context: context)
+
+        XCTAssertEqual(candidates.map(\.rawText), ["orbit alpha", "orbit beta"])
+    }
+
+    func testRealtimeQABurstSplitterUsesPolicyPreambleInsteadOfHardcodedTerms() throws {
+        var rulePack = QuestionIntentRulePack.default
+        rulePack.directQuestionMarkers = ["orbit"]
+        rulePack.embeddedQuestionSplitMarkers = []
+        rulePack.embeddedQuestionSplitPreambleMarkers = ["preface"]
+        rulePack.embeddedQuestionSplitMaximumPreambleTokens = 1
+        rulePack.fragmentPhrases = []
+        rulePack.fragmentPrefixes = []
+        rulePack.stopWords = []
+        rulePack.lowInformationWords = []
+
+        let text = "preface orbit alpha orbit beta"
+        let segment = TranscriptSegment(meetingId: UUID(), speakerLabel: "Interviewer", text: text, originalLanguage: "en-US")
+        let context = TranscriptContext(recentTranscript: text, mediumTranscript: text, completeTranscript: text, dominantLanguage: "en-US", currentSegment: segment)
+        let candidates = QuestionDetectionService(rulePack: rulePack).detectCandidates(from: segment, context: context)
+
+        XCTAssertEqual(candidates.map(\.rawText), ["orbit alpha", "orbit beta"])
+    }
+
+    func testRealtimeQABurstSplitterUsesPolicyContinuationLeadsInsteadOfHardcodedTerms() throws {
+        var splittingRulePack = QuestionIntentRulePack.default
+        splittingRulePack.directQuestionMarkers = []
+        splittingRulePack.modalQuestionStarters = ["relay"]
+        splittingRulePack.indirectQuestionMarkers = ["orbit"]
+        splittingRulePack.embeddedQuestionSplitMarkers = []
+        splittingRulePack.embeddedQuestionSplitPreambleMarkers = []
+        splittingRulePack.embeddedQuestionSplitContinuationLeadMarkers = []
+        splittingRulePack.embeddedQuestionSplitMaximumPreambleTokens = 0
+        splittingRulePack.fragmentPhrases = []
+        splittingRulePack.fragmentPrefixes = []
+        splittingRulePack.stopWords = []
+        splittingRulePack.lowInformationWords = []
+
+        let text = "orbit alpha relay beta"
+        let segment = TranscriptSegment(meetingId: UUID(), speakerLabel: "Interviewer", text: text, originalLanguage: "en-US")
+        let context = TranscriptContext(recentTranscript: text, mediumTranscript: text, completeTranscript: text, dominantLanguage: "en-US", currentSegment: segment)
+        let splitCandidates = QuestionDetectionService(rulePack: splittingRulePack).detectCandidates(from: segment, context: context)
+
+        XCTAssertEqual(splitCandidates.map(\.rawText), ["orbit alpha", "relay beta"])
+
+        var continuationRulePack = splittingRulePack
+        continuationRulePack.embeddedQuestionSplitContinuationLeadMarkers = ["orbit"]
+        let preservedCandidates = QuestionDetectionService(rulePack: continuationRulePack).detectCandidates(from: segment, context: context)
+
+        XCTAssertEqual(preservedCandidates.map(\.rawText), [text])
+    }
+
+    func testRealtimeQAAdaptiveProfilePromotesLearnedQuestionShapes() async throws {
+        var adaptiveProfile = QuestionAnsweringAdaptiveProfile()
+        adaptiveProfile.record(feedback: .markedUseful, rawText: "Release timeline Alpha")
+        adaptiveProfile.record(feedback: .markedUseful, rawText: "Release timeline Alpha")
+
+        let text = "Release timeline Alpha"
+        let segment = TranscriptSegment(meetingId: UUID(), speakerLabel: "Interviewer", text: text, originalLanguage: "en-US")
+        let context = TranscriptContext(recentTranscript: text, mediumTranscript: text, completeTranscript: text, dominantLanguage: "en-US", currentSegment: segment)
+        let candidates = QuestionDetectionService(adaptiveProfile: adaptiveProfile).detectCandidates(from: segment, context: context)
+
+        let candidate = try XCTUnwrap(candidates.first)
+        XCTAssertTrue(candidate.discovery.surfaceSignals.contains(QuestionUnderstandingSignal.adaptivePromotion.rawValue))
+
+        let classification = try await QuestionClassifier(adaptiveProfile: adaptiveProfile)
+            .classifyQuestion(candidate: candidate, context: context, userProfile: makeProfile())
+        XCTAssertTrue(classification.responseNeeded, "Expected learned promoted shape to be accepted: \(classification.reason)")
+    }
+
+    func testRealtimeQALearnsContextualQuestionLeadWithoutHardcodedLanguageMarker() async throws {
+        let prior = "Wie funktioniert der Cache?"
+        let text = "Wie funktioniert der Scheduler"
+        let segment = TranscriptSegment(meetingId: UUID(), speakerLabel: "Interviewer", text: text, originalLanguage: "de-DE")
+        let transcript = """
+        [Microphone] Interviewer: \(prior)
+        [Microphone] Interviewer: \(text)
+        """
+        let context = TranscriptContext(
+            recentTranscript: transcript,
+            mediumTranscript: transcript,
+            completeTranscript: transcript,
+            dominantLanguage: "de-DE",
+            currentSegment: segment
+        )
+
+        let candidates = QuestionDetectionService().detectCandidates(from: segment, context: context)
+        let candidate = try XCTUnwrap(candidates.first)
+        XCTAssertTrue(candidate.discovery.surfaceSignals.contains(QuestionUnderstandingSignal.contextualQuestionLead.rawValue))
+        XCTAssertTrue(candidate.discovery.surfaceSignals.contains(QuestionUnderstandingSignal.semanticQuestionShape.rawValue))
+
+        let classification = try await QuestionClassifier().classifyQuestion(candidate: candidate, context: context, userProfile: makeProfile())
+        XCTAssertTrue(classification.responseNeeded, "Expected contextual cue to justify response: \(classification.reason)")
+        XCTAssertEqual(classification.questionType, .generalQuestion)
+    }
+
+    func testRealtimeQAContextualQuestionLeadRequiresSpecificPhraseOrRepeatedSingleToken() throws {
+        let prior = "Release timeline Alpha?"
+        let text = "Release build green"
+        let segment = TranscriptSegment(meetingId: UUID(), speakerLabel: "Speaker", text: text, originalLanguage: "en-US")
+        let transcript = """
+        [Microphone] Speaker: \(prior)
+        [Microphone] Speaker: \(text)
+        """
+        let context = TranscriptContext(
+            recentTranscript: transcript,
+            mediumTranscript: transcript,
+            completeTranscript: transcript,
+            dominantLanguage: "en-US",
+            currentSegment: segment
+        )
+
+        let candidates = QuestionDetectionService().detectCandidates(from: segment, context: context)
+        XCTAssertTrue(candidates.isEmpty, "A single learned domain token should not promote an unrelated statement.")
+    }
+
+    func testRealtimeQAContextualQuestionLeadLearnsRepeatedSingleTokenCue() throws {
+        let text = "Wie loesen wir das"
+        let segment = TranscriptSegment(meetingId: UUID(), speakerLabel: "Interviewer", text: text, originalLanguage: "de-DE")
+        let transcript = """
+        [Microphone] Interviewer: Wie funktioniert der Cache?
+        [Microphone] Interviewer: Wie laeuft der Deploy?
+        [Microphone] Interviewer: \(text)
+        """
+        let context = TranscriptContext(
+            recentTranscript: transcript,
+            mediumTranscript: transcript,
+            completeTranscript: transcript,
+            dominantLanguage: "de-DE",
+            currentSegment: segment
+        )
+
+        let candidate = try XCTUnwrap(QuestionDetectionService().detectCandidates(from: segment, context: context).first)
+        XCTAssertTrue(candidate.discovery.surfaceSignals.contains(QuestionUnderstandingSignal.contextualQuestionLead.rawValue))
+    }
+
+    func testRealtimeQAContextualCueLearnsCompactScriptQuestionSuffix() async throws {
+        let text = "认证流程可以吗"
+        let segment = TranscriptSegment(meetingId: UUID(), speakerLabel: "Interviewer", text: text, originalLanguage: "zh-Hans")
+        let transcript = """
+        [Microphone] Interviewer: 缓存准备好了吗？
+        [Microphone] Interviewer: 部署成功了吗？
+        [Microphone] Interviewer: \(text)
+        """
+        let context = TranscriptContext(
+            recentTranscript: transcript,
+            mediumTranscript: transcript,
+            completeTranscript: transcript,
+            dominantLanguage: "zh-Hans",
+            currentSegment: segment
+        )
+
+        let candidates = QuestionDetectionService().detectCandidates(from: segment, context: context)
+        let candidate = try XCTUnwrap(candidates.first)
+        XCTAssertTrue(candidate.discovery.surfaceSignals.contains(QuestionUnderstandingSignal.contextualQuestionLead.rawValue))
+
+        let classification = try await QuestionClassifier().classifyQuestion(candidate: candidate, context: context, userProfile: makeProfile())
+        XCTAssertTrue(classification.responseNeeded, "Expected compact-script contextual suffix to justify response: \(classification.reason)")
+    }
+
+    func testRealtimeQAEngineSurfacesScreenshotQuestionSequence() async throws {
+        let engine = TestRealtimeQuestionAnsweringEngine()
+        let meetingId = UUID()
+        let meeting = MeetingSession(id: meetingId, title: "Interview", status: .listening)
+        let lines = [
+            "Quais são as notícias de hoje",
+            "Como funciona o algoritmo de duas formas",
+            "Duas formas e não duas formas duas somas meu Deus",
+            "Como funciona uma Linked list",
+            "Como inverter uma árvore binária em Python"
+        ]
+
+        let eventTask = Task { () -> [RealtimeQuestionEvent] in
+            var events: [RealtimeQuestionEvent] = []
+            for await event in engine.eventBus.events {
+                events.append(event)
+            }
+            return events
+        }
+
+        for (index, text) in lines.enumerated() {
+            let segment = TranscriptSegment(
+                meetingId: meetingId,
+                speakerLabel: "Interviewer",
+                text: text,
+                originalLanguage: "pt-BR",
+                startTime: TimeInterval(index * 3),
+                endTime: TimeInterval(index * 3 + 2),
+                confidence: 0.96,
+                isFinal: true
+            )
+            await engine.ingest(segment: segment, meeting: meeting, preferences: AppPreferences())
+        }
+
+        try await Task.sleep(for: .milliseconds(100))
+        engine.stop()
+        let events = await eventTask.value
+        let detectedTexts = events.compactMap { event -> String? in
+            if case let .questionDetected(candidate, _) = event {
+                return candidate.rawText
+            }
+            return nil
+        }
+
+        XCTAssertEqual(detectedTexts, [
+            "Quais são as notícias de hoje",
+            "Como funciona o algoritmo de duas formas",
+            "Como funciona uma Linked list",
+            "Como inverter uma árvore binária em Python"
+        ])
+    }
+
     func testRealtimeQALocalFallbackAnswersInterviewQuestions() async throws {
         let questions = [
             ("Qual a capital da França", "Paris"),
@@ -7515,6 +11028,8 @@ final class NotchCopilotTests: XCTestCase {
         var byLanguage: [String: (tp: Int, fp: Int, fn: Int)] = [:]
         var falsePositiveExamples: [String] = []
         var falseNegativeExamples: [String] = []
+        var falsePositiveExamplesByLanguage: [String: [String]] = [:]
+        var falseNegativeExamplesByLanguage: [String: [String]] = [:]
 
         for line in lines {
             let row = try decoder.decode(Row.self, from: Data(line.utf8))
@@ -7548,11 +11063,17 @@ final class NotchCopilotTests: XCTestCase {
                 if falsePositiveExamples.count < 12 {
                     falsePositiveExamples.append("[\(row.language)] \(row.text)")
                 }
+                if falsePositiveExamplesByLanguage[row.language, default: []].count < 6 {
+                    falsePositiveExamplesByLanguage[row.language, default: []].append(row.text)
+                }
             case (true, false):
                 falseNegative += 1
                 languageStats.fn += 1
                 if falseNegativeExamples.count < 12 {
                     falseNegativeExamples.append("[\(row.language)] \(row.text)")
+                }
+                if falseNegativeExamplesByLanguage[row.language, default: []].count < 6 {
+                    falseNegativeExamplesByLanguage[row.language, default: []].append(row.text)
                 }
             case (false, false):
                 trueNegative += 1
@@ -7569,8 +11090,16 @@ final class NotchCopilotTests: XCTestCase {
         for (language, stats) in byLanguage {
             let languagePrecision = Double(stats.tp) / Double(max(stats.tp + stats.fp, 1))
             let languageRecall = Double(stats.tp) / Double(max(stats.tp + stats.fn, 1))
-            XCTAssertGreaterThanOrEqual(languagePrecision, 0.98, "Precision below target for \(language)")
-            XCTAssertGreaterThanOrEqual(languageRecall, 0.90, "Recall below target for \(language)")
+            XCTAssertGreaterThanOrEqual(
+                languagePrecision,
+                0.98,
+                "Precision below target for \(language). False positives: \((falsePositiveExamplesByLanguage[language] ?? []).joined(separator: " | "))"
+            )
+            XCTAssertGreaterThanOrEqual(
+                languageRecall,
+                0.90,
+                "Recall below target for \(language). False negatives: \((falseNegativeExamplesByLanguage[language] ?? []).joined(separator: " | "))"
+            )
         }
     }
 
@@ -7823,6 +11352,36 @@ final class NotchCopilotTests: XCTestCase {
         XCTAssertFalse(classification.isQuestion)
         XCTAssertTrue(classification.suppressionSignals?.contains("partial_unstable") == true)
         XCTAssertNotNil(classification.decisionScore)
+    }
+
+    func testQuestionClassifierUsesPolicyDrivenRejectedGateConfidenceCeiling() async throws {
+        let signal = QuestionMultimodalSignal(
+            language: "en-US",
+            asrConfidence: 0.93,
+            isFinal: false,
+            isPartial: true,
+            speakerLabel: "Speaker",
+            audioSource: .microphone,
+            duration: 0.7,
+            hasTerminalPause: false,
+            partialStability: 0.2,
+            rms: 0.02,
+            peak: 0.04,
+            audioEnergy: 0.02
+        )
+        let candidate = makeQuestion("Ryan can you explain the OAuth flow", isPartial: true, multimodalSignal: signal)
+        var rulePack = QuestionClassificationRulePack.default
+        rulePack.confidencePolicy.rejectedGateConfidenceCeiling = 0.43
+
+        let classification = try await QuestionClassifier(
+            classificationRulePack: rulePack,
+            multimodalMode: .enforced
+        )
+        .classifyQuestion(candidate: candidate, context: makeContext(candidate.rawText), userProfile: makeProfile())
+
+        XCTAssertFalse(classification.responseNeeded)
+        XCTAssertFalse(classification.isQuestion)
+        XCTAssertEqual(classification.confidence, 0.43, accuracy: 0.001)
     }
 
     func testRealtimeQATrainedMultiQTDecisionOverridesFallbackWhenAvailable() async throws {
@@ -8163,6 +11722,56 @@ final class NotchCopilotTests: XCTestCase {
         XCTAssertEqual(finalRescue.first?.discovery.source, .multiqtRescue)
     }
 
+    func testRealtimeQAMultiQTRescueThresholdsArePolicyDriven() async throws {
+        let text = "We need the deadline for OAuth endpoint by Friday"
+        let segment = TranscriptSegment(
+            meetingId: UUID(),
+            speakerLabel: "Speaker",
+            text: text,
+            originalLanguage: "en-US",
+            startTime: 0,
+            endTime: 2.1,
+            confidence: 0.95,
+            isFinal: true
+        )
+        let context = TranscriptContext(
+            recentTranscript: text,
+            mediumTranscript: text,
+            completeTranscript: text,
+            dominantLanguage: "en-US",
+            currentSegment: segment
+        )
+        let detection = QuestionDetectionService(precisionMode: .highPrecision)
+            .detect(from: segment, context: context, signal: QuestionMultimodalSignal(segment: segment))
+        let runner = StubTrainedMultiQTModelRunner(
+            prediction: positiveCandidateDetectionPrediction(label: "deadline", responseScore: 0.92, candidateScore: 0.60)
+        )
+
+        let strictRescuer = QuestionMultiQTCandidateRescuer(
+            trainedModelRunner: runner,
+            intentGate: QuestionIntentGate(),
+            rescuePolicy: RealtimeMultiQTRescuePolicy(minimumCandidateScore: 0.80)
+        )
+        let strictRescue = await strictRescuer.rescueCandidates(
+            from: detection.rejectedFrames,
+            context: context,
+            mode: .enforced
+        )
+        XCTAssertTrue(strictRescue.isEmpty)
+
+        let permissiveRescuer = QuestionMultiQTCandidateRescuer(
+            trainedModelRunner: runner,
+            intentGate: QuestionIntentGate(),
+            rescuePolicy: RealtimeMultiQTRescuePolicy(minimumCandidateScore: 0.50)
+        )
+        let permissiveRescue = await permissiveRescuer.rescueCandidates(
+            from: detection.rejectedFrames,
+            context: context,
+            mode: .enforced
+        )
+        XCTAssertEqual(permissiveRescue.first?.discovery.source, .multiqtRescue)
+    }
+
     func testRealtimeQAEngineSurfacesMultiQTRescuedSurfaceMissInOrder() async throws {
         let prediction = positiveCandidateDetectionPrediction(label: "deadline")
         let runner = StubTrainedMultiQTModelRunner(prediction: prediction)
@@ -8218,6 +11827,83 @@ final class NotchCopilotTests: XCTestCase {
         XCTAssertTrue(events.contains(where: { if case let .answerGenerating(_, stage) = $0 { return stage == .retrievingContext }; return false }))
         XCTAssertTrue(events.contains(where: { if case let .answerGenerating(_, stage) = $0 { return stage == .drafting }; return false }))
         XCTAssertTrue(events.contains(where: { if case .suggestedAnswerReady = $0 { return true }; return false }))
+    }
+
+    func testRealtimeQAEngineDefersMarkerlessPartialForMultiQTRescue() async throws {
+        let prediction = positiveCandidateDetectionPrediction(label: "deadline")
+        let runner = StubTrainedMultiQTModelRunner(prediction: prediction)
+        let realtimePolicy = RealtimeQuestionAnsweringPolicy(
+            answerResolutionMarkers: [],
+            incompleteActionFrames: [],
+            danglingPartialTokens: [],
+            selfAnswerWindowSeconds: 20,
+            partialStability: .fallback,
+            deferredPartialDetection: RealtimeDeferredPartialDetectionPolicy(
+                stableCandidateDelayMilliseconds: 0,
+                deferredDetectionDelayMilliseconds: 0,
+                forcedPartialStability: 0.84,
+                forcedRevisionCount: 1,
+                minimumTokenCount: 4,
+                minimumCJKCharacterCount: 4,
+                minimumConfidence: 0.45,
+                completeMinimumTokenCount: 5,
+                completeMinimumCJKCharacterCount: 8,
+                allowModelRescuePrefilter: true,
+                modelRescuePrefilterRequiresSurfaceEvidence: true
+            ),
+            multiqtRescue: .fallback,
+            runtimeLabels: .empty
+        )
+        let engine = RealtimeQuestionAnsweringEngine(
+            classifierProvider: QuestionClassifier(
+                precisionMode: .highPrecision,
+                multimodalMode: .enforced,
+                trainedModelRunner: runner
+            ),
+            contextRetriever: MeetingContextRetriever(knowledgeStore: nil),
+            answerProvider: TestMeetingAnswerProvider(),
+            multiqtRescuer: QuestionMultiQTCandidateRescuer(
+                trainedModelRunner: runner,
+                intentGate: QuestionIntentGate()
+            ),
+            realtimePolicy: realtimePolicy
+        )
+        var preferences = AppPreferences()
+        preferences.qaMultimodalMode = .enforced
+        preferences.qaPrecisionMode = .highPrecision
+        let meetingId = UUID()
+        let meeting = MeetingSession(id: meetingId, title: "Partial rescue", status: .listening)
+        let segment = TranscriptSegment(
+            meetingId: meetingId,
+            speakerLabel: "Speaker",
+            text: "We need the deadline for OAuth endpoint by Friday",
+            originalLanguage: "en-US",
+            startTime: 0,
+            endTime: 1.8,
+            confidence: 0.95,
+            isFinal: false
+        )
+
+        let eventTask = Task { () -> [RealtimeQuestionEvent] in
+            var events: [RealtimeQuestionEvent] = []
+            for await event in engine.eventBus.events {
+                events.append(event)
+                if case .questionDetected = event { break }
+            }
+            return events
+        }
+
+        await engine.ingest(segment: segment, meeting: meeting, preferences: preferences)
+        try await Task.sleep(for: .milliseconds(200))
+        engine.stop()
+
+        let events = await eventTask.value
+        let candidate = try XCTUnwrap(events.compactMap { event -> QuestionCandidate? in
+            if case let .questionDetected(candidate, _) = event { return candidate }
+            return nil
+        }.first)
+        XCTAssertEqual(candidate.discovery.source, .multiqtRescue)
+        XCTAssertEqual(candidate.discovery.modelLabel, "deadline")
     }
 
     func testQuestionCandidateDecodesLegacyPayloadWithSurfaceDiscovery() throws {
@@ -8329,6 +12015,69 @@ final class NotchCopilotTests: XCTestCase {
 
             XCTAssertTrue(detector.detectCandidates(from: segment, context: context).isEmpty, text)
         }
+    }
+
+    func testRealtimeQAPartialStabilityTrackerUsesPolicyDrivenThresholds() {
+        let policy = RealtimePartialStabilityPolicy(
+            similarityStableThreshold: 0.90,
+            finalStableCount: 3,
+            stableRevisionCount: 3,
+            stableScoreFloor: 0.91,
+            unstableScoreFloor: 0.12,
+            stableMinimumTokens: 4,
+            prefixSimilarityFloor: 0.66
+        )
+        var tracker = QuestionPartialStabilityTracker(policy: policy)
+        let meetingId = UUID()
+        let segment = TranscriptSegment(
+            meetingId: meetingId,
+            speakerLabel: "Speaker",
+            text: "Can we ship Friday",
+            startTime: 0,
+            endTime: 1,
+            confidence: 0.95,
+            isFinal: false
+        )
+
+        let first = tracker.observe(segment: segment)
+        let second = tracker.observe(segment: segment)
+        let third = tracker.observe(segment: segment)
+
+        XCTAssertFalse(first.isStable)
+        XCTAssertFalse(second.isStable)
+        XCTAssertTrue(third.isStable)
+        XCTAssertEqual(first.score, 0.12, accuracy: 0.001)
+        XCTAssertEqual(third.revisionCount, 2)
+    }
+
+    func testRealtimeQAPartialStabilityTrackerUsesPolicyTokenizationForCompactScripts() {
+        let textPolicy = QuestionIntentRulePack.default.textSegmentationPolicy
+        let text = "認証リスクは何ですか"
+        XCTAssertGreaterThanOrEqual(textPolicy.lexicalTokenCount(in: text), 2)
+
+        let policy = RealtimePartialStabilityPolicy(
+            similarityStableThreshold: 0.90,
+            finalStableCount: 3,
+            stableRevisionCount: 2,
+            stableScoreFloor: 0.91,
+            unstableScoreFloor: 0.12,
+            stableMinimumTokens: 2,
+            prefixSimilarityFloor: 0.66
+        )
+        var tracker = QuestionPartialStabilityTracker(policy: policy, textPolicy: textPolicy)
+        let segment = TranscriptSegment(
+            meetingId: UUID(),
+            speakerLabel: "Speaker",
+            text: text,
+            originalLanguage: "ja-JP",
+            startTime: 0,
+            endTime: 1,
+            confidence: 0.95,
+            isFinal: false
+        )
+
+        XCTAssertFalse(tracker.observe(segment: segment).isStable)
+        XCTAssertTrue(tracker.observe(segment: segment).isStable)
     }
 
     func testRealtimeQAEngineDoesNotSurfaceUnstablePartialBeforeFinal() async throws {
@@ -8463,6 +12212,218 @@ final class NotchCopilotTests: XCTestCase {
         XCTAssertTrue(event.1.responseNeeded)
         XCTAssertTrue(event.1.complete)
         XCTAssertEqual(event.1.extractedQuestion, "Quanto é 2 + 2")
+    }
+
+    func testRealtimeQAEngineUsesPolicyDrivenDeferredPartialDelay() async throws {
+        let policy = RealtimeQuestionAnsweringPolicy(
+            answerResolutionMarkers: [],
+            incompleteActionFrames: [],
+            danglingPartialTokens: [],
+            selfAnswerWindowSeconds: 20,
+            partialStability: .fallback,
+            deferredPartialDetection: RealtimeDeferredPartialDetectionPolicy(
+                stableCandidateDelayMilliseconds: 10,
+                deferredDetectionDelayMilliseconds: 10,
+                forcedPartialStability: 0.90,
+                forcedRevisionCount: 1,
+                minimumTokenCount: 2,
+                minimumCJKCharacterCount: 2,
+                minimumConfidence: 0.20,
+                completeMinimumTokenCount: 2,
+                completeMinimumCJKCharacterCount: 2
+            )
+        )
+        let engine = RealtimeQuestionAnsweringEngine(
+            classifierProvider: QuestionClassifier(),
+            contextRetriever: MeetingContextRetriever(knowledgeStore: nil),
+            answerProvider: TestMeetingAnswerProvider(),
+            realtimePolicy: policy
+        )
+        var preferences = AppPreferences()
+        preferences.qaMultimodalMode = .enforced
+        let meetingId = UUID()
+        let meeting = MeetingSession(id: meetingId, title: "Fast partial", status: .listening)
+        let partial = TranscriptSegment(
+            meetingId: meetingId,
+            speakerLabel: "Speaker",
+            text: "Quanto é 2 + 2",
+            originalLanguage: "pt-BR",
+            startTime: 0,
+            endTime: 1.3,
+            confidence: 0.96,
+            isFinal: false
+        )
+
+        let eventTask = Task { () -> [RealtimeQuestionEvent] in
+            var events: [RealtimeQuestionEvent] = []
+            for await event in engine.eventBus.events {
+                events.append(event)
+                if case .questionDetected = event { break }
+            }
+            return events
+        }
+
+        await engine.ingest(segment: partial, meeting: meeting, preferences: preferences)
+        try await Task.sleep(for: .milliseconds(140))
+        engine.stop()
+
+        let events = await eventTask.value
+        XCTAssertTrue(events.contains { if case .questionDetected = $0 { return true }; return false })
+    }
+
+    func testRealtimeQAEngineUsesPolicyDrivenAnswerOptions() async throws {
+        let answerProvider = CapturingMeetingAnswerProvider()
+        let policy = RealtimeQuestionAnsweringPolicy(
+            answerResolutionMarkers: [],
+            incompleteActionFrames: [],
+            danglingPartialTokens: [],
+            selfAnswerWindowSeconds: 20,
+            answerMaxSentences: 5,
+            answerAllowCommitments: true,
+            partialStability: .fallback,
+            deferredPartialDetection: .fallback
+        )
+        let engine = RealtimeQuestionAnsweringEngine(
+            classifierProvider: QuestionClassifier(),
+            contextRetriever: MeetingContextRetriever(knowledgeStore: nil),
+            answerProvider: answerProvider,
+            realtimePolicy: policy
+        )
+        let meetingId = UUID()
+        let meeting = MeetingSession(id: meetingId, title: "Answer policy", status: .listening)
+        let segment = TranscriptSegment(
+            meetingId: meetingId,
+            speakerLabel: "Speaker",
+            text: "What is the main risk here?",
+            originalLanguage: "en-US",
+            startTime: 0,
+            endTime: 1.8,
+            confidence: 0.96,
+            isFinal: true
+        )
+        let eventTask = Task { () -> [RealtimeQuestionEvent] in
+            var events: [RealtimeQuestionEvent] = []
+            for await event in engine.eventBus.events {
+                events.append(event)
+                if case .suggestedAnswerReady = event { break }
+            }
+            return events
+        }
+
+        await engine.ingest(segment: segment, meeting: meeting, preferences: AppPreferences())
+        try await Task.sleep(for: .milliseconds(120))
+        engine.stop()
+
+        _ = await eventTask.value
+        let options = try XCTUnwrap(answerProvider.capturedOptions.first)
+        XCTAssertEqual(options.maxSentences, 5)
+        XCTAssertTrue(options.allowCommitments)
+    }
+
+    func testRealtimeQAEngineUsesPolicyDrivenAnswerGenerationGate() async throws {
+        let answerProvider = CapturingMeetingAnswerProvider()
+        let policy = RealtimeQuestionAnsweringPolicy(
+            answerResolutionMarkers: [],
+            incompleteActionFrames: [],
+            danglingPartialTokens: [],
+            selfAnswerWindowSeconds: 20,
+            partialStability: .fallback,
+            deferredPartialDetection: .fallback,
+            answerGenerationGate: RealtimeAnswerGenerationGatePolicy(
+                allowedPriorities: [.low, .medium, .high, .urgent]
+            )
+        )
+        let classification = QuestionClassification(
+            isQuestion: true,
+            rhetorical: false,
+            complete: true,
+            actionable: false,
+            responseNeeded: true,
+            userAttentionNeeded: false,
+            directedToUser: false,
+            directedToGroup: false,
+            questionType: .generalQuestion,
+            priority: .low,
+            confidence: 0.91,
+            reason: "policy allowed low priority answer generation",
+            extractedQuestion: "What is the main risk here?",
+            expectedAnswerStyle: .concise
+        )
+        let engine = RealtimeQuestionAnsweringEngine(
+            classifierProvider: FixedQuestionClassifierProvider(classification: classification),
+            contextRetriever: MeetingContextRetriever(knowledgeStore: nil),
+            answerProvider: answerProvider,
+            realtimePolicy: policy
+        )
+        let meetingId = UUID()
+        let meeting = MeetingSession(id: meetingId, title: "Answer gate policy", status: .listening)
+        let segment = TranscriptSegment(
+            meetingId: meetingId,
+            speakerLabel: "Speaker",
+            text: "What is the main risk here?",
+            originalLanguage: "en-US",
+            startTime: 0,
+            endTime: 1.8,
+            confidence: 0.96,
+            isFinal: true
+        )
+        let eventTask = Task { () -> [RealtimeQuestionEvent] in
+            var events: [RealtimeQuestionEvent] = []
+            for await event in engine.eventBus.events {
+                events.append(event)
+                if case .suggestedAnswerReady = event { break }
+            }
+            return events
+        }
+
+        await engine.ingest(segment: segment, meeting: meeting, preferences: AppPreferences())
+        try await Task.sleep(for: .milliseconds(120))
+        engine.stop()
+
+        let events = await eventTask.value
+        XCTAssertTrue(events.contains { if case .suggestedAnswerReady = $0 { return true }; return false })
+        XCTAssertEqual(answerProvider.capturedOptions.count, 1)
+    }
+
+    func testRealtimeQAEngineUsesPolicyDrivenDismissMessage() async throws {
+        let questionId = UUID()
+        let policy = RealtimeQuestionAnsweringPolicy(
+            answerResolutionMarkers: [],
+            incompleteActionFrames: [],
+            danglingPartialTokens: [],
+            selfAnswerWindowSeconds: 20,
+            partialStability: .fallback,
+            deferredPartialDetection: .fallback,
+            runtimeLabels: RealtimeQuestionRuntimeLabelsPolicy(
+                questionDismissedMessage: "Dismissed from realtime policy."
+            )
+        )
+        let engine = RealtimeQuestionAnsweringEngine(
+            classifierProvider: QuestionClassifier(),
+            contextRetriever: MeetingContextRetriever(knowledgeStore: nil),
+            answerProvider: TestMeetingAnswerProvider(),
+            realtimePolicy: policy
+        )
+
+        let eventTask = Task { () -> RealtimeQuestionEvent? in
+            for await event in engine.eventBus.events {
+                if case .questionCancelled = event {
+                    return event
+                }
+            }
+            return nil
+        }
+
+        engine.dismiss(questionId: questionId)
+        engine.stop()
+
+        let eventValue = await eventTask.value
+        let event = try XCTUnwrap(eventValue)
+        guard case let .questionCancelled(cancelledId, reason) = event else {
+            return XCTFail("Expected questionCancelled event")
+        }
+        XCTAssertEqual(cancelledId, questionId)
+        XCTAssertEqual(reason, "Dismissed from realtime policy.")
     }
 
     func testRealtimeQAEngineSurfacesPortuguesePluralQuestionPartialAfterFallback() async throws {
@@ -8974,6 +12935,32 @@ final class NotchCopilotTests: XCTestCase {
         XCTAssertTrue(formatted.contains("def invert_tree"))
     }
 
+    func testAnswerPresentationFormatsPreservedCodeFenceBeforeUI() {
+        let candidate = makeQuestion("Como inverter uma árvore binária em JavaScript?")
+        let formatted = AnswerPresentationFormatter.normalizedGeneratedText(
+            """
+            Use:
+
+            ```javascript
+            function invert(root) {
+            if (!root) return null;
+            const tmp = root.left;
+            root.left = root.right;
+            root.right = tmp;
+            invert(root.left);
+            invert(root.right);
+            return root;
+            }
+            ```
+            """,
+            question: candidate,
+            classification: makeClassification(for: candidate, type: .technicalExplanation)
+        )
+
+        XCTAssertTrue(formatted.contains("  if (!root) return null;\n\n  const tmp = root.left;"))
+        XCTAssertTrue(formatted.contains("\n\n  invert(root.left);\n  invert(root.right);\n\n  return root;"))
+    }
+
     func testAnswerGenerationServiceNormalizesPlainTextFenceBeforeUI() async throws {
         let candidate = makeQuestion("Qual é o nome da capital da França?")
         let classification = try await QuestionClassifier().classifyQuestion(candidate: candidate, context: makeContext(candidate.rawText), userProfile: makeProfile())
@@ -8992,6 +12979,40 @@ final class NotchCopilotTests: XCTestCase {
         XCTAssertEqual(answer.shortAnswer, "A capital da França é Paris.")
         XCTAssertFalse(answer.answerText.contains("```"))
         XCTAssertFalse(answer.shortAnswer.contains("```"))
+    }
+
+    func testAnswerGenerationServiceUsesPolicyDrivenCopilotIntentMapping() async throws {
+        let candidate = makeQuestion("Summarize the release status")
+        let classification = makeClassification(for: candidate, type: .generalQuestion)
+        let context = AnswerContext(
+            meetingTitle: "Policy routing",
+            transcriptWindow: candidate.rawText,
+            ragContext: "",
+            userRole: "Engineer",
+            responseStyle: .concise,
+            languageCode: "en-US"
+        )
+        let provider = StaticAnswerAIProvider(text: "The release is on track.")
+        let policy = AnswerGenerationPolicy(
+            copilotIntentByQuestionType: [
+                QuestionType.generalQuestion.rawValue: .newsSearch
+            ],
+            defaultCopilotIntent: .answerableQuestion
+        )
+
+        let stream = try await AnswerGenerationService(
+            provider: provider,
+            generationPolicy: policy
+        ).generateAnswer(
+            question: candidate,
+            classification: classification,
+            context: context,
+            options: AnswerGenerationOptions()
+        )
+        let maybeAnswer = try await finalAnswer(from: stream)
+        let answer = try XCTUnwrap(maybeAnswer)
+
+        XCTAssertEqual(answer.answerFormat, .newsWithSources)
     }
 
     func testRealtimeQADoesNotGenerateWhenResponseNotNeeded() async throws {
@@ -9164,6 +13185,304 @@ final class NotchCopilotTests: XCTestCase {
         XCTAssertEqual(CodeBlockLineNumbering.lineNumberText(for: code), "1\n2\n3")
         XCTAssertEqual(CodeBlockLineNumbering.digitCount(for: code), 2)
         XCTAssertEqual(CodeBlockLineNumbering.lineNumberText(for: ""), "1")
+    }
+
+    func testDynamicAnswerSyntaxHighlighterSplitsTokensIntoRenderableRows() {
+        let code = """
+        function invert(root) {
+          if (!root) return null;
+
+          return root;
+        }
+        """
+
+        let rows = CodeSyntaxHighlighter.lineTokens(for: code, language: "javascript")
+
+        XCTAssertEqual(rows.count, CodeBlockLineNumbering.lines(for: code).count)
+        XCTAssertTrue(rows[1].contains { $0.text == "if" && $0.role == .keyword })
+        XCTAssertEqual(rows[2], [])
+        XCTAssertTrue(rows[3].contains { $0.text == "return" && $0.role == .keyword })
+    }
+
+    func testDynamicAnswerCodeBlockFormatterIndentsExistingCStyleBlocks() {
+        let code = """
+        function invert(root) {
+        if (!root) return null;
+        const tmp = root.left;
+        root.left = root.right;
+        root.right = tmp;
+        invert(root.left);
+        invert(root.right);
+        return root;
+        }
+        """
+
+        XCTAssertEqual(
+            CodeBlockFormatter.formatted(code, language: "javascript"),
+            """
+            function invert(root) {
+              if (!root) return null;
+
+              const tmp = root.left;
+              root.left = root.right;
+              root.right = tmp;
+
+              invert(root.left);
+              invert(root.right);
+
+              return root;
+            }
+            """
+        )
+    }
+
+    func testDynamicAnswerCodeBlockFormatterExpandsCompactJavaScript() {
+        let code = "function invert(root){if(!root)return null;const tmp=root.left;root.left=root.right;root.right=tmp;invert(root.left);invert(root.right);return root;}"
+
+        XCTAssertEqual(
+            CodeBlockFormatter.formatted(code, language: "js"),
+            """
+            function invert(root) {
+              if (!root) return null;
+
+              const tmp = root.left;
+              root.left = root.right;
+              root.right = tmp;
+
+              invert(root.left);
+              invert(root.right);
+
+              return root;
+            }
+            """
+        )
+    }
+
+    func testDynamicAnswerCodeBlockFormatterSplitsDenseMultilineJavaScript() {
+        let code = """
+        function invert(root){
+        if(!root)return null;const tmp=root.left;root.left=root.right;
+        root.right=tmp;invert(root.left);invert(root.right);return root;
+        }
+        """
+
+        XCTAssertEqual(
+            CodeBlockFormatter.formatted(code, language: "JAVASCRIPT"),
+            """
+            function invert(root) {
+              if (!root) return null;
+
+              const tmp = root.left;
+              root.left = root.right;
+              root.right = tmp;
+
+              invert(root.left);
+              invert(root.right);
+
+              return root;
+            }
+            """
+        )
+    }
+
+    func testDynamicAnswerCodeBlockFormatterKeepsForLoopHeaderIntact() {
+        let code = "for (let i=0;i<items.length;i++){visit(items[i]);}"
+
+        XCTAssertEqual(
+            CodeBlockFormatter.formatted(code, language: "javascript"),
+            """
+            for (let i = 0; i < items.length; i++) {
+              visit(items[i]);
+            }
+            """
+        )
+    }
+
+    func testDynamicAnswerCodeBlockFormatterPreservesInlineObjectLiterals() {
+        let code = "const next={left:root.right,right:root.left};return next;"
+
+        XCTAssertEqual(
+            CodeBlockFormatter.formatted(code, language: "javascript"),
+            """
+            const next = { left: root.right, right: root.left };
+
+            return next;
+            """
+        )
+    }
+
+    func testDynamicAnswerCodeBlockFormatterSpacesCommonCStyleOperators() {
+        let code = "if(a===b&&count>=limit){return foo+1;}const fn=(x)=>x*2;"
+
+        XCTAssertEqual(
+            CodeBlockFormatter.formatted(code, language: "javascript"),
+            """
+            if (a === b && count >= limit) {
+              return foo + 1;
+            }
+
+            const fn = (x) => x * 2;
+            """
+        )
+    }
+
+    func testDynamicAnswerCodeBlockFormatterPreservesGenericTypeSpacing() {
+        let code = "const xs: Array<string> = [];function first<T>(items:Array<T>){return items[0];}"
+
+        XCTAssertEqual(
+            CodeBlockFormatter.formatted(code, language: "typescript"),
+            """
+            const xs: Array<string> = [];
+            function first<T>(items: Array<T>) {
+              return items[0];
+            }
+            """
+        )
+    }
+
+    func testDynamicAnswerCodeBlockFormatterDecodesEscapedLineBreaks() {
+        let code = "function invert(root) {\\nif (!root) return null;\\nconst tmp = root.left;\\nroot.left = root.right;\\nroot.right = tmp;\\nreturn root;\\n}"
+
+        XCTAssertEqual(
+            CodeBlockFormatter.formatted(code, language: "javascript"),
+            """
+            function invert(root) {
+              if (!root) return null;
+
+              const tmp = root.left;
+              root.left = root.right;
+              root.right = tmp;
+
+              return root;
+            }
+            """
+        )
+    }
+
+    func testDynamicAnswerMarkdownParserFormatsFencedCodeBlocks() {
+        let text = """
+        ```js
+        function value(){return 1;}
+        ```
+        """
+
+        let blocks = RichAnswerMarkdownParser.parse(text)
+
+        XCTAssertEqual(blocks, [
+            .code(
+                language: "js",
+                code: """
+                function value() {
+                  return 1;
+                }
+                """
+            )
+        ])
+    }
+
+    func testRichAnswerCodeBlockRendererFormatsReadableRows() {
+        let payload = RichAnswerPayload(blocks: [
+            RichAnswerBlockPayload(
+                type: RichAnswerBlockKind.code.rawValue,
+                language: "javascript",
+                code: "function invert(root){if(!root)return null;const tmp=root.left;root.left=root.right;root.right=tmp;invert(root.left);invert(root.right);return root;}"
+            )
+        ])
+        let renderer = RichAnswerRenderer(
+            text: "",
+            richAnswer: payload,
+            format: .code,
+            sources: [],
+            confidence: nil,
+            riskLevel: nil,
+            tone: nil,
+            allowRemoteLinkPreview: false
+        )
+        .frame(width: 620, height: 360)
+        .background(Color.black)
+
+        XCTAssertTrue(renderedViewHasVisiblePixels(renderer, size: CGSize(width: 620, height: 360)))
+
+        let blocks = RichAnswerMarkdownParser.parse("""
+        ```javascript
+        function invert(root){if(!root)return null;const tmp=root.left;root.left=root.right;root.right=tmp;invert(root.left);invert(root.right);return root;}
+        ```
+        """)
+        guard case let .code(_, code) = blocks.first else {
+            return XCTFail("Expected a formatted code block")
+        }
+        XCTAssertTrue(code.contains("\n\n  const tmp = root.left;"))
+        XCTAssertTrue(code.contains("\n\n  invert(root.left);"))
+    }
+
+    func testDynamicAnswerCodeBlockFormatterIsStableWithLogicalBlankLines() {
+        let formatted = """
+        function invert(root) {
+          if (!root) return null;
+
+          const tmp = root.left;
+          root.left = root.right;
+          root.right = tmp;
+
+          invert(root.left);
+          invert(root.right);
+
+          return root;
+        }
+        """
+
+        XCTAssertEqual(CodeBlockFormatter.formatted(formatted, language: "javascript"), formatted)
+    }
+
+    func testDynamicAnswerCodeBlockFormatterInfersUnlabeledJavaScript() {
+        let code = "function invert(root){if(!root)return null;const tmp=root.left;root.left=root.right;root.right=tmp;invert(root.left);invert(root.right);return root;}"
+
+        XCTAssertEqual(CodeLanguageRegistry.definition(for: nil, code: code).id, "javascript")
+        XCTAssertEqual(
+            CodeBlockFormatter.formatted(code, language: nil),
+            """
+            function invert(root) {
+              if (!root) return null;
+
+              const tmp = root.left;
+              root.left = root.right;
+              root.right = tmp;
+
+              invert(root.left);
+              invert(root.right);
+
+              return root;
+            }
+            """
+        )
+    }
+
+    func testDynamicAnswerCodeBlockFormatterRepairsFlatPythonIndentation() {
+        let code = """
+        def invert(root):
+        if root is None:
+        return None
+        root.left, root.right = root.right, root.left
+        invert(root.left)
+        invert(root.right)
+        return root
+        """
+
+        XCTAssertEqual(
+            CodeBlockFormatter.formatted(code, language: "python"),
+            """
+            def invert(root):
+                if root is None:
+                    return None
+
+                root.left, root.right = root.right, root.left
+
+                invert(root.left)
+                invert(root.right)
+
+                return root
+            """
+        )
     }
 
     func testDynamicAnswerCodeBlockClipboardCopiesExactCode() {
@@ -10389,6 +14708,7 @@ final class NotchCopilotTests: XCTestCase {
     private struct QAPrediction {
         var responseNeeded: Bool
         var classification: QuestionClassification?
+        var candidate: QuestionCandidate?
     }
 
     private struct QAMetricStats {
@@ -10469,10 +14789,10 @@ final class NotchCopilotTests: XCTestCase {
             currentSegment: segment
         )
         guard let candidate = detector.detectCandidates(from: segment, context: context).first else {
-            return QAPrediction(responseNeeded: false, classification: nil)
+            return QAPrediction(responseNeeded: false, classification: nil, candidate: nil)
         }
         let classification = try await classifier.classifyQuestion(candidate: candidate, context: context, userProfile: makeProfile())
-        return QAPrediction(responseNeeded: classification.responseNeeded, classification: classification)
+        return QAPrediction(responseNeeded: classification.responseNeeded, classification: classification, candidate: candidate)
     }
 
     private func syntheticMultimodalSignal(for row: QAGoldFixtureRow, segment: TranscriptSegment) -> QuestionMultimodalSignal {
@@ -10576,6 +14896,25 @@ final class NotchCopilotTests: XCTestCase {
             priority: .medium,
             confidence: 0.90,
             reason: intent.rawValue,
+            extractedQuestion: question.rawText,
+            expectedAnswerStyle: .concise
+        )
+    }
+
+    private func makeClassification(for question: QuestionCandidate, type: QuestionType) -> QuestionClassification {
+        QuestionClassification(
+            isQuestion: true,
+            rhetorical: false,
+            complete: true,
+            actionable: false,
+            responseNeeded: true,
+            userAttentionNeeded: true,
+            directedToUser: false,
+            directedToGroup: false,
+            questionType: type,
+            priority: .medium,
+            confidence: 0.90,
+            reason: "test",
             extractedQuestion: question.rawText,
             expectedAnswerStyle: .concise
         )

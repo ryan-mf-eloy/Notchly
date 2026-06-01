@@ -2560,12 +2560,10 @@ final class CopilotRuntime {
             transition(to: .ready, status: "Ready")
             appState.statusMessage = "Notchly answer"
             let interaction = result.interaction.withLatency(Int(Date().timeIntervalSince(startedAt) * 1000))
-            try interactionStore().saveInteraction(interaction)
-            try? interactionStore().saveMemory(
-                prompt: candidate.rawText,
-                answer: result.answer.shortAnswer,
-                languageCode: candidate.language,
-                interactionId: interaction.id
+            let persistedInteraction = persistCompletedCopilotInteraction(
+                interaction,
+                candidate: candidate,
+                answer: result.answer
             )
             appState.applyCopilotInteraction(interaction)
             recordQuality(
@@ -2576,9 +2574,14 @@ final class CopilotRuntime {
                 latencyMs: Date().timeIntervalSince(startedAt) * 1_000,
                 reason: "answer_ready"
             )
-            reloadHistory()
+            if persistedInteraction {
+                reloadHistory()
+            }
         } catch {
             let failure = copilotFailure(from: error)
+            AppLog.ai.error(
+                "Notchly answer generation failed: \(String(describing: type(of: error)), privacy: .public) \(error.localizedDescription, privacy: .public)"
+            )
             transition(to: failure.kind == .microphonePermissionMissing ? .permissionBlocked : .failedRecoverable, failure: failure.kind, status: failure.userMessage)
             appState.updateQueuedQuestionStage(questionId: candidate.id, stage: .failed)
             appState.streamingAnswerText = ""
@@ -2616,6 +2619,37 @@ final class CopilotRuntime {
                 failureKind: failure.kind
             )
         }
+    }
+
+    @discardableResult
+    private func persistCompletedCopilotInteraction(
+        _ interaction: CopilotInteraction,
+        candidate: QuestionCandidate,
+        answer: SuggestedAnswer
+    ) -> Bool {
+        let store = interactionStore()
+        do {
+            try store.saveInteraction(interaction)
+        } catch {
+            AppLog.persistence.error(
+                "Copilot answer ready but history persistence failed: \(error.localizedDescription, privacy: .public)"
+            )
+            return false
+        }
+
+        do {
+            try store.saveMemory(
+                prompt: candidate.rawText,
+                answer: answer.shortAnswer,
+                languageCode: candidate.language,
+                interactionId: interaction.id
+            )
+        } catch {
+            AppLog.persistence.error(
+                "Copilot answer ready but memory persistence failed: \(error.localizedDescription, privacy: .public)"
+            )
+        }
+        return true
     }
 
     private func reloadHistory() {
@@ -3172,24 +3206,30 @@ enum CopilotClarificationPolicy {
             )
     }
 
-    static func inferredFormat(for text: String) -> CopilotAnswerFormat {
-        let normalized = normalized(text)
-        if containsAny(normalized, ["passo a passo", "plano", "roteiro", "etapas", "steps", "plan"]) {
+    static func inferredFormat(
+        for text: String,
+        presentationPolicy: AnswerPresentationPolicy = .default,
+        rulePack: QuestionIntentRulePack = .default
+    ) -> CopilotAnswerFormat {
+        let normalizedText = normalized(text)
+        let policy = presentationPolicy.normalized()
+        let textPolicy = rulePack.textSegmentationPolicy
+        if containsAnyPolicyMarker(policy.procedureQuestionMarkers, in: normalizedText, textPolicy: textPolicy) {
             return .steps
         }
-        if containsAny(normalized, ["checklist", "lista de tarefas", "validar", "conferir"]) {
+        if containsAnyPolicyMarker(policy.comparisonQuestionMarkers, in: normalizedText, textPolicy: textPolicy) {
             return .bullets
         }
-        if containsAny(normalized, ["compare", "comparar", "versus", "vs", "pros", "contras", "recomende"]) {
-            return .bullets
-        }
-        if containsAny(normalized, ["calcule", "calcular", "quanto", "quantos", "converta", "converter", "%", "por cento"]) {
+        if matchesPolicyPattern(policy.arithmeticQuestionPattern, in: normalizedText) {
             return .calculation
         }
-        if containsAny(normalized, ["codigo", "script", "swift", "python", "sql", "json", "yaml"]) {
+        if containsAnyPolicyMarker(policy.commandQuestionMarkers, in: normalizedText, textPolicy: textPolicy)
+            || containsAnyPolicyMarker(policy.structuredDataQuestionMarkers, in: normalizedText, textPolicy: textPolicy)
+            || containsAnyPolicyMarker(policy.codeQuestionMarkers, in: normalizedText, textPolicy: textPolicy) {
             return .code
         }
-        if containsAny(normalized, ["noticias", "fontes", "web", "busque", "procure", "current", "news", "sources", "search"]) {
+        if containsAnyPolicyMarker(policy.freshNewsQuestionMarkers, in: normalizedText, textPolicy: textPolicy)
+            || containsAnyPolicyMarker(policy.webSearchQuestionMarkers, in: normalizedText, textPolicy: textPolicy) {
             return .newsWithSources
         }
         return .paragraph
@@ -3204,8 +3244,9 @@ enum CopilotClarificationPolicy {
         intent: CopilotIntentKind,
         needsReminderAction: Bool
     ) -> Bool {
+        let rulePack = QuestionIntentRulePack.default
         let normalizedText = normalized(text)
-        guard normalizedText.count >= 12 else { return false }
+        guard normalizedText.count >= rulePack.textSegmentationPolicy.minimumFrameCharacters else { return false }
         if intent == .reminder || needsReminderAction { return false }
         if [.statement, .smallTalk, .ambientNoise].contains(intent) { return false }
         if source != .typed && source != .shortcut {
@@ -3213,47 +3254,74 @@ enum CopilotClarificationPolicy {
                 return false
             }
         }
-        return hasTaskSignal(normalizedText) || hasQuestionSignal(normalizedText)
+        return hasTaskSignal(text, rulePack: rulePack) || hasQuestionSignal(text, rulePack: rulePack)
     }
 
-    private static func inferredIntent(for text: String) -> CopilotIntentKind {
+    static func inferredIntent(
+        for text: String,
+        presentationPolicy: AnswerPresentationPolicy = .default,
+        rulePack: QuestionIntentRulePack = .default
+    ) -> CopilotIntentKind {
         let normalizedText = normalized(text)
-        if containsAny(normalizedText, ["noticias", "hoje", "atual", "recentes", "news", "current"]) {
+        let policy = presentationPolicy.normalized()
+        let textPolicy = rulePack.textSegmentationPolicy
+        if containsAnyPolicyMarker(policy.freshNewsQuestionMarkers, in: normalizedText, textPolicy: textPolicy) {
             return .newsSearch
         }
-        if containsAny(normalizedText, ["busque", "procure", "web", "fontes", "search", "sources"]) {
+        if containsAnyPolicyMarker(policy.webSearchQuestionMarkers, in: normalizedText, textPolicy: textPolicy) {
             return .webSearch
         }
-        if containsAny(normalizedText, ["calcule", "calcular", "converta", "converter", "%", "por cento"]) {
+        if matchesPolicyPattern(policy.arithmeticQuestionPattern, in: normalizedText) {
             return .calculation
         }
         return .answerableQuestion
     }
 
-    private static func hasTaskSignal(_ text: String) -> Bool {
-        containsAny(text, [
-            "monte", "crie", "gere", "resuma", "explique", "liste", "compare", "calcule", "converta",
-            "organize", "planeje", "escreva", "prepare", "analise", "sugira", "recomende", "busque",
-            "procure", "me ajude", "ajude", "make", "create", "generate", "summarize", "explain",
-            "list", "compare", "calculate", "convert", "organize", "plan", "write", "prepare",
-            "analyze", "suggest", "recommend", "search", "help"
-        ])
+    private static func hasTaskSignal(_ text: String, rulePack: QuestionIntentRulePack) -> Bool {
+        surfaceAnalysis(for: text, rulePack: rulePack).strongSignals.contains(.actionRequestFrame)
     }
 
-    private static func hasQuestionSignal(_ text: String) -> Bool {
-        text.count >= 18 && containsAny(text, [
-            "qual", "quais", "como", "por que", "porque", "quando", "onde", "quanto", "quantos",
-            "what", "which", "how", "why", "when", "where"
-        ])
+    private static func hasQuestionSignal(_ text: String, rulePack: QuestionIntentRulePack) -> Bool {
+        let surface = surfaceAnalysis(for: text, rulePack: rulePack)
+        if surface.hasQuestionPunctuation { return true }
+        return surface.strongSignals.contains { signal in
+            signal == .interrogativeStarter
+                || signal == .modalQuestionFrame
+                || signal == .indirectQuestionFrame
+                || signal == .actionRequestFrame
+        }
     }
 
-    private static func containsAny(_ text: String, _ tokens: [String]) -> Bool {
-        tokens.contains { text.contains($0) }
+    private static func surfaceAnalysis(
+        for text: String,
+        rulePack: QuestionIntentRulePack
+    ) -> QuestionSurfaceAnalysis {
+        let normalizedText = normalized(text)
+        return QuestionSurfaceAnalyzer(rulePack: rulePack).analyze(
+            text: text,
+            normalized: normalizedText,
+            context: nil,
+            profile: nil,
+            isPartial: false,
+            isFinal: true
+        )
+    }
+
+    private static func containsAnyPolicyMarker(
+        _ markers: [String],
+        in normalizedText: String,
+        textPolicy: QuestionTextSegmentationPolicy
+    ) -> Bool {
+        markers.contains { textPolicy.containsMarker($0, in: normalizedText) }
+    }
+
+    private static func matchesPolicyPattern(_ pattern: String, in text: String) -> Bool {
+        guard !pattern.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return false }
+        return text.range(of: pattern, options: [.regularExpression, .caseInsensitive]) != nil
     }
 
     private static func normalized(_ text: String) -> String {
-        text.folding(options: [.diacriticInsensitive, .caseInsensitive], locale: .current)
-            .lowercased()
+        QuestionDetectionService.normalize(text)
             .trimmingCharacters(in: .whitespacesAndNewlines)
     }
 }
@@ -3649,8 +3717,7 @@ struct CopilotLLMFinalAnswerService {
     ) -> String {
         let rawRequest = candidate.rawText.trimmingCharacters(in: .whitespacesAndNewlines)
         let request = rawRequest.isEmpty ? "este pedido" : rawRequest
-        let lowerLanguage = (candidate.language ?? "").lowercased()
-        let isPortuguese = lowerLanguage.hasPrefix("pt") || QuestionDetectionService.normalize(request).contains("monte")
+        let isPortuguese = SupportedLanguage.language(for: candidate.language) == .portugueseBR
         let needsFreshData = decision.needsWeb || format == .newsWithSources
 
         if isPortuguese {

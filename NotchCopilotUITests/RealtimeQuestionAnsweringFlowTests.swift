@@ -25,6 +25,8 @@ final class RealtimeQuestionAnsweringFlowTests: XCTestCase {
         let transcriptToggle = anyElement(in: harness, "qa-toggle-transcript")
         XCTAssertTrue(answerToggle.waitForExistence(timeout: 3))
         XCTAssertTrue(transcriptToggle.waitForExistence(timeout: 3))
+        XCTAssertTrue(anyElement(in: harness, "qa-question-spinner").waitForExistence(timeout: 3))
+        XCTAssertFalse(anyElement(in: harness, "qa-stage-indicator").exists)
 
         transcriptToggle.click()
         XCTAssertTrue(anyElement(in: harness, "qa-transcript-stream").waitForExistence(timeout: 3))

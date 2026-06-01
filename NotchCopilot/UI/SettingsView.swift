@@ -329,12 +329,10 @@ struct SettingsView: View {
     private var about: some View {
         VStack(spacing: 30) {
             VStack(spacing: 16) {
-                Image("NotchIcon")
-                    .renderingMode(.template)
+                Image("NotchIconWhite")
                     .resizable()
                     .scaledToFit()
                     .frame(width: 66, height: 34)
-                    .foregroundStyle(MinimalTheme.notchAccent)
                 VStack(spacing: 5) {
                     Text("Notchly")
                         .font(.system(size: 22, weight: .semibold))

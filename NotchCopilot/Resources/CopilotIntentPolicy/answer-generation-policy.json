@@ -1,0 +1,25 @@
+{
+  "noExternalSourceAssumption": "No external source was available for this draft.",
+  "defaultClarifyingQuestion": "What detail should we confirm before answering?",
+  "defaultCopilotIntent": "answerable_question",
+  "copilotIntentByQuestionType": {
+    "action_request": "action_request"
+  },
+  "immediateDraftPriorities": ["urgent", "high"],
+  "emitImmediateDraftWhenRAGAvailable": true,
+  "defaultProvisionalDraft": "I’m checking the context and drafting a short, safe answer.",
+  "provisionalDraftByLanguage": {
+    "pt-br": "Estou checando o contexto; já vou sugerir uma resposta curta e segura."
+  },
+  "caveatsByQuestionType": {
+    "deadline_or_estimate": [
+      "Confirm PR status, tests, and blockers before committing to a date."
+    ],
+    "approval_request": [
+      "Needs explicit human approval before being treated as a decision."
+    ],
+    "risk_assessment": [
+      "Validate the risk against the actual implementation before shipping."
+    ]
+  }
+}

@@ -11,6 +11,9 @@ struct PromptBuilder {
         - For trade-offs, options, or checklists, use compact bullets.
         - For procedures or implementation plans, use short numbered steps.
         - Use fenced code blocks only for actual executable code, shell commands, SQL, structured config/data, diffs, or logs that the question explicitly needs.
+        - When code is useful, use valid Markdown fences on their own lines: opening fence with language, code on following lines, closing fence on its own line. Format code with real indentation, one statement per line when practical, and blank lines only between logical blocks. Never inline code after the language name.
+        - For fresh news or multi-item summaries, prefer 2-5 short bullets; include source links only when the web tool provides reliable public sources.
+        - For timelines, dates, milestones, or rollout sequences, use one short item per line.
         Never put a single word, proper name, plain sentence, or final factual answer inside a fenced code block.
         Do not invent facts. If the question involves timeline, cost, final approval, or commitments, answer cautiously and suggest confirming.
         Return only the answer itself. Do not include source lists, transcript excerpts, citations, labels, or sections named Sources, Transcript, Assumptions, Caveats, Suggested, or Expanded. If a caveat is important, incorporate it naturally into the answer.

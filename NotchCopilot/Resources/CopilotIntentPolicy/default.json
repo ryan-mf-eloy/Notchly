@@ -73,6 +73,110 @@
   "lowInformationWords": [],
   "numberWords": [],
   "operatorWords": [],
+  "structuralSemantic": {
+    "syntaxSurfaceSignalWeights": {
+      "terminal_question_mark": 0.34,
+      "interrogative_starter": 0.28,
+      "modal_question_frame": 0.26,
+      "indirect_question_frame": 0.24,
+      "action_request_frame": 0.22,
+      "concrete_object": 0.10,
+      "contextual_carryover": 0.06
+    },
+    "cjkSyntaxBonus": 0.28,
+    "cjkMinimumCharacters": 5,
+    "maximumSyntaxScore": 1.0,
+    "meaningfulTokenMinimumLength": 3,
+    "meaningfulTokenTargetCount": 5,
+    "numericPatterns": [
+      {
+        "pattern": "\\d+(?:\\.\\d+)?\\s*(?:%|\\+|\\-|\\*|/|×|÷)\\s*\\d+",
+        "score": 1.0
+      },
+      {
+        "pattern": "\\d+(?:\\.\\d+)?\\s*%[^\\d]{0,16}\\d+(?:\\.\\d+)?",
+        "score": 0.96
+      },
+      {
+        "pattern": "\\d+(?:\\.\\d+)?\\s*(?:%|percent).*?\\s+\\d+(?:\\.\\d+)?",
+        "score": 0.94
+      }
+    ],
+    "rules": [
+      {
+        "label": "calculation",
+        "kind": "calculation",
+        "tool": "answer_synthesis",
+        "requiresWeb": false,
+        "reason": "structural_numeric_expression",
+        "requiredSurfaceSignals": [],
+        "requiresSurfaceNegativeSignals": false,
+        "minimumNumericScore": 0.92,
+        "confidenceBase": 0.70,
+        "syntaxConfidenceWeight": 0.08,
+        "contentConfidenceWeight": 0.0,
+        "numericConfidenceWeight": 0.12,
+        "minimumConfidence": 0.0,
+        "maximumConfidence": 0.90,
+        "signals": ["semantic_intent", "tool_intent", "question_syntax"],
+        "propagateSurfaceNegativeSignals": true
+      },
+      {
+        "label": "action_request",
+        "kind": "action_request",
+        "tool": "answer_synthesis",
+        "requiresWeb": false,
+        "reason": "structural_action_request",
+        "requiredSurfaceSignals": ["action_request_frame"],
+        "requiresSurfaceNegativeSignals": false,
+        "minimumContentScore": 0.35,
+        "confidenceBase": 0.66,
+        "syntaxConfidenceWeight": 0.12,
+        "contentConfidenceWeight": 0.10,
+        "numericConfidenceWeight": 0.0,
+        "minimumConfidence": 0.0,
+        "maximumConfidence": 0.88,
+        "signals": ["semantic_intent", "question_syntax", "meaningful_content"],
+        "propagateSurfaceNegativeSignals": true
+      },
+      {
+        "label": "answerable_question",
+        "kind": "answerable_question",
+        "tool": "answer_synthesis",
+        "requiresWeb": false,
+        "reason": "structural_question",
+        "requiredSurfaceSignals": [],
+        "requiresSurfaceNegativeSignals": false,
+        "minimumSyntaxScore": 0.52,
+        "minimumContentScore": 0.40,
+        "confidenceBase": 0.64,
+        "syntaxConfidenceWeight": 0.14,
+        "contentConfidenceWeight": 0.08,
+        "numericConfidenceWeight": 0.0,
+        "minimumConfidence": 0.0,
+        "maximumConfidence": 0.87,
+        "signals": ["semantic_intent", "question_syntax", "meaningful_content"],
+        "propagateSurfaceNegativeSignals": true
+      },
+      {
+        "kind": "statement",
+        "tool": "unavailable",
+        "requiresWeb": false,
+        "reason": "structural_negative",
+        "requiredSurfaceSignals": [],
+        "requiresSurfaceNegativeSignals": true,
+        "maximumSyntaxScore": 0.40,
+        "confidenceBase": 0.74,
+        "syntaxConfidenceWeight": 0.0,
+        "contentConfidenceWeight": 0.0,
+        "numericConfidenceWeight": 0.0,
+        "minimumConfidence": 0.0,
+        "maximumConfidence": 0.74,
+        "signals": [],
+        "propagateSurfaceNegativeSignals": true
+      }
+    ]
+  },
   "semanticLabels": [
     {
       "label": "answerable_question",
@@ -81,6 +185,7 @@
       "confidence": 0.82,
       "weight": 1.0,
       "cues": [],
+      "aliases": ["question"],
       "prefixCues": [],
       "signals": [
         "semantic_intent",
@@ -94,6 +199,7 @@
       "confidence": 0.82,
       "weight": 1.12,
       "cues": [],
+      "aliases": ["request"],
       "prefixCues": [],
       "signals": [
         "semantic_intent",
@@ -110,6 +216,7 @@
       "weight": 1.0,
       "requiresWeb": false,
       "cues": [],
+      "aliases": ["math", "date_math"],
       "signals": [
         "tool_intent",
         "calculation_request",
@@ -152,6 +259,7 @@
       "weight": 1.0,
       "requiresWeb": true,
       "cues": [],
+      "aliases": ["news"],
       "signals": [
         "tool_intent",
         "news_request",
@@ -208,6 +316,40 @@
       "cues": [],
       "signals": [
         "operational_check"
+      ]
+    },
+    {
+      "label": "statement",
+      "kind": "statement",
+      "tool": "unavailable",
+      "confidence": 0.84,
+      "weight": 1.0,
+      "cues": [],
+      "signals": [
+        "statement"
+      ]
+    },
+    {
+      "label": "ambient_noise",
+      "kind": "ambient_noise",
+      "tool": "unavailable",
+      "confidence": 0.84,
+      "weight": 1.0,
+      "cues": [],
+      "aliases": ["noise"],
+      "signals": [
+        "ambient_noise"
+      ]
+    },
+    {
+      "label": "ambiguous",
+      "kind": "ambiguous",
+      "tool": "unavailable",
+      "confidence": 0.62,
+      "weight": 1.0,
+      "cues": [],
+      "signals": [
+        "ambiguous"
       ]
     },
     {

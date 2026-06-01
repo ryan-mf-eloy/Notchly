@@ -4,20 +4,20 @@ import Foundation
 struct QuestionMultiQTCandidateRescuer {
     var trainedModelRunner: any QuestionTrainedMultimodalModelRunning
     var intentGate: QuestionIntentGate = QuestionIntentGate()
-    var minimumResponseMargin: Double = 0.05
-    var minimumCandidateScore: Double = 0.55
+    var rescuePolicy: RealtimeMultiQTRescuePolicy = .fallback
 
     func rescueCandidates(
         from rejectedFrames: [QuestionRejectedFrame],
         context: TranscriptContext,
         mode: QAMultimodalMode,
+        profile: UserMeetingProfile? = nil,
         shadowLogger: QuestionShadowLogger? = nil
     ) async -> [QuestionCandidate] {
         guard mode != .off, !rejectedFrames.isEmpty else { return [] }
         var rescued: [QuestionCandidate] = []
 
         for rejectedFrame in rejectedFrames {
-            guard shouldConsider(rejectedFrame, context: context) else {
+            guard shouldConsider(rejectedFrame, context: context, profile: profile) else {
                 shadowLogger?.record(rejectedFrame: rejectedFrame, prediction: nil, decision: "rescue_hard_suppressed")
                 continue
             }
@@ -46,28 +46,32 @@ struct QuestionMultiQTCandidateRescuer {
         return rescued
     }
 
-    private func shouldConsider(_ rejectedFrame: QuestionRejectedFrame, context: TranscriptContext) -> Bool {
+    private func shouldConsider(
+        _ rejectedFrame: QuestionRejectedFrame,
+        context: TranscriptContext,
+        profile: UserMeetingProfile?
+    ) -> Bool {
         guard !rejectedFrame.hasHardSuppression else { return false }
         let frame = rejectedFrame.frame
         if frame.isPartial {
             guard let signal = frame.multimodalSignal,
-                  signal.partialStability >= 0.82,
-                  signal.partialRevisionCount >= 1
+                  signal.partialStability >= rescuePolicy.partialMinimumStability,
+                  signal.partialRevisionCount >= rescuePolicy.partialMinimumRevisionCount
             else { return false }
         }
-        if frame.rawText.trimmingCharacters(in: .whitespacesAndNewlines).count < 4 {
+        if frame.rawText.trimmingCharacters(in: .whitespacesAndNewlines).count < rescuePolicy.minimumFrameCharacters {
             return false
         }
         let hardSuppressionCandidate = candidate(from: rejectedFrame, source: .shadowRescue)
-        return intentGate.hardSuppression(candidate: hardSuppressionCandidate, context: context) == nil
+        return intentGate.hardSuppression(candidate: hardSuppressionCandidate, context: context, profile: profile) == nil
     }
 
     private func shouldPromote(prediction: QuestionTrainedMultimodalPrediction) -> Bool {
         let candidateScore = prediction.candidateScore ?? prediction.responseScore
         return prediction.shouldAllow
             && prediction.isPositiveLabel
-            && prediction.responseScore >= prediction.threshold + minimumResponseMargin
-            && candidateScore >= minimumCandidateScore
+            && prediction.responseScore >= prediction.threshold + rescuePolicy.minimumResponseMargin
+            && candidateScore >= rescuePolicy.minimumCandidateScore
     }
 
     private func candidate(

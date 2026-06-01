@@ -113,6 +113,39 @@ struct TestMeetingAnswerProvider: MeetingAnswerProvider {
 }
 
 @MainActor
+final class CapturingMeetingAnswerProvider: MeetingAnswerProvider {
+    private(set) var capturedOptions: [AnswerGenerationOptions] = []
+
+    func generateAnswer(
+        question: QuestionCandidate,
+        classification: QuestionClassification,
+        context: AnswerContext,
+        options: AnswerGenerationOptions
+    ) async throws -> AsyncThrowingStream<PartialAnswer, Error> {
+        capturedOptions.append(options)
+        return try await TestMeetingAnswerProvider().generateAnswer(
+            question: question,
+            classification: classification,
+            context: context,
+            options: options
+        )
+    }
+}
+
+@MainActor
+struct FixedQuestionClassifierProvider: QuestionClassifierProvider {
+    var classification: QuestionClassification
+
+    func classifyQuestion(
+        candidate: QuestionCandidate,
+        context: TranscriptContext,
+        userProfile: UserMeetingProfile
+    ) async throws -> QuestionClassification {
+        classification
+    }
+}
+
+@MainActor
 final class TestRealtimeQuestionAnsweringEngine: RealtimeQuestionAnsweringEngine {
     init(knowledgeStore: LocalKnowledgeStore? = nil) {
         super.init(

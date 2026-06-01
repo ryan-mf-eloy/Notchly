@@ -1,6 +1,115 @@
 import AppKit
 import SwiftUI
 
+struct TranscriptQuestionHighlight: Equatable, Sendable {
+    var segmentIds: Set<UUID>
+    var text: String
+    var isLoading = false
+    var loadingPhase: Double = 0
+
+    var normalizedText: String {
+        Self.normalized(text)
+    }
+
+    var isEmpty: Bool {
+        segmentIds.isEmpty || normalizedText.isEmpty
+    }
+
+    static func normalized(_ text: String) -> String {
+        text
+            .folding(options: [.caseInsensitive, .diacriticInsensitive], locale: .current)
+            .lowercased()
+            .components(separatedBy: .whitespacesAndNewlines)
+            .filter { !$0.isEmpty }
+            .joined(separator: " ")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+}
+
+enum TranscriptQuestionHighlighter {
+    static let exactBackgroundColor = NSColor.white.withAlphaComponent(0.145)
+    static let fallbackBackgroundColor = NSColor.white.withAlphaComponent(0.072)
+
+    private static func backgroundColor(for highlight: TranscriptQuestionHighlight, isFallback: Bool) -> NSColor {
+        guard highlight.isLoading else {
+            return isFallback ? fallbackBackgroundColor : exactBackgroundColor
+        }
+
+        let pulse = (sin(highlight.loadingPhase) + 1) * 0.5
+        let alpha = isFallback
+            ? CGFloat(0.052 + (pulse * 0.046))
+            : CGFloat(0.112 + (pulse * 0.082))
+        return NSColor.white.withAlphaComponent(alpha)
+    }
+
+    static func apply(
+        to attributedString: NSMutableAttributedString,
+        visibleText: String,
+        visibleRange: NSRange,
+        segmentId: UUID,
+        highlights: [TranscriptQuestionHighlight]
+    ) {
+        for highlight in highlights {
+            apply(
+                to: attributedString,
+                visibleText: visibleText,
+                visibleRange: visibleRange,
+                segmentId: segmentId,
+                highlight: highlight
+            )
+        }
+    }
+
+    static func apply(
+        to attributedString: NSMutableAttributedString,
+        visibleText: String,
+        visibleRange: NSRange,
+        segmentId: UUID,
+        highlight: TranscriptQuestionHighlight?
+    ) {
+        guard let highlight,
+              !highlight.isEmpty,
+              highlight.segmentIds.contains(segmentId),
+              visibleRange.location != NSNotFound,
+              visibleRange.length > 0
+        else { return }
+
+        let text = visibleText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty else { return }
+
+        let nsText = visibleText as NSString
+        let exactRange = nsText.range(
+            of: highlight.text,
+            options: [.caseInsensitive, .diacriticInsensitive]
+        )
+
+        if exactRange.location != NSNotFound {
+            attributedString.addAttribute(
+                .backgroundColor,
+                value: backgroundColor(for: highlight, isFallback: false),
+                range: NSRange(location: visibleRange.location + exactRange.location, length: exactRange.length)
+            )
+            return
+        }
+
+        let normalizedVisible = TranscriptQuestionHighlight.normalized(text)
+        let normalizedHighlight = highlight.normalizedText
+        if normalizedHighlight.contains(normalizedVisible) || normalizedVisible.contains(normalizedHighlight) {
+            attributedString.addAttribute(
+                .backgroundColor,
+                value: backgroundColor(for: highlight, isFallback: false),
+                range: visibleRange
+            )
+        } else {
+            attributedString.addAttribute(
+                .backgroundColor,
+                value: backgroundColor(for: highlight, isFallback: true),
+                range: visibleRange
+            )
+        }
+    }
+}
+
 struct MeetingPanelView: View {
     @ObservedObject var appState: AppState
     @Environment(\.islandDesignMode) private var islandDesignMode
@@ -154,6 +263,14 @@ struct MeetingPanelView: View {
         }
         .padding(.top, shouldShowPresentationToggle ? presentationTopPadding : 0)
         .frame(width: panelWidth, height: panelHeight, alignment: .top)
+        .overlay(alignment: .bottomTrailing) {
+            if appState.activeQuestion != nil && appState.answerStage.isInProgress {
+                TranscriptQuestionSpinner(primaryColor: primaryColor)
+                    .padding(.trailing, 12)
+                    .padding(.bottom, 11)
+                    .transition(.opacity.combined(with: .scale(scale: 0.92)))
+            }
+        }
     }
 
     private var qaColumn: some View {
@@ -243,37 +360,36 @@ struct MeetingPanelView: View {
         if appState.answerStage == .failed {
             return appState.copilotFailureMessage ?? "Nao consegui concluir esta acao agora."
         }
-        if appState.currentMeeting != nil, appState.copilotRuntimeState == .paused {
-            return "Notchly paused during recording"
-        }
-        return "\(appState.answerStage.displayName)..."
+        return ""
     }
 
     private var copilotQuickActions: some View {
         HStack(spacing: 8) {
-            IconButton(systemName: "doc.on.doc", help: "Copy", size: .compact) {
-                appState.copySelectedAnswerToPasteboard()
+            if canCopySelectedAnswer {
+                IconButton(systemName: "doc.on.doc", help: "Copy", size: .compact) {
+                    appState.copySelectedAnswerToPasteboard()
+                }
+                .accessibilityIdentifier("qa-action-copy")
             }
-            .accessibilityIdentifier("qa-action-copy")
-            IconButton(systemName: appState.isSelectedQuestionSaved ? "bookmark.fill" : "bookmark", help: "Save", size: .compact) {
-                appState.saveSelectedQuestionAnswer()
+            if appState.selectedQuestionId != nil {
+                IconButton(systemName: appState.isSelectedQuestionSaved ? "bookmark.fill" : "bookmark", help: "Save", size: .compact) {
+                    appState.saveSelectedQuestionAnswer()
+                }
+                .accessibilityIdentifier("qa-action-save")
             }
-            .accessibilityIdentifier("qa-action-save")
             IconButton(systemName: "xmark", help: "Dismiss", role: .destructive, size: .compact) {
                 appState.dismissActiveQuestion()
             }
             .accessibilityIdentifier("qa-action-dismiss")
-            IconButton(systemName: "link", help: "Open sources", isDisabled: !hasSourceLink, size: .compact) {
-                appState.openSelectedAnswerSources()
+            if hasSourceLink {
+                IconButton(systemName: "link", help: "Open sources", size: .compact) {
+                    appState.openSelectedAnswerSources()
+                }
             }
-            IconButton(systemName: "hand.thumbsup", help: "Useful", size: .compact) {
-                appState.recordCopilotFeedback(.markedUseful, note: "Marked useful")
-            }
-            IconButton(systemName: "hand.thumbsdown", help: "Incorrect", size: .compact) {
-                appState.recordCopilotFeedback(.markedWrong, note: "Marked incorrect")
-            }
-            IconButton(systemName: "globe", help: "Regenerate with web", isDisabled: appState.currentMeeting != nil, size: .compact) {
-                appState.regenerateSelectedCopilotAnswerWithWeb()
+            if canRegenerateSelectedAnswerWithWeb {
+                IconButton(systemName: "globe", help: "Regenerate with web", size: .compact) {
+                    appState.regenerateSelectedCopilotAnswerWithWeb()
+                }
             }
             Spacer(minLength: 0)
             if appState.currentMeeting == nil {
@@ -287,6 +403,15 @@ struct MeetingPanelView: View {
         }
         .padding(.top, 2)
         .opacity(appState.answerStage.isInProgress ? 0.54 : 1)
+    }
+
+    private var canCopySelectedAnswer: Bool {
+        !answerTextForDisplay.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
+    private var canRegenerateSelectedAnswerWithWeb: Bool {
+        appState.currentMeeting == nil &&
+            !questionTitleText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
 
     private var hasSourceLink: Bool {
@@ -355,44 +480,76 @@ struct MeetingPanelView: View {
                 emptyStateView
                     .transition(.opacity)
             } else {
-                LiveTranscriptScrollView(
-                    segments: segments,
-                    showOriginalText: appState.preferences.showOriginalText,
-                    showTranslatedText: appState.preferences.showTranslatedText,
-                    onCopyBlock: { segment, text in
-                        appState.copyTranscriptSegmentToPasteboard(segment, text: text)
-                    },
-                    onDeleteSegment: { segment in
-                        appState.deleteTranscriptSegment(segment)
-                    }
-                )
-                .frame(width: panelWidth, height: height)
-                .protectedContentRegion(appState.preferences.stealthModeEnabled)
-                .transition(.opacity)
+                TimelineView(.animation(
+                    minimumInterval: 0.36,
+                    paused: !appState.shouldShowTranscriptQuestionLoadingIndicator
+                )) { timeline in
+                    LiveTranscriptScrollView(
+                        segments: segments,
+                        showOriginalText: appState.preferences.showOriginalText,
+                        showTranslatedText: appState.preferences.showTranslatedText,
+                        questionHighlights: activeTranscriptQuestionHighlights(
+                            loadingPhase: transcriptQuestionHighlightLoadingPhase(for: timeline.date)
+                        ),
+                        onCopyBlock: { segment, text in
+                            appState.copyTranscriptSegmentToPasteboard(segment, text: text)
+                        },
+                        onDeleteSegment: { segment in
+                            appState.deleteTranscriptSegment(segment)
+                        }
+                    )
+                    .frame(width: panelWidth, height: height)
+                    .protectedContentRegion(appState.preferences.stealthModeEnabled)
+                    .transition(.opacity)
+                }
 
                 bottomScrollFade
             }
         }
         .frame(height: height)
         .clipped()
-        .overlay(alignment: .topTrailing) {
-            if appState.shouldShowTranscriptQuestionLoadingIndicator {
-                TranscriptQuestionLoadingIndicator(primaryColor: primaryColor, status: transcriptQuestionStatusText)
-                    .padding(.top, 8)
-                    .padding(.trailing, 10)
-                    .transition(.opacity.combined(with: .scale(scale: 0.92)))
-            }
-        }
         .animation(.easeOut(duration: 0.12), value: segments.isEmpty)
         .animation(.easeOut(duration: 0.16), value: appState.shouldShowTranscriptQuestionLoadingIndicator)
         .accessibilityIdentifier("qa-transcript-stream")
     }
 
-    private var transcriptQuestionStatusText: String {
-        if appState.currentMeeting != nil, appState.copilotRuntimeState == .paused {
-            return "Notchly paused during recording"
+    private func activeTranscriptQuestionHighlights(loadingPhase: Double = 0) -> [TranscriptQuestionHighlight] {
+        let queuedHighlights = appState.questionAnswerQueue.compactMap { item -> TranscriptQuestionHighlight? in
+            guard item.stage != .cancelled else { return nil }
+            if let classification = item.classification,
+               (!classification.responseNeeded || classification.rhetorical) {
+                return nil
+            }
+            let questionText = item.classification?.extractedQuestion ?? item.candidate.rawText
+            let isLoading = item.stage.isInProgress ||
+                (appState.activeQuestion?.id == item.candidate.id && appState.answerStage.isInProgress)
+            let highlight = TranscriptQuestionHighlight(
+                segmentIds: Set(item.candidate.sourceSegmentIds),
+                text: questionText,
+                isLoading: isLoading,
+                loadingPhase: isLoading ? loadingPhase : 0
+            )
+            return highlight.isEmpty ? nil : highlight
         }
-        return appState.answerStage.displayName
+        if !queuedHighlights.isEmpty {
+            return queuedHighlights
+        }
+
+        guard let question = appState.activeQuestion else { return [] }
+        let questionText = questionTitleText.trimmingCharacters(in: .whitespacesAndNewlines)
+        let isLoading = appState.answerStage.isInProgress
+        let highlight = TranscriptQuestionHighlight(
+            segmentIds: Set(question.sourceSegmentIds),
+            text: questionText.isEmpty ? question.rawText : questionText,
+            isLoading: isLoading,
+            loadingPhase: isLoading ? loadingPhase : 0
+        )
+        return highlight.isEmpty ? [] : [highlight]
+    }
+
+    private func transcriptQuestionHighlightLoadingPhase(for date: Date) -> Double {
+        guard appState.shouldShowTranscriptQuestionLoadingIndicator else { return 0 }
+        return date.timeIntervalSinceReferenceDate * 4.4
     }
 
     private var bottomScrollFade: some View {
@@ -544,15 +701,12 @@ private struct CopilotIsolatedAnswerPanelView: View {
     @ViewBuilder
     private var answerSection: some View {
         if answerText.isEmpty && appState.answerStage.isInProgress {
-            HStack(spacing: 9) {
+            HStack {
+                Spacer(minLength: 0)
                 ProgressView()
                     .controlSize(.small)
-                    .scaleEffect(0.64)
+                    .scaleEffect(0.58)
                     .tint(secondaryColor)
-                Text(appState.currentMeeting != nil && appState.copilotRuntimeState == .paused ? "Notchly paused during recording" : appState.answerStage.displayName)
-                    .font(.system(size: 13, weight: .medium))
-                    .foregroundStyle(secondaryColor)
-                    .lineLimit(1)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(.top, 2)
@@ -1014,15 +1168,28 @@ private struct CopilotTimelineRow: View {
     }
 
     private var actionStrip: some View {
-        HStack(spacing: 4) {
-            IconButton(systemName: "arrow.up.forward.square", help: "Open answer", isDisabled: entry.prompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && entry.response.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty, size: .compact, action: onOpenAnswer)
-            IconButton(systemName: "doc.on.doc", help: "Copy", size: .compact, action: onCopy)
-            IconButton(systemName: "link", help: "Open sources", isDisabled: !entry.hasSourceLink, size: .compact, action: onOpenSources)
-            IconButton(systemName: "hand.thumbsup", help: "Useful", size: .compact, action: onUseful)
-            IconButton(systemName: "hand.thumbsdown", help: "Incorrect", size: .compact, action: onWrong)
+        let hasPrompt = !entry.prompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        let hasResponse = !entry.response.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+
+        return HStack(spacing: 4) {
+            if hasPrompt || hasResponse {
+                IconButton(systemName: "arrow.up.forward.square", help: "Open answer", size: .compact, action: onOpenAnswer)
+            }
+            if hasResponse {
+                IconButton(systemName: "doc.on.doc", help: "Copy", size: .compact, action: onCopy)
+            }
+            if entry.hasSourceLink {
+                IconButton(systemName: "link", help: "Open sources", size: .compact, action: onOpenSources)
+            }
+            if entry.interaction != nil {
+                IconButton(systemName: "hand.thumbsup", help: "Useful", size: .compact, action: onUseful)
+                IconButton(systemName: "hand.thumbsdown", help: "Incorrect", size: .compact, action: onWrong)
+            }
             Spacer(minLength: 0)
-            IconButton(systemName: "arrow.clockwise", help: "Analyze again", isDisabled: entry.prompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty, size: .compact, action: onRegenerateLocal)
-            IconButton(systemName: "globe", help: "Analyze with web", isDisabled: entry.prompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty, size: .compact, action: onRegenerateWeb)
+            if hasPrompt {
+                IconButton(systemName: "arrow.clockwise", help: "Analyze again", size: .compact, action: onRegenerateLocal)
+                IconButton(systemName: "globe", help: "Analyze with web", size: .compact, action: onRegenerateWeb)
+            }
         }
         .opacity(entry.isLive ? 0.45 : 1)
     }
@@ -1468,42 +1635,32 @@ private extension CopilotToolKind {
     }
 }
 
-private struct TranscriptQuestionLoadingIndicator: View {
+private struct TranscriptQuestionSpinner: View {
     var primaryColor: Color
-    var status: String
     @Environment(\.islandDesignMode) private var islandDesignMode
 
     var body: some View {
-        HStack(spacing: 5) {
-            ProgressView()
-                .controlSize(.small)
-                .scaleEffect(0.52)
-                .tint(primaryColor.opacity(0.42))
-                .frame(width: 14, height: 14)
-            Text(status)
-                .font(.system(size: 9.4, weight: .medium))
-                .foregroundStyle(primaryColor.opacity(0.44))
-                .lineLimit(1)
-                .minimumScaleFactor(0.82)
-        }
-            .padding(.horizontal, 7)
-            .frame(height: 22)
-            .accessibilityIdentifier("qa-stage-indicator")
+        ProgressView()
+            .controlSize(.small)
+            .scaleEffect(0.54)
+            .tint(primaryColor.opacity(0.48))
+            .frame(width: 22, height: 22)
+            .accessibilityIdentifier("qa-question-spinner")
             .background(
                 IslandGlassFill(
                     shape: Capsule(style: .continuous),
                     mode: islandDesignMode,
-                    solidOpacity: 0.16,
-                    glassTintOpacity: 0.060,
-                    glassFallbackOpacity: 0.052
+                    solidOpacity: 0.13,
+                    glassTintOpacity: 0.052,
+                    glassFallbackOpacity: 0.046
                 )
             )
             .overlay(
                 Capsule(style: .continuous)
-                    .stroke(Color.white.opacity(islandDesignMode == .liquidGlass ? 0.10 : 0.055), lineWidth: 0.5)
+                    .stroke(Color.white.opacity(islandDesignMode == .liquidGlass ? 0.095 : 0.050), lineWidth: 0.5)
             )
             .shadow(color: .black.opacity(islandDesignMode == .liquidGlass ? 0.10 : 0.16), radius: 5, x: 0, y: 2)
-            .accessibilityLabel(status)
+            .accessibilityLabel("Question answer loading")
     }
 }
 
@@ -1677,6 +1834,7 @@ private struct LiveTranscriptScrollView: NSViewRepresentable {
     var segments: [TranscriptSegment]
     var showOriginalText: Bool
     var showTranslatedText: Bool
+    var questionHighlights: [TranscriptQuestionHighlight]
     var onCopyBlock: (TranscriptSegment, String) -> Void
     var onDeleteSegment: (TranscriptSegment) -> Void
 
@@ -1711,6 +1869,7 @@ private struct LiveTranscriptScrollView: NSViewRepresentable {
             segments: segments,
             showOriginalText: showOriginalText,
             showTranslatedText: showTranslatedText,
+            questionHighlights: questionHighlights,
             onCopyBlock: onCopyBlock,
             onDeleteSegment: onDeleteSegment
         )
@@ -1727,6 +1886,7 @@ private struct LiveTranscriptScrollView: NSViewRepresentable {
         private var segments: [TranscriptSegment] = []
         private var showOriginalText = true
         private var showTranslatedText = false
+        private var questionHighlights: [TranscriptQuestionHighlight] = []
         private var onCopyBlock: (TranscriptSegment, String) -> Void = { _, _ in }
         private var onDeleteSegment: (TranscriptSegment) -> Void = { _ in }
         private var lastSignature: RenderSignature?
@@ -1739,12 +1899,14 @@ private struct LiveTranscriptScrollView: NSViewRepresentable {
             segments: [TranscriptSegment],
             showOriginalText: Bool,
             showTranslatedText: Bool,
+            questionHighlights: [TranscriptQuestionHighlight],
             onCopyBlock: @escaping (TranscriptSegment, String) -> Void,
             onDeleteSegment: @escaping (TranscriptSegment) -> Void
         ) {
             self.segments = segments
             self.showOriginalText = showOriginalText
             self.showTranslatedText = showTranslatedText
+            self.questionHighlights = questionHighlights
             self.onCopyBlock = onCopyBlock
             self.onDeleteSegment = onDeleteSegment
         }
@@ -1783,6 +1945,7 @@ private struct LiveTranscriptScrollView: NSViewRepresentable {
                 viewportSize: CGSize(width: round(viewportSize.width), height: round(viewportSize.height)),
                 showOriginalText: showOriginalText,
                 showTranslatedText: showTranslatedText,
+                questionHighlights: questionHighlights,
                 fingerprint: fingerprint(for: segments)
             )
 
@@ -1800,7 +1963,8 @@ private struct LiveTranscriptScrollView: NSViewRepresentable {
                     width: max(1, viewportSize.width),
                     minHeight: max(1, viewportSize.height),
                     showOriginalText: showOriginalText,
-                    showTranslatedText: showTranslatedText
+                    showTranslatedText: showTranslatedText,
+                    questionHighlights: questionHighlights
                 )
                 documentView.replaceRows(
                     layout.rows,
@@ -1908,6 +2072,7 @@ private struct LiveTranscriptScrollView: NSViewRepresentable {
         var viewportSize: CGSize
         var showOriginalText: Bool
         var showTranslatedText: Bool
+        var questionHighlights: [TranscriptQuestionHighlight]
         var fingerprint: Int
     }
 }
@@ -2238,7 +2403,8 @@ private enum TranscriptLayout {
         width: CGFloat,
         minHeight: CGFloat,
         showOriginalText: Bool,
-        showTranslatedText: Bool
+        showTranslatedText: Bool,
+        questionHighlights: [TranscriptQuestionHighlight] = []
     ) -> (rows: [Row], documentHeight: CGFloat) {
         let rowWidth = max(1, min(width - 24, showTranslatedText ? 492 : 520))
         let rowHorizontalInset: CGFloat = 8
@@ -2248,7 +2414,12 @@ private enum TranscriptLayout {
         let rowX = max(0, (width - rowWidth) / 2)
         let verticalPadding: CGFloat = 0
         let blocks = segments.flatMap {
-            attributedBlocks(for: $0, showOriginalText: showOriginalText, showTranslatedText: showTranslatedText)
+            attributedBlocks(
+                for: $0,
+                showOriginalText: showOriginalText,
+                showTranslatedText: showTranslatedText,
+                questionHighlights: questionHighlights
+            )
         }
         let heights = blocks.map { block -> CGFloat in
             let rect = block.text.boundingRect(
@@ -2284,7 +2455,8 @@ private enum TranscriptLayout {
     private static func attributedBlocks(
         for segment: TranscriptSegment,
         showOriginalText: Bool,
-        showTranslatedText: Bool
+        showTranslatedText: Bool,
+        questionHighlights: [TranscriptQuestionHighlight]
     ) -> [Block] {
         if showTranslatedText, let translationLine = translationLine(for: segment) {
             if showOriginalText {
@@ -2299,7 +2471,8 @@ private enum TranscriptLayout {
                             for: segment,
                             originalText: pair.original,
                             translatedText: pair.translation,
-                            translationOnly: false
+                            translationOnly: false,
+                            questionHighlights: questionHighlights
                         ),
                         copyText: copyText(originalText: pair.original, translatedText: pair.translation),
                         spacingAfter: index == pairs.count - 1 ? 14 : 8
@@ -2315,7 +2488,8 @@ private enum TranscriptLayout {
                         for: segment,
                         originalText: nil,
                         translatedText: chunk,
-                        translationOnly: true
+                        translationOnly: true,
+                        questionHighlights: questionHighlights
                     ),
                     copyText: chunk,
                     spacingAfter: index == chunks.count - 1 ? 14 : 8
@@ -2331,7 +2505,8 @@ private enum TranscriptLayout {
                     for: segment,
                     originalText: chunk,
                     translatedText: nil,
-                    translationOnly: false
+                    translationOnly: false,
+                    questionHighlights: questionHighlights
                 ),
                 copyText: chunk,
                 spacingAfter: index == chunks.count - 1 ? 13 : 7
@@ -2350,7 +2525,8 @@ private enum TranscriptLayout {
         for segment: TranscriptSegment,
         originalText: String?,
         translatedText: String?,
-        translationOnly: Bool
+        translationOnly: Bool,
+        questionHighlights: [TranscriptQuestionHighlight]
     ) -> NSAttributedString {
         let result = NSMutableAttributedString()
         let transcriptionColor = transcriptTextColor(for: segment)
@@ -2364,6 +2540,7 @@ private enum TranscriptLayout {
         secondaryParagraph.paragraphSpacing = 1.2
 
         if let translatedText {
+            let translatedStart = result.length
             result.append(NSAttributedString(
                 string: translatedText,
                 attributes: [
@@ -2372,8 +2549,16 @@ private enum TranscriptLayout {
                     .paragraphStyle: primaryParagraph
                 ]
             ))
+            TranscriptQuestionHighlighter.apply(
+                to: result,
+                visibleText: translatedText,
+                visibleRange: NSRange(location: translatedStart, length: (translatedText as NSString).length),
+                segmentId: segment.id,
+                highlights: translationOnly ? questionHighlights : []
+            )
             if let originalText {
                 result.append(NSAttributedString(string: "\n"))
+                let originalStart = result.length
                 result.append(NSAttributedString(
                     string: originalText,
                     attributes: [
@@ -2382,8 +2567,16 @@ private enum TranscriptLayout {
                         .paragraphStyle: secondaryParagraph
                     ]
                 ))
+                TranscriptQuestionHighlighter.apply(
+                    to: result,
+                    visibleText: originalText,
+                    visibleRange: NSRange(location: originalStart, length: (originalText as NSString).length),
+                    segmentId: segment.id,
+                    highlights: questionHighlights
+                )
             }
         } else if let originalText {
+            let originalStart = result.length
             result.append(NSAttributedString(
                 string: originalText,
                 attributes: [
@@ -2392,6 +2585,13 @@ private enum TranscriptLayout {
                     .paragraphStyle: primaryParagraph
                 ]
             ))
+            TranscriptQuestionHighlighter.apply(
+                to: result,
+                visibleText: originalText,
+                visibleRange: NSRange(location: originalStart, length: (originalText as NSString).length),
+                segmentId: segment.id,
+                highlights: questionHighlights
+            )
         }
 
         return result

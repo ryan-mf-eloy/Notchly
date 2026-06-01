@@ -143,6 +143,21 @@ enum CodeLanguageRegistry {
         if lower.hasPrefix("select ") || lower.hasPrefix("with ") || lower.hasPrefix("insert ") || lower.hasPrefix("update ") {
             return definition(for: "sql")
         }
+        if lower.hasPrefix("function ") ||
+            lower.contains("\nfunction ") ||
+            lower.contains("const ") ||
+            lower.contains("\nconst ") ||
+            lower.contains("let ") ||
+            lower.contains("\nlet ") ||
+            lower.contains("=>") {
+            return definition(for: "javascript")
+        }
+        if lower.hasPrefix("def ") ||
+            lower.contains("\ndef ") ||
+            lower.hasPrefix("class ") ||
+            lower.contains("\nclass ") {
+            return definition(for: "python")
+        }
         if lower.hasPrefix("http/") || lower.hasPrefix("get ") || lower.hasPrefix("post ") || lower.hasPrefix("put ") {
             return definition(for: "http")
         }
@@ -425,6 +440,1300 @@ enum CodeLanguageRegistry {
     ]
 }
 
+enum CodeBlockFormatter {
+    private static let cStyleOperatorTokens = [
+        ">>>=", "<<=", ">>=", "**=", "&&=", "||=", "??=",
+        "===", "!==", ">>>",
+        "=>", "->", "++", "--", "...", "?.", "::",
+        "<=", ">=", "==", "!=", "&&", "||", "??", "+=", "-=", "*=", "%=", "&=", "|=", "^=", "<<", ">>", "**",
+        "+", "-", "*", "%", "<", ">", "&", "|", "^"
+    ]
+
+    static func formatted(_ code: String, language: String?) -> String {
+        let definition = CodeLanguageRegistry.definition(for: language, code: code)
+        var normalized = code
+            .replacingOccurrences(of: "\r\n", with: "\n")
+            .replacingOccurrences(of: "\r", with: "\n")
+        normalized = decodedEscapedLineBreaksIfNeeded(normalized)
+        normalized = trimOuterBlankLines(normalized)
+        normalized = stripTrailingWhitespace(from: normalized)
+        normalized = dedented(normalized)
+        normalized = expandedTabs(normalized)
+        normalized = collapseExcessBlankLines(normalized)
+
+        guard !normalized.isEmpty else { return "" }
+
+        if let json = formattedJSON(normalized, definition: definition) {
+            return json
+        }
+
+        if shouldFormatCStyle(definition: definition, code: normalized) {
+            return formattedCStyle(
+                normalized,
+                addsLogicalSpacing: definition.family == .cLike || definition.id == "php"
+            )
+        }
+
+        if definition.id == "python" {
+            return formattedPython(normalized)
+        }
+
+        return normalized
+    }
+
+    private static func decodedEscapedLineBreaksIfNeeded(_ code: String) -> String {
+        guard !code.contains("\n") else { return code }
+        let escapedBreakCount = code.components(separatedBy: "\\n").count - 1
+        let hasStructuralBreaks = code.contains(";\\n")
+            || code.contains("{\\n")
+            || code.contains("}\\n")
+            || code.contains(":\\n")
+            || code.contains("\\n  ")
+            || code.contains("\\n\t")
+        guard escapedBreakCount >= 2 || hasStructuralBreaks else { return code }
+
+        return code
+            .replacingOccurrences(of: "\\r\\n", with: "\n")
+            .replacingOccurrences(of: "\\n", with: "\n")
+            .replacingOccurrences(of: "\\t", with: "\t")
+    }
+
+    private static func trimOuterBlankLines(_ code: String) -> String {
+        let lines = code.split(separator: "\n", omittingEmptySubsequences: false).map(String.init)
+        guard !lines.isEmpty else { return "" }
+
+        var start = lines.startIndex
+        var end = lines.endIndex
+
+        while start < end, lines[start].trimmingCharacters(in: .whitespaces).isEmpty {
+            start = lines.index(after: start)
+        }
+
+        while end > start {
+            let previous = lines.index(before: end)
+            guard lines[previous].trimmingCharacters(in: .whitespaces).isEmpty else { break }
+            end = previous
+        }
+
+        return lines[start..<end].joined(separator: "\n")
+    }
+
+    private static func stripTrailingWhitespace(from code: String) -> String {
+        code
+            .split(separator: "\n", omittingEmptySubsequences: false)
+            .map { trimTrailingWhitespace(String($0)) }
+            .joined(separator: "\n")
+    }
+
+    private static func trimTrailingWhitespace(_ line: String) -> String {
+        var end = line.endIndex
+        while end > line.startIndex {
+            let previous = line.index(before: end)
+            guard line[previous] == " " || line[previous] == "\t" else { break }
+            end = previous
+        }
+        return String(line[..<end])
+    }
+
+    private static func dedented(_ code: String) -> String {
+        let lines = code.split(separator: "\n", omittingEmptySubsequences: false).map(String.init)
+        let nonEmptyLines = lines.filter { !$0.trimmingCharacters(in: .whitespaces).isEmpty }
+        guard let commonIndent = nonEmptyLines.map(leadingWhitespaceCount).min(), commonIndent > 0 else {
+            return code
+        }
+
+        return lines
+            .map { removeLeadingWhitespace(from: $0, count: commonIndent) }
+            .joined(separator: "\n")
+    }
+
+    private static func leadingWhitespaceCount(_ line: String) -> Int {
+        var count = 0
+        for character in line {
+            guard character == " " || character == "\t" else { break }
+            count += 1
+        }
+        return count
+    }
+
+    private static func removeLeadingWhitespace(from line: String, count: Int) -> String {
+        var index = line.startIndex
+        var removed = 0
+        while index < line.endIndex, removed < count, line[index] == " " || line[index] == "\t" {
+            index = line.index(after: index)
+            removed += 1
+        }
+        return String(line[index...])
+    }
+
+    private static func expandedTabs(_ code: String, width: Int = 4) -> String {
+        code.replacingOccurrences(of: "\t", with: String(repeating: " ", count: max(1, width)))
+    }
+
+    private static func collapseExcessBlankLines(_ code: String) -> String {
+        var blankRun = 0
+        var output: [String] = []
+
+        for line in code.split(separator: "\n", omittingEmptySubsequences: false).map(String.init) {
+            if line.trimmingCharacters(in: .whitespaces).isEmpty {
+                blankRun += 1
+                if blankRun <= 2 {
+                    output.append("")
+                }
+            } else {
+                blankRun = 0
+                output.append(line)
+            }
+        }
+
+        return output.joined(separator: "\n")
+    }
+
+    private static func formattedJSON(_ code: String, definition: CodeLanguageDefinition) -> String? {
+        let trimmed = code.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard (definition.id == "json" || trimmed.hasPrefix("{") || trimmed.hasPrefix("[")),
+              let data = trimmed.data(using: .utf8),
+              let object = try? JSONSerialization.jsonObject(with: data, options: []),
+              JSONSerialization.isValidJSONObject(object),
+              let prettyData = try? JSONSerialization.data(withJSONObject: object, options: [.prettyPrinted, .withoutEscapingSlashes]),
+              let pretty = String(data: prettyData, encoding: .utf8)
+        else {
+            return nil
+        }
+        return pretty
+    }
+
+    private static func shouldFormatCStyle(definition: CodeLanguageDefinition, code: String) -> Bool {
+        switch definition.family {
+        case .cLike, .stylesheet:
+            return code.contains("{") || code.contains(";")
+        case .scripting:
+            return definition.id == "php" && (code.contains("{") || code.contains(";"))
+        default:
+            return false
+        }
+    }
+
+    private static func formattedCStyle(_ code: String, addsLogicalSpacing: Bool) -> String {
+        let expanded = needsStructuralExpansion(code) ? expandedCStyleStatements(code) : code
+        let lines = expanded.split(separator: "\n", omittingEmptySubsequences: false).map(String.init)
+        let mergedLines = mergedContinuationLines(lines)
+        var indent = 0
+        var output: [String] = []
+
+        for rawLine in mergedLines {
+            let trimmed = rawLine.trimmingCharacters(in: .whitespaces)
+            guard !trimmed.isEmpty else {
+                output.append("")
+                continue
+            }
+
+            let leadingClosers = leadingClosingBraceCount(in: trimmed)
+            if leadingClosers > 0 {
+                indent = max(0, indent - leadingClosers)
+            }
+
+            let formattedLine = normalizedCStyleLine(trimmed)
+            output.append(String(repeating: "  ", count: indent) + formattedLine)
+
+            let delta = braceDelta(in: formattedLine)
+            indent = max(0, indent + delta + leadingClosers)
+        }
+
+        let formatted = output.joined(separator: "\n")
+        return addsLogicalSpacing ? insertingLogicalCStyleSpacing(formatted) : formatted
+    }
+
+    private static func needsStructuralExpansion(_ code: String) -> Bool {
+        code
+            .split(separator: "\n", omittingEmptySubsequences: false)
+            .contains { cStyleLineNeedsStructuralExpansion(String($0)) }
+    }
+
+    private static func cStyleLineNeedsStructuralExpansion(_ line: String) -> Bool {
+        let characters = Array(line)
+        var index = 0
+        var quote: Character?
+        var isEscaped = false
+        var isLineComment = false
+        var isBlockComment = false
+        var parenDepth = 0
+        var bracketDepth = 0
+
+        while index < characters.count {
+            let character = characters[index]
+
+            if isLineComment {
+                return false
+            }
+
+            if isBlockComment {
+                if character == "*", index + 1 < characters.count, characters[index + 1] == "/" {
+                    index += 2
+                    isBlockComment = false
+                } else {
+                    index += 1
+                }
+                continue
+            }
+
+            if let activeQuote = quote {
+                if character == "\\" && !isEscaped {
+                    isEscaped = true
+                } else {
+                    if character == activeQuote && !isEscaped {
+                        quote = nil
+                    }
+                    isEscaped = false
+                }
+                index += 1
+                continue
+            }
+
+            if character == "/", index + 1 < characters.count, characters[index + 1] == "/" {
+                isLineComment = true
+                index += 2
+                continue
+            }
+
+            if character == "/", index + 1 < characters.count, characters[index + 1] == "*" {
+                isBlockComment = true
+                index += 2
+                continue
+            }
+
+            if character == "\"" || character == "'" || character == "`" {
+                quote = character
+                index += 1
+                continue
+            }
+
+            if character == "(" {
+                parenDepth += 1
+                index += 1
+                continue
+            }
+            if character == ")" {
+                parenDepth = max(0, parenDepth - 1)
+                index += 1
+                continue
+            }
+            if character == "[" {
+                bracketDepth += 1
+                index += 1
+                continue
+            }
+            if character == "]" {
+                bracketDepth = max(0, bracketDepth - 1)
+                index += 1
+                continue
+            }
+
+            if parenDepth == 0, bracketDepth == 0 {
+                if character == "{",
+                   shouldSplitCStyleOpeningBrace(after: String(characters[..<index])),
+                   hasCodeAfterStructuralBreak(in: characters, from: index + 1) {
+                    return true
+                }
+                if character == ";", hasCodeAfterStructuralBreak(in: characters, from: index + 1) {
+                    return true
+                }
+            }
+
+            index += 1
+        }
+
+        return false
+    }
+
+    private static func expandedCStyleStatements(_ code: String) -> String {
+        var lines: [String] = []
+        var current = ""
+        var index = code.startIndex
+        var quote: Character?
+        var isEscaped = false
+        var isLineComment = false
+        var isBlockComment = false
+        var parenDepth = 0
+        var bracketDepth = 0
+        var braceStack: [Bool] = []
+
+        func flushCurrent() {
+            let line = current.trimmingCharacters(in: .whitespaces)
+            if !line.isEmpty {
+                lines.append(line)
+            }
+            current.removeAll(keepingCapacity: true)
+        }
+
+        while index < code.endIndex {
+            let character = code[index]
+            let next = code.index(after: index)
+
+            if isLineComment {
+                if character == "\n" {
+                    flushCurrent()
+                    isLineComment = false
+                } else {
+                    current.append(character)
+                }
+                index = next
+                continue
+            }
+
+            if isBlockComment {
+                current.append(character)
+                if character == "*", next < code.endIndex, code[next] == "/" {
+                    current.append("/")
+                    index = code.index(after: next)
+                    isBlockComment = false
+                } else {
+                    index = next
+                }
+                continue
+            }
+
+            if let activeQuote = quote {
+                current.append(character)
+                if character == "\\" && !isEscaped {
+                    isEscaped = true
+                } else {
+                    if character == activeQuote && !isEscaped {
+                        quote = nil
+                    }
+                    isEscaped = false
+                }
+                index = next
+                continue
+            }
+
+            if character == "/", next < code.endIndex, code[next] == "/" {
+                current.append(contentsOf: "//")
+                index = code.index(after: next)
+                isLineComment = true
+                continue
+            }
+
+            if character == "/", next < code.endIndex, code[next] == "*" {
+                current.append(contentsOf: "/*")
+                index = code.index(after: next)
+                isBlockComment = true
+                continue
+            }
+
+            if character == "\"" || character == "'" || character == "`" {
+                quote = character
+                current.append(character)
+                index = next
+                continue
+            }
+
+            if character == "(" {
+                parenDepth += 1
+                current.append(character)
+                index = next
+                continue
+            }
+
+            if character == ")" {
+                parenDepth = max(0, parenDepth - 1)
+                current.append(character)
+                index = next
+                continue
+            }
+
+            if character == "[" {
+                bracketDepth += 1
+                current.append(character)
+                index = next
+                continue
+            }
+
+            if character == "]" {
+                bracketDepth = max(0, bracketDepth - 1)
+                current.append(character)
+                index = next
+                continue
+            }
+
+            switch character {
+            case "\n":
+                flushCurrent()
+            case "{":
+                guard parenDepth == 0, bracketDepth == 0 else {
+                    current.append(character)
+                    index = next
+                    continue
+                }
+                let shouldSplit = shouldSplitCStyleOpeningBrace(after: current)
+                braceStack.append(shouldSplit)
+                current.append("{")
+                if shouldSplit {
+                    flushCurrent()
+                }
+            case "}":
+                guard parenDepth == 0, bracketDepth == 0 else {
+                    current.append(character)
+                    index = next
+                    continue
+                }
+                let shouldSplit = braceStack.popLast() ?? true
+                if shouldSplit {
+                    flushCurrent()
+                }
+                current.append("}")
+                if shouldSplit {
+                    flushCurrent()
+                }
+            case ";":
+                guard parenDepth == 0, bracketDepth == 0 else {
+                    current.append(character)
+                    index = next
+                    continue
+                }
+                current.append(";")
+                flushCurrent()
+            default:
+                current.append(character)
+            }
+            index = next
+        }
+
+        flushCurrent()
+        return mergedContinuationLines(lines).joined(separator: "\n")
+    }
+
+    private static func shouldSplitCStyleOpeningBrace(after prefix: String) -> Bool {
+        let trimmed = prefix.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return false }
+        let lowercased = trimmed.lowercased()
+        if lowercased.hasSuffix(")") || lowercased.hasSuffix("=>") {
+            return true
+        }
+        if lowercased.hasSuffix("else")
+            || lowercased.hasSuffix("do")
+            || lowercased.hasSuffix("try")
+            || lowercased.hasSuffix("finally") {
+            return true
+        }
+        return lowercased.range(
+            of: #"(^|\s)(class|struct|enum|interface|namespace|type|module)\s+[A-Za-z_$][A-Za-z0-9_$]*(?:\s+extends\s+[A-Za-z_$][A-Za-z0-9_$.]*)?$"#,
+            options: .regularExpression
+        ) != nil
+    }
+
+    private static func hasCodeAfterStructuralBreak(in characters: [Character], from start: Int) -> Bool {
+        var index = start
+        while index < characters.count {
+            let character = characters[index]
+            if character == " " || character == "\t" {
+                index += 1
+                continue
+            }
+            if character == "/", index + 1 < characters.count, characters[index + 1] == "/" {
+                return false
+            }
+            return true
+        }
+        return false
+    }
+
+    private static func mergedContinuationLines(_ lines: [String]) -> [String] {
+        var merged: [String] = []
+        var index = 0
+
+        while index < lines.count {
+            let line = lines[index].trimmingCharacters(in: .whitespaces)
+            if line == "}", index + 1 < lines.count {
+                let next = lines[index + 1].trimmingCharacters(in: .whitespaces)
+                if isContinuationAfterClosingBrace(next) {
+                    merged.append("} \(next)")
+                    index += 2
+                    continue
+                }
+            }
+            merged.append(line)
+            index += 1
+        }
+
+        return merged
+    }
+
+    private static func isContinuationAfterClosingBrace(_ line: String) -> Bool {
+        let lowercased = line.lowercased()
+        return lowercased.hasPrefix("else")
+            || lowercased.hasPrefix("catch")
+            || lowercased.hasPrefix("finally")
+            || lowercased.hasPrefix("while")
+    }
+
+    private static func leadingClosingBraceCount(in line: String) -> Int {
+        var count = 0
+        for character in line {
+            guard character == "}" else { break }
+            count += 1
+        }
+        return count
+    }
+
+    private static func braceDelta(in line: String) -> Int {
+        var delta = 0
+        var index = line.startIndex
+        var quote: Character?
+        var isEscaped = false
+        var isLineComment = false
+        var isBlockComment = false
+
+        while index < line.endIndex {
+            let character = line[index]
+            let next = line.index(after: index)
+
+            if isLineComment {
+                break
+            }
+
+            if isBlockComment {
+                if character == "*", next < line.endIndex, line[next] == "/" {
+                    index = line.index(after: next)
+                    isBlockComment = false
+                } else {
+                    index = next
+                }
+                continue
+            }
+
+            if let activeQuote = quote {
+                if character == "\\" && !isEscaped {
+                    isEscaped = true
+                } else {
+                    if character == activeQuote && !isEscaped {
+                        quote = nil
+                    }
+                    isEscaped = false
+                }
+                index = next
+                continue
+            }
+
+            if character == "/", next < line.endIndex, line[next] == "/" {
+                isLineComment = true
+                index = line.index(after: next)
+                continue
+            }
+
+            if character == "/", next < line.endIndex, line[next] == "*" {
+                isBlockComment = true
+                index = line.index(after: next)
+                continue
+            }
+
+            if character == "\"" || character == "'" || character == "`" {
+                quote = character
+                index = next
+                continue
+            }
+
+            if character == "{" {
+                delta += 1
+            } else if character == "}" {
+                delta -= 1
+            }
+            index = next
+        }
+
+        return delta
+    }
+
+    private static func normalizedCStyleLine(_ line: String) -> String {
+        let controlKeywords: Set<String> = ["catch", "for", "if", "switch", "while", "with"]
+        let jumpKeywords: Set<String> = ["break", "continue", "return", "throw"]
+        let characters = Array(line)
+        var output = ""
+        var index = 0
+        var quote: Character?
+        var isEscaped = false
+        var isLineComment = false
+        var isBlockComment = false
+
+        while index < characters.count {
+            let character = characters[index]
+
+            if isLineComment {
+                output.append(character)
+                index += 1
+                continue
+            }
+
+            if isBlockComment {
+                output.append(character)
+                if character == "*", index + 1 < characters.count, characters[index + 1] == "/" {
+                    output.append("/")
+                    index += 2
+                    isBlockComment = false
+                } else {
+                    index += 1
+                }
+                continue
+            }
+
+            if let activeQuote = quote {
+                output.append(character)
+                if character == "\\" && !isEscaped {
+                    isEscaped = true
+                } else {
+                    if character == activeQuote && !isEscaped {
+                        quote = nil
+                    }
+                    isEscaped = false
+                }
+                index += 1
+                continue
+            }
+
+            if character == "/", index + 1 < characters.count, characters[index + 1] == "/" {
+                output.append(contentsOf: "//")
+                index += 2
+                isLineComment = true
+                continue
+            }
+
+            if character == "/", index + 1 < characters.count, characters[index + 1] == "*" {
+                output.append(contentsOf: "/*")
+                index += 2
+                isBlockComment = true
+                continue
+            }
+
+            if character == "\"" || character == "'" || character == "`" {
+                quote = character
+                output.append(character)
+                index += 1
+                continue
+            }
+
+            if isIdentifierStart(character) {
+                let start = index
+                index += 1
+                while index < characters.count, isIdentifierContinuation(characters[index]) {
+                    index += 1
+                }
+
+                let word = String(characters[start..<index])
+                if output.last == ")", jumpKeywords.contains(word), !output.hasSuffix(" ") {
+                    output.append(" ")
+                }
+                output.append(contentsOf: word)
+
+                let nextIndex = skippingInlineSpaces(in: characters, from: index)
+                if controlKeywords.contains(word), nextIndex < characters.count, characters[nextIndex] == "(" {
+                    output.append(" ")
+                    index = nextIndex
+                }
+                continue
+            }
+
+            if character == "," {
+                trimTrailingInlineWhitespace(from: &output)
+                output.append(",")
+                let nextIndex = skippingInlineSpaces(in: characters, from: index + 1)
+                if nextIndex < characters.count, !isClosingPunctuation(characters[nextIndex]) {
+                    output.append(" ")
+                }
+                index = nextIndex
+                continue
+            }
+
+            if character == "{" {
+                trimTrailingInlineWhitespace(from: &output)
+                if let last = output.last, last != " " && last != "(" && last != "[" && last != "{" {
+                    output.append(" ")
+                }
+                output.append("{")
+                let nextIndex = skippingInlineSpaces(in: characters, from: index + 1)
+                if nextIndex < characters.count,
+                   characters[nextIndex] != "}",
+                   hasClosingBraceAhead(in: characters, from: nextIndex) {
+                    output.append(" ")
+                }
+                index = nextIndex
+                continue
+            }
+
+            if character == "}" {
+                trimTrailingInlineWhitespace(from: &output)
+                if let last = output.last, last != "{" && last != " " {
+                    output.append(" ")
+                }
+                output.append("}")
+                let nextIndex = skippingInlineSpaces(in: characters, from: index + 1)
+                if nextIndex < characters.count, !isClosingPunctuation(characters[nextIndex]) {
+                    output.append(" ")
+                }
+                index = nextIndex
+                continue
+            }
+
+            if character == ";" {
+                trimTrailingInlineWhitespace(from: &output)
+                output.append(";")
+                let nextIndex = skippingInlineSpaces(in: characters, from: index + 1)
+                if nextIndex < characters.count, characters[nextIndex] != ")" {
+                    output.append(" ")
+                }
+                index = nextIndex
+                continue
+            }
+
+            if character == ":" {
+                trimTrailingInlineWhitespace(from: &output)
+                output.append(":")
+                let nextIndex = skippingInlineSpaces(in: characters, from: index + 1)
+                if nextIndex < characters.count, !isClosingPunctuation(characters[nextIndex]) {
+                    output.append(" ")
+                }
+                index = nextIndex
+                continue
+            }
+
+            if character == "=", isSingleAssignment(in: characters, at: index) {
+                trimTrailingInlineWhitespace(from: &output)
+                output.append(" = ")
+                index = skippingInlineSpaces(in: characters, from: index + 1)
+                continue
+            }
+
+            if let operatorToken = cStyleOperatorToken(in: characters, at: index) {
+                if shouldSpaceCStyleOperator(operatorToken, in: characters, at: index) {
+                    trimTrailingInlineWhitespace(from: &output)
+                    output.append(" \(operatorToken) ")
+                    index = skippingInlineSpaces(in: characters, from: index + operatorToken.count)
+                } else {
+                    output.append(operatorToken)
+                    index += operatorToken.count
+                }
+                continue
+            }
+
+            output.append(character)
+            index += 1
+        }
+
+        return output.trimmingCharacters(in: .whitespaces)
+    }
+
+    private static func isIdentifierStart(_ character: Character) -> Bool {
+        character.isLetter || character == "_" || character == "$"
+    }
+
+    private static func isIdentifierContinuation(_ character: Character) -> Bool {
+        character.isLetter || character.isNumber || character == "_" || character == "$"
+    }
+
+    private static func skippingInlineSpaces(in characters: [Character], from start: Int) -> Int {
+        var index = start
+        while index < characters.count, characters[index] == " " || characters[index] == "\t" {
+            index += 1
+        }
+        return index
+    }
+
+    private static func trimTrailingInlineWhitespace(from output: inout String) {
+        while output.last == " " || output.last == "\t" {
+            output.removeLast()
+        }
+    }
+
+    private static func isClosingPunctuation(_ character: Character) -> Bool {
+        character == ")" || character == "]" || character == "}" || character == ";" || character == ","
+    }
+
+    private static func hasClosingBraceAhead(in characters: [Character], from start: Int) -> Bool {
+        var cursor = start
+        var quote: Character?
+        var isEscaped = false
+        while cursor < characters.count {
+            let character = characters[cursor]
+            if let activeQuote = quote {
+                if character == "\\" && !isEscaped {
+                    isEscaped = true
+                } else {
+                    if character == activeQuote && !isEscaped {
+                        quote = nil
+                    }
+                    isEscaped = false
+                }
+                cursor += 1
+                continue
+            }
+            if character == "\"" || character == "'" || character == "`" {
+                quote = character
+                cursor += 1
+                continue
+            }
+            if character == "}" {
+                return true
+            }
+            cursor += 1
+        }
+        return false
+    }
+
+    private static func cStyleOperatorToken(in characters: [Character], at index: Int) -> String? {
+        for token in cStyleOperatorTokens where matches(token, in: characters, at: index) {
+            return token
+        }
+        return nil
+    }
+
+    private static func matches(_ token: String, in characters: [Character], at index: Int) -> Bool {
+        let tokenCharacters = Array(token)
+        guard index + tokenCharacters.count <= characters.count else { return false }
+        for offset in tokenCharacters.indices where characters[index + offset] != tokenCharacters[offset] {
+            return false
+        }
+        return true
+    }
+
+    private static func shouldSpaceCStyleOperator(_ token: String, in characters: [Character], at index: Int) -> Bool {
+        switch token {
+        case "++", "--", "...", "?.", "::", "->":
+            return false
+        case "+", "-":
+            return !isUnarySignOperator(token, in: characters, at: index)
+        case "<":
+            return !isLikelyGenericOpening(in: characters, at: index)
+        case ">":
+            return !isLikelyGenericClosing(in: characters, at: index)
+        default:
+            return previousNonWhitespaceCharacter(in: characters, before: index) != nil
+                && nextNonWhitespaceCharacter(in: characters, after: index + token.count - 1) != nil
+        }
+    }
+
+    private static func isUnarySignOperator(_ token: String, in characters: [Character], at index: Int) -> Bool {
+        guard token == "+" || token == "-" else { return false }
+        guard let previous = previousNonWhitespaceCharacter(in: characters, before: index) else {
+            return true
+        }
+        if "([{=:+-*/%!<>?&|,^".contains(previous) {
+            return true
+        }
+        return false
+    }
+
+    private static func isLikelyGenericOpening(in characters: [Character], at index: Int) -> Bool {
+        guard let previous = previousNonWhitespaceCharacter(in: characters, before: index),
+              isGenericBoundaryPrefix(previous) else {
+            return false
+        }
+        let nextIndex = skippingInlineSpaces(in: characters, from: index + 1)
+        guard nextIndex < characters.count, isIdentifierStart(characters[nextIndex]) else {
+            return false
+        }
+
+        var cursor = index
+        var depth = 0
+        while cursor < characters.count {
+            let character = characters[cursor]
+            if character == "<" {
+                depth += 1
+            } else if character == ">" {
+                depth -= 1
+                if depth == 0 {
+                    let after = skippingInlineSpaces(in: characters, from: cursor + 1)
+                    guard after < characters.count else { return true }
+                    return isGenericBoundarySuffix(characters[after])
+                }
+            } else if character == ";" || character == "{" || character == "\n" {
+                return false
+            }
+            cursor += 1
+        }
+        return false
+    }
+
+    private static func isLikelyGenericClosing(in characters: [Character], at index: Int) -> Bool {
+        var cursor = index - 1
+        var depth = 0
+        while cursor >= 0 {
+            let character = characters[cursor]
+            if character == ">" {
+                depth += 1
+            } else if character == "<" {
+                if depth == 0 {
+                    guard let previous = previousNonWhitespaceCharacter(in: characters, before: cursor),
+                          isGenericBoundaryPrefix(previous) else {
+                        return false
+                    }
+                    let after = skippingInlineSpaces(in: characters, from: cursor + 1)
+                    return after < characters.count && isIdentifierStart(characters[after])
+                }
+                depth -= 1
+            } else if character == ";" || character == "=" || character == "{" || character == "(" || character == ")" {
+                return false
+            }
+            cursor -= 1
+        }
+        return false
+    }
+
+    private static func isGenericBoundaryPrefix(_ character: Character) -> Bool {
+        character.isLetter || character.isNumber || character == "_" || character == "$" || character == "]" || character == ">"
+    }
+
+    private static func isGenericBoundarySuffix(_ character: Character) -> Bool {
+        character == "(" || character == ")" || character == "[" || character == "]" || character == "{" ||
+            character == "," || character == ";" || character == "=" || character == "." || character == ":"
+    }
+
+    private static func isSingleAssignment(in characters: [Character], at index: Int) -> Bool {
+        guard characters[index] == "=" else { return false }
+        let previous = previousNonWhitespaceCharacter(in: characters, before: index)
+        let next = nextNonWhitespaceCharacter(in: characters, after: index)
+        guard let previous, let next else { return false }
+        if next == "=" || next == ">" { return false }
+        if previous == "=" || previous == "!" || previous == "<" || previous == ">" ||
+            previous == "+" || previous == "-" || previous == "*" || previous == "/" ||
+            previous == "%" || previous == "&" || previous == "|" || previous == "^" ||
+            previous == "~" || previous == "?" {
+            return false
+        }
+        return true
+    }
+
+    private static func previousNonWhitespaceCharacter(in characters: [Character], before index: Int) -> Character? {
+        var cursor = index - 1
+        while cursor >= 0 {
+            let character = characters[cursor]
+            if character != " " && character != "\t" {
+                return character
+            }
+            cursor -= 1
+        }
+        return nil
+    }
+
+    private static func nextNonWhitespaceCharacter(in characters: [Character], after index: Int) -> Character? {
+        var cursor = index + 1
+        while cursor < characters.count {
+            let character = characters[cursor]
+            if character != " " && character != "\t" {
+                return character
+            }
+            cursor += 1
+        }
+        return nil
+    }
+
+    private enum CStyleLineGroup {
+        case opening
+        case closing
+        case guardClause
+        case setup
+        case call
+        case exit
+        case other
+    }
+
+    private static func insertingLogicalCStyleSpacing(_ code: String) -> String {
+        let lines = code.split(separator: "\n", omittingEmptySubsequences: false).map(String.init)
+        var output: [String] = []
+        var previousGroup: CStyleLineGroup?
+
+        for line in lines {
+            let trimmed = line.trimmingCharacters(in: .whitespaces)
+            guard !trimmed.isEmpty else {
+                if output.last?.isEmpty != true {
+                    output.append("")
+                }
+                previousGroup = nil
+                continue
+            }
+
+            let group = cStyleLineGroup(for: trimmed)
+            if shouldInsertLogicalBlankLine(after: previousGroup, before: group),
+               output.last?.isEmpty != true,
+               !output.isEmpty {
+                output.append("")
+            }
+
+            output.append(line)
+            previousGroup = group
+        }
+
+        return output.joined(separator: "\n")
+    }
+
+    private static func cStyleLineGroup(for trimmed: String) -> CStyleLineGroup {
+        if trimmed.hasPrefix("}") {
+            return .closing
+        }
+        if trimmed.hasSuffix("{") {
+            return .opening
+        }
+        if isCStyleGuardClause(trimmed) {
+            return .guardClause
+        }
+        if isCStyleExitLine(trimmed) {
+            return .exit
+        }
+        if isCStyleSetupLine(trimmed) {
+            return .setup
+        }
+        if isCStyleCallLine(trimmed) {
+            return .call
+        }
+        return .other
+    }
+
+    private static func shouldInsertLogicalBlankLine(
+        after previous: CStyleLineGroup?,
+        before current: CStyleLineGroup
+    ) -> Bool {
+        guard let previous else { return false }
+        switch (previous, current) {
+        case (.guardClause, .setup), (.guardClause, .call), (.guardClause, .exit), (.guardClause, .other):
+            return true
+        case (.closing, .setup), (.closing, .call):
+            return true
+        case (.setup, .call), (.setup, .exit), (.call, .exit):
+            return true
+        default:
+            return false
+        }
+    }
+
+    private static func isCStyleGuardClause(_ line: String) -> Bool {
+        let lowercased = line.lowercased()
+        guard lowercased.hasPrefix("if ") || lowercased.hasPrefix("if(") else { return false }
+        return containsControlJump(in: lowercased)
+    }
+
+    private static func isCStyleExitLine(_ line: String) -> Bool {
+        let lowercased = line.lowercased()
+        return lowercased.hasPrefix("return ")
+            || lowercased == "return;"
+            || lowercased.hasPrefix("throw ")
+            || lowercased == "break;"
+            || lowercased == "continue;"
+    }
+
+    private static func isCStyleSetupLine(_ line: String) -> Bool {
+        let lowercased = line.lowercased()
+        if lowercased.hasPrefix("const ")
+            || lowercased.hasPrefix("let ")
+            || lowercased.hasPrefix("var ") {
+            return true
+        }
+        return line.hasSuffix(";") && containsSingleAssignmentOperator(in: line)
+    }
+
+    private static func isCStyleCallLine(_ line: String) -> Bool {
+        guard line.hasSuffix(";") else { return false }
+        let body = String(line.dropLast()).trimmingCharacters(in: .whitespaces)
+        guard let openParen = body.firstIndex(of: "("),
+              body.hasSuffix(")") else {
+            return false
+        }
+        let callee = body[..<openParen].trimmingCharacters(in: .whitespaces)
+        guard !callee.isEmpty else { return false }
+        let blockedPrefixes = ["if", "for", "while", "switch", "catch", "return", "throw", "new"]
+        if blockedPrefixes.contains(callee.lowercased()) {
+            return false
+        }
+        return callee.allSatisfy { character in
+            character.isLetter || character.isNumber || character == "_" || character == "$" || character == "."
+        }
+    }
+
+    private static func containsControlJump(in line: String) -> Bool {
+        line.range(of: "\\b(return|throw|break|continue)\\b", options: .regularExpression) != nil
+    }
+
+    private static func containsSingleAssignmentOperator(in line: String) -> Bool {
+        let characters = Array(line)
+        guard !characters.isEmpty else { return false }
+        for index in characters.indices where characters[index] == "=" {
+            if isSingleAssignment(in: characters, at: index) {
+                return true
+            }
+        }
+        return false
+    }
+
+    private static func formattedPython(_ code: String) -> String {
+        let repaired = needsPythonIndentRepair(code) ? repairedFlatPythonIndentation(code) : code
+        return insertingLogicalPythonSpacing(repaired)
+    }
+
+    private static func needsPythonIndentRepair(_ code: String) -> Bool {
+        let lines = code.split(separator: "\n", omittingEmptySubsequences: false).map(String.init)
+        let nonEmptyLines = lines.filter { !$0.trimmingCharacters(in: .whitespaces).isEmpty }
+        guard nonEmptyLines.count >= 3 else { return false }
+        guard nonEmptyLines.contains(where: { pythonBlockOpener($0.trimmingCharacters(in: .whitespaces)) }) else {
+            return false
+        }
+        return nonEmptyLines.dropFirst().allSatisfy { leadingWhitespaceCount($0) == 0 }
+    }
+
+    private static func repairedFlatPythonIndentation(_ code: String) -> String {
+        let lines = code.split(separator: "\n", omittingEmptySubsequences: false).map(String.init)
+        var indent = 0
+        var previousWasTerminal = false
+        var output: [String] = []
+
+        for rawLine in lines {
+            let trimmed = rawLine.trimmingCharacters(in: .whitespaces)
+            guard !trimmed.isEmpty else {
+                if output.last?.isEmpty != true {
+                    output.append("")
+                }
+                previousWasTerminal = false
+                continue
+            }
+
+            if pythonDedentClause(trimmed), !previousWasTerminal {
+                indent = max(0, indent - 1)
+            }
+
+            output.append(String(repeating: "    ", count: indent) + trimmed)
+
+            if pythonBlockOpener(trimmed) {
+                indent += 1
+                previousWasTerminal = false
+            } else {
+                let terminal = pythonTerminalLine(trimmed)
+                if terminal, indent > 0 {
+                    indent = max(0, indent - 1)
+                }
+                previousWasTerminal = terminal
+            }
+        }
+
+        return output.joined(separator: "\n")
+    }
+
+    private enum PythonLineGroup {
+        case opener
+        case guardReturn
+        case setup
+        case call
+        case exit
+        case other
+    }
+
+    private static func insertingLogicalPythonSpacing(_ code: String) -> String {
+        let lines = code.split(separator: "\n", omittingEmptySubsequences: false).map(String.init)
+        var output: [String] = []
+        var previousInfo: (group: PythonLineGroup, indent: Int)?
+
+        for line in lines {
+            let trimmed = line.trimmingCharacters(in: .whitespaces)
+            guard !trimmed.isEmpty else {
+                if output.last?.isEmpty != true {
+                    output.append("")
+                }
+                previousInfo = nil
+                continue
+            }
+
+            let indent = leadingWhitespaceCount(line)
+            let group = pythonLineGroup(for: trimmed)
+            if shouldInsertLogicalPythonBlankLine(after: previousInfo, before: (group, indent)),
+               output.last?.isEmpty != true,
+               !output.isEmpty {
+                output.append("")
+            }
+
+            output.append(line)
+            previousInfo = (group, indent)
+        }
+
+        return output.joined(separator: "\n")
+    }
+
+    private static func pythonLineGroup(for trimmed: String) -> PythonLineGroup {
+        if pythonBlockOpener(trimmed) {
+            return .opener
+        }
+        if pythonExitLine(trimmed) {
+            return .exit
+        }
+        if pythonSetupLine(trimmed) {
+            return .setup
+        }
+        if pythonCallLine(trimmed) {
+            return .call
+        }
+        return .other
+    }
+
+    private static func shouldInsertLogicalPythonBlankLine(
+        after previous: (group: PythonLineGroup, indent: Int)?,
+        before current: (group: PythonLineGroup, indent: Int)
+    ) -> Bool {
+        guard let previous else { return false }
+        if previous.indent > current.indent {
+            switch previous.group {
+            case .guardReturn, .exit:
+                return true
+            default:
+                break
+            }
+        }
+        switch (previous.group, current.group) {
+        case (.guardReturn, .setup),
+             (.guardReturn, .call),
+             (.guardReturn, .exit),
+             (.guardReturn, .other),
+             (.setup, .call),
+             (.setup, .exit),
+             (.call, .exit):
+            return previous.indent == current.indent
+        default:
+            return false
+        }
+    }
+
+    private static func pythonBlockOpener(_ line: String) -> Bool {
+        line.hasSuffix(":")
+    }
+
+    private static func pythonDedentClause(_ line: String) -> Bool {
+        let lowercased = line.lowercased()
+        return lowercased.hasPrefix("elif ")
+            || lowercased == "else:"
+            || lowercased.hasPrefix("except")
+            || lowercased.hasPrefix("finally:")
+    }
+
+    private static func pythonTerminalLine(_ line: String) -> Bool {
+        let lowercased = line.lowercased()
+        return lowercased.hasPrefix("return")
+            || lowercased.hasPrefix("raise ")
+            || lowercased == "break"
+            || lowercased == "continue"
+            || lowercased == "pass"
+    }
+
+    private static func pythonExitLine(_ line: String) -> Bool {
+        pythonTerminalLine(line)
+    }
+
+    private static func pythonSetupLine(_ line: String) -> Bool {
+        line.contains("=") && !line.contains("==") && !line.contains("!=") && !line.contains(">=") && !line.contains("<=")
+    }
+
+    private static func pythonCallLine(_ line: String) -> Bool {
+        guard line.hasSuffix(")") else { return false }
+        guard let openParen = line.firstIndex(of: "(") else { return false }
+        let callee = line[..<openParen].trimmingCharacters(in: .whitespaces)
+        guard !callee.isEmpty else { return false }
+        let blockedPrefixes = ["if", "for", "while", "return", "raise", "with"]
+        return !blockedPrefixes.contains(callee.lowercased())
+    }
+}
+
 enum RichAnswerMarkdownParser {
     static func containsRichContent(_ text: String) -> Bool {
         let normalized = text.replacingOccurrences(of: "\r\n", with: "\n")
@@ -447,6 +1756,14 @@ enum RichAnswerMarkdownParser {
         var codeLanguage: String?
         var isInCodeBlock = false
 
+        func flushCodeBlock() {
+            let rawCode = codeLines.joined(separator: "\n").trimmingCharacters(in: .newlines)
+            let formattedCode = CodeBlockFormatter.formatted(rawCode, language: codeLanguage)
+            blocks.append(.code(language: codeLanguage, code: formattedCode))
+            codeLines.removeAll()
+            codeLanguage = nil
+        }
+
         func flushParagraph() {
             let paragraph = paragraphLines
                 .joined(separator: " ")
@@ -462,9 +1779,7 @@ enum RichAnswerMarkdownParser {
 
             if trimmed.hasPrefix("```") {
                 if isInCodeBlock {
-                    blocks.append(.code(language: codeLanguage, code: codeLines.joined(separator: "\n").trimmingCharacters(in: .newlines)))
-                    codeLines.removeAll()
-                    codeLanguage = nil
+                    flushCodeBlock()
                     isInCodeBlock = false
                 } else {
                     flushParagraph()
@@ -508,7 +1823,7 @@ enum RichAnswerMarkdownParser {
         }
 
         if isInCodeBlock {
-            blocks.append(.code(language: codeLanguage, code: codeLines.joined(separator: "\n").trimmingCharacters(in: .newlines)))
+            flushCodeBlock()
         }
         flushParagraph()
 
@@ -634,6 +1949,34 @@ enum CodeSyntaxHighlighter {
         }
 
         return output
+    }
+
+    static func lineTokens(for code: String, language: String?) -> [[SyntaxHighlightToken]] {
+        let tokens = tokens(for: code, language: language)
+        guard !tokens.isEmpty else { return [[]] }
+
+        var rows: [[SyntaxHighlightToken]] = [[]]
+
+        func append(_ text: String, role: SyntaxHighlightRole) {
+            guard !text.isEmpty else { return }
+            if rows[rows.count - 1].last?.role == role {
+                rows[rows.count - 1][rows[rows.count - 1].count - 1].text += text
+            } else {
+                rows[rows.count - 1].append(SyntaxHighlightToken(text: text, role: role))
+            }
+        }
+
+        for token in tokens {
+            var slice = token.text[...]
+            while let newline = slice.firstIndex(of: "\n") {
+                append(String(slice[..<newline]), role: token.role)
+                rows.append([])
+                slice = slice[slice.index(after: newline)...]
+            }
+            append(String(slice), role: token.role)
+        }
+
+        return rows
     }
 
     private static func role(
@@ -1027,37 +2370,49 @@ private struct CodeBlockView: View {
     @State private var didCopy = false
     @State private var resetCopyFeedbackTask: Task<Void, Never>?
 
+    private var displayCode: String {
+        CodeBlockFormatter.formatted(code, language: language)
+    }
+
     private var definition: CodeLanguageDefinition {
-        CodeLanguageRegistry.definition(for: language, code: code)
+        CodeLanguageRegistry.definition(for: language, code: displayCode)
     }
 
     private var codeFont: Font {
         switch density {
         case .compact:
-            .system(size: 10.5, weight: .regular, design: .monospaced)
+            .system(size: 11.4, weight: .regular, design: .monospaced)
         case .detail:
-            .system(size: 10, weight: .regular, design: .monospaced)
+            .system(size: 10.8, weight: .regular, design: .monospaced)
         case .qa:
-            .system(size: 12, weight: .light, design: .monospaced)
+            .system(size: 13.2, weight: .regular, design: .monospaced)
         }
     }
 
-    private var codeLineSpacing: CGFloat {
+    private var codeRowHeight: CGFloat {
         switch density {
-        case .compact: 2
-        case .detail: 2
-        case .qa: 3.4
+        case .compact: 18.0
+        case .detail: 17.2
+        case .qa: 21.8
         }
     }
 
-    private var lineNumberText: String {
-        CodeBlockLineNumbering.lineNumberText(for: code)
+    private var codeLines: [String] {
+        CodeBlockLineNumbering.lines(for: displayCode)
+    }
+
+    private var codeLineTokens: [[SyntaxHighlightToken]] {
+        CodeSyntaxHighlighter.lineTokens(for: displayCode, language: language)
+    }
+
+    private var codeRowsHeight: CGFloat {
+        CGFloat(max(1, codeLines.count)) * codeRowHeight
     }
 
     private var lineNumberColumnWidth: CGFloat {
-        let digitCount = CodeBlockLineNumbering.digitCount(for: code)
-        let characterWidth: CGFloat = density == .qa ? 7.2 : 6.4
-        return CGFloat(digitCount) * characterWidth + 8
+        let digitCount = CodeBlockLineNumbering.digitCount(for: displayCode)
+        let characterWidth: CGFloat = density == .qa ? 8.1 : 7.3
+        return CGFloat(digitCount) * characterWidth + (density == .qa ? 11 : 9)
     }
 
     private var lineNumberColor: Color {
@@ -1065,7 +2420,7 @@ private struct CodeBlockView: View {
     }
 
     private func copyCode() {
-        guard CodeBlockClipboard.copy(code) else { return }
+        guard CodeBlockClipboard.copy(displayCode) else { return }
         resetCopyFeedbackTask?.cancel()
         didCopy = false
         withAnimation(.interactiveSpring(response: 0.22, dampingFraction: 0.78, blendDuration: 0.02)) {
@@ -1081,55 +2436,76 @@ private struct CodeBlockView: View {
     }
 
     var body: some View {
-        ZStack(alignment: .topTrailing) {
-            VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: density == .qa ? 10 : 8) {
+            HStack(alignment: .center, spacing: 10) {
                 Text(definition.displayName.uppercased())
-                    .font(.system(size: density == .qa ? 8.8 : 8, weight: .bold))
-                    .foregroundStyle(Color.white.opacity(density == .qa ? 0.48 : 0.42))
+                    .font(.system(size: density == .qa ? 9.6 : 8.6, weight: .bold))
+                    .foregroundStyle(Color.white.opacity(density == .qa ? 0.50 : 0.44))
                     .lineLimit(1)
-                    .padding(.trailing, 66)
+                    .tracking(0)
 
-                HStack(alignment: .top, spacing: 10) {
-                    Text(lineNumberText)
-                        .font(codeFont)
-                        .foregroundStyle(lineNumberColor)
-                        .lineSpacing(codeLineSpacing)
-                        .multilineTextAlignment(.trailing)
-                        .fixedSize(horizontal: true, vertical: true)
-                        .frame(width: lineNumberColumnWidth, alignment: .trailing)
-                        .padding(.vertical, 2)
+                Spacer(minLength: 12)
 
-                    Rectangle()
-                        .fill(Color.white.opacity(0.065))
-                        .frame(width: 0.6)
-                        .padding(.vertical, 1)
-
-                    ScrollView(.horizontal, showsIndicators: false) {
-                        SyntaxHighlightedCodeText(code: code, language: language)
-                            .font(codeFont)
-                            .lineSpacing(codeLineSpacing)
-                            .fixedSize(horizontal: true, vertical: true)
-                            .padding(.vertical, 2)
-                    }
-                }
+                CodeBlockCopyButton(didCopy: didCopy, action: copyCode)
             }
 
-            CodeBlockCopyButton(didCopy: didCopy, action: copyCode)
+            HStack(alignment: .top, spacing: 0) {
+                VStack(alignment: .trailing, spacing: 0) {
+                    ForEach(codeLines.indices, id: \.self) { index in
+                        Text("\(index + 1)")
+                            .font(codeFont)
+                            .foregroundStyle(lineNumberColor)
+                            .monospacedDigit()
+                            .frame(width: lineNumberColumnWidth, height: codeRowHeight, alignment: .trailing)
+                    }
+                }
+                .fixedSize(horizontal: true, vertical: true)
+                .padding(.trailing, density == .qa ? 10 : 8)
+
+                Rectangle()
+                    .fill(Color.white.opacity(density == .qa ? 0.080 : 0.060))
+                    .frame(width: 0.6, height: codeRowsHeight)
+                    .padding(.vertical, 1)
+
+                ScrollView(.horizontal, showsIndicators: false) {
+                    VStack(alignment: .leading, spacing: 0) {
+                        ForEach(codeLines.indices, id: \.self) { index in
+                            SyntaxHighlightedCodeLineText(tokens: tokens(forLineAt: index))
+                                .font(codeFont)
+                                .frame(height: codeRowHeight, alignment: .leading)
+                        }
+                    }
+                    .fixedSize(horizontal: true, vertical: true)
+                    .padding(.leading, density == .qa ? 15 : 12)
+                    .padding(.trailing, density == .qa ? 18 : 14)
+                }
+                .frame(maxWidth: .infinity, minHeight: codeRowsHeight, alignment: .topLeading)
+            }
+            .padding(.top, density == .qa ? 1 : 0)
         }
-        .padding(.horizontal, density == .qa ? 12 : 10)
-        .padding(.vertical, density == .qa ? 10 : 8)
+        .padding(.horizontal, density == .qa ? 18 : 13)
+        .padding(.top, density == .qa ? 15 : 10)
+        .padding(.bottom, density == .qa ? 17 : 12)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(
             RoundedRectangle(cornerRadius: 8, style: .continuous)
-                .fill(Color.white.opacity(0.045))
+                .fill(Color.white.opacity(density == .qa ? 0.038 : 0.045))
         )
         .overlay(
             RoundedRectangle(cornerRadius: 8, style: .continuous)
-                .stroke(Color.white.opacity(0.075), lineWidth: 0.6)
+                .stroke(Color.white.opacity(density == .qa ? 0.082 : 0.075), lineWidth: 0.6)
         )
         .onDisappear {
             resetCopyFeedbackTask?.cancel()
         }
+        .accessibilityIdentifier("rich-code-block")
+    }
+
+    private func tokens(forLineAt index: Int) -> [SyntaxHighlightToken] {
+        guard codeLineTokens.indices.contains(index) else {
+            return [SyntaxHighlightToken(text: codeLines[index], role: .plain)]
+        }
+        return codeLineTokens[index]
     }
 }
 
@@ -1232,17 +2608,24 @@ private struct CodeBlockCopyButton: View {
     }
 }
 
-private struct SyntaxHighlightedCodeText: View {
-    var code: String
-    var language: String?
+private struct SyntaxHighlightedCodeLineText: View {
+    var tokens: [SyntaxHighlightToken]
 
     private var highlightedText: Text {
-        CodeSyntaxHighlighter.tokens(for: code, language: language).reduce(Text("")) { partial, token in
-            partial + Text(token.text).foregroundColor(token.role.color)
+        tokens.reduce(Text("")) { partial, token in
+            partial + Text(verbatim: visibleText(for: token.text)).foregroundColor(token.role.color)
         }
     }
 
     var body: some View {
         highlightedText
+            .lineLimit(1)
+            .fixedSize(horizontal: true, vertical: false)
+    }
+
+    private func visibleText(for text: String) -> String {
+        text
+            .replacingOccurrences(of: "\t", with: String(repeating: "\u{00a0}", count: 4))
+            .replacingOccurrences(of: " ", with: "\u{00a0}")
     }
 }

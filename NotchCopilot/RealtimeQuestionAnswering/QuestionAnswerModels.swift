@@ -1123,6 +1123,10 @@ enum QuestionUnderstandingSignal: String, Codable, CaseIterable, Identifiable, S
     case directedToGroup = "directed_to_group"
     case concreteObject = "concrete_object"
     case domainObject = "domain_object"
+    case semanticQuestionShape = "semantic_question_shape"
+    case answerableObjectFocus = "answerable_object_focus"
+    case contextualQuestionLead = "contextual_question_lead"
+    case adaptivePromotion = "adaptive_promotion"
     case finalUtterance = "final_utterance"
     case contextualCarryover = "contextual_carryover"
 
@@ -1989,6 +1993,78 @@ struct CopilotSpeechClarificationRule: Codable, Hashable, Sendable {
     var message: String
 }
 
+struct CopilotSpeechFrameSelectionPolicy: Codable, Hashable, Sendable {
+    var sourceBiases: [String: Double]
+    var finalUtteranceBonus: Double
+    var partialPenalty: Double
+    var accuratePartialPenalty: Double
+    var veryShortCharacterThreshold: Int
+    var veryShortPenalty: Double
+    var shortCharacterThreshold: Int
+    var shortPenalty: Double
+    var lowConfidenceWordThreshold: Double
+    var lowConfidenceWordPenalty: Double
+    var lowConfidenceWordMaxPenalty: Double
+    var lowLanguageConfidenceThreshold: Double
+    var lowLanguageConfidencePenalty: Double
+    var lowStabilityThreshold: Double
+    var lowStabilityPenalty: Double
+    var truncationPenalty: Double
+    var dominantLanguageBonus: Double
+    var contextTokenMinimumLength: Int
+    var contextStopWords: [String]
+    var contextOverlapPerMatchBonus: Double
+    var contextOverlapMaxBonus: Double
+    var trailingFragmentTerms: [String]
+    var domainBoostTerms: [String]
+    var domainBoostASRConfidenceBonus: Double
+    var domainBoostLanguageConfidenceBonus: Double
+    var partialStabilityBase: Double
+    var partialStabilityWordLimit: Int
+    var partialStabilityWordWeight: Double
+    var partialStabilityRevisionWeight: Double
+    var partialStabilityRevisionMaxBonus: Double
+    var partialStabilityMax: Double
+
+    static let fallback = CopilotSpeechFrameSelectionPolicy(
+        sourceBiases: [:],
+        finalUtteranceBonus: 0.14,
+        partialPenalty: 0.12,
+        accuratePartialPenalty: 0.24,
+        veryShortCharacterThreshold: 10,
+        veryShortPenalty: 0.16,
+        shortCharacterThreshold: 18,
+        shortPenalty: 0.06,
+        lowConfidenceWordThreshold: 0.68,
+        lowConfidenceWordPenalty: 0.045,
+        lowConfidenceWordMaxPenalty: 0.20,
+        lowLanguageConfidenceThreshold: 0.42,
+        lowLanguageConfidencePenalty: 0.10,
+        lowStabilityThreshold: 0.55,
+        lowStabilityPenalty: 0.10,
+        truncationPenalty: 0.07,
+        dominantLanguageBonus: 0.025,
+        contextTokenMinimumLength: 5,
+        contextStopWords: [],
+        contextOverlapPerMatchBonus: 0.012,
+        contextOverlapMaxBonus: 0.05,
+        trailingFragmentTerms: [],
+        domainBoostTerms: [],
+        domainBoostASRConfidenceBonus: 0.045,
+        domainBoostLanguageConfidenceBonus: 0.035,
+        partialStabilityBase: 0.42,
+        partialStabilityWordLimit: 8,
+        partialStabilityWordWeight: 0.055,
+        partialStabilityRevisionWeight: 0.06,
+        partialStabilityRevisionMaxBonus: 0.18,
+        partialStabilityMax: 0.88
+    )
+
+    func sourceBias(_ source: SpeechCandidateSource) -> Double {
+        sourceBiases[source.rawValue] ?? 0
+    }
+}
+
 struct CopilotSpeechPolicy: Codable, Hashable, Sendable {
     var version: Int
     var alternativeLimit: Int
@@ -1996,11 +2072,16 @@ struct CopilotSpeechPolicy: Codable, Hashable, Sendable {
     var lowConfidenceRepairThreshold: Double
     var repairConfidenceFloor: Double
     var sourceWeights: [String: Double]
+    var frameSelection: CopilotSpeechFrameSelectionPolicy?
     var repairRules: [CopilotSpeechRepairRule]
     var clarificationRules: [CopilotSpeechClarificationRule]
 
     func sourceWeight(_ source: SpeechCandidateSource) -> Double {
         sourceWeights[source.rawValue] ?? 1.0
+    }
+
+    var frameSelectionPolicy: CopilotSpeechFrameSelectionPolicy {
+        frameSelection ?? .fallback
     }
 }
 
@@ -2047,6 +2128,7 @@ enum CopilotSpeechPolicyStore {
             lowConfidenceRepairThreshold: 0.86,
             repairConfidenceFloor: 0.58,
             sourceWeights: ["best": 1.0, "alternative": 0.94, "repair": 0.86, "language_fanout": 0.92],
+            frameSelection: .fallback,
             repairRules: [],
             clarificationRules: []
         )
@@ -2188,15 +2270,14 @@ struct CopilotSpeechUnderstandingPipeline {
     }
 
     private func boostIfDomainVocabularyPresent(_ frame: SpeechCandidateFrame) -> SpeechCandidateFrame {
+        let framePolicy = policy.frameSelectionPolicy
         let normalized = QuestionDetectionService.normalize(frame.text)
-        let domainTerms = [
-            "swiftui", "openai", "chatgpt", "api", "deploy", "deployment", "pr", "branch",
-            "bug", "latency", "roadmap", "notchly", "rag", "pull request", "screen capture kit"
-        ]
-        guard domainTerms.contains(where: { normalized.contains($0) }) else { return frame }
+        guard framePolicy.domainBoostTerms
+            .map(QuestionDetectionService.normalize)
+            .contains(where: { !($0.isEmpty) && normalized.contains($0) }) else { return frame }
         var boosted = frame
-        boosted.asrConfidence = min(1, boosted.asrConfidence + 0.045)
-        boosted.languageConfidence = min(1, (boosted.languageConfidence ?? 0.7) + 0.035)
+        boosted.asrConfidence = min(1, boosted.asrConfidence + framePolicy.domainBoostASRConfidenceBonus)
+        boosted.languageConfidence = min(1, (boosted.languageConfidence ?? 0.7) + framePolicy.domainBoostLanguageConfidenceBonus)
         return boosted
     }
 
@@ -2230,8 +2311,14 @@ struct CopilotSpeechUnderstandingPipeline {
 
     private func partialStability(for segment: TranscriptSegment, text: String) -> Double {
         if segment.isFinal { return 1.0 }
-        let wordCount = text.split(separator: " ").count
-        return min(0.88, 0.42 + Double(min(wordCount, 8)) * 0.055 + min(Double(segment.revisionNumber) * 0.06, 0.18))
+        let framePolicy = policy.frameSelectionPolicy
+        let tokenCount = QuestionIntentRulePack.default.textSegmentationPolicy.lexicalTokenCount(in: text)
+        return min(
+            framePolicy.partialStabilityMax,
+            framePolicy.partialStabilityBase
+                + Double(min(tokenCount, framePolicy.partialStabilityWordLimit)) * framePolicy.partialStabilityWordWeight
+                + min(Double(segment.revisionNumber) * framePolicy.partialStabilityRevisionWeight, framePolicy.partialStabilityRevisionMaxBonus)
+        )
     }
 }
 
@@ -2239,90 +2326,102 @@ enum CopilotSpeechFrameSelector {
     static func bestFrame(
         in frames: [SpeechCandidateFrame],
         context: TranscriptContext? = nil,
-        preferences: AppPreferences? = nil
+        preferences: AppPreferences? = nil,
+        policy: CopilotSpeechPolicy = CopilotSpeechPolicyStore.current
     ) -> SpeechCandidateFrame? {
         frames.max { lhs, rhs in
-            score(lhs, context: context, preferences: preferences) < score(rhs, context: context, preferences: preferences)
+            score(lhs, context: context, preferences: preferences, policy: policy) < score(rhs, context: context, preferences: preferences, policy: policy)
         }
     }
 
     static func score(
         _ frame: SpeechCandidateFrame,
         context: TranscriptContext? = nil,
-        preferences: AppPreferences? = nil
+        preferences: AppPreferences? = nil,
+        policy: CopilotSpeechPolicy = CopilotSpeechPolicyStore.current
     ) -> Double {
         let text = frame.text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty else { return -.infinity }
 
+        let framePolicy = policy.frameSelectionPolicy
         var score = frame.combinedConfidence
-        switch frame.source {
-        case .best:
-            score += 0.035
-        case .alternative:
-            score += 0.015
-        case .languageFanout:
-            score += 0.025
-        case .repair:
-            score -= 0.025
-        }
+        score += framePolicy.sourceBias(frame.source)
 
         if frame.isFinal && !frame.isPartial {
-            score += 0.14
+            score += framePolicy.finalUtteranceBonus
         } else {
-            score -= (preferences?.copilotASRCommitPolicy == .accurate) ? 0.24 : 0.12
+            score -= (preferences?.copilotASRCommitPolicy == .accurate) ? framePolicy.accuratePartialPenalty : framePolicy.partialPenalty
         }
 
         let normalized = QuestionDetectionService.normalize(text)
-        let tokenCount = normalized.split(separator: " ").count
-        if normalized.count < 10 || tokenCount <= 1 {
-            score -= 0.16
-        } else if normalized.count < 18 {
-            score -= 0.06
+        let textPolicy = QuestionIntentRulePack.default.textSegmentationPolicy
+        let tokenCount = textPolicy.lexicalTokenCount(in: normalized)
+        if normalized.count < framePolicy.veryShortCharacterThreshold || tokenCount <= 1 {
+            score -= framePolicy.veryShortPenalty
+        } else if normalized.count < framePolicy.shortCharacterThreshold {
+            score -= framePolicy.shortPenalty
         }
 
-        let lowConfidenceWords = frame.wordConfidences.filter { $0 < 0.68 }.count
+        let lowConfidenceWords = frame.wordConfidences.filter { $0 < framePolicy.lowConfidenceWordThreshold }.count
         if lowConfidenceWords > 0 {
-            score -= min(0.20, Double(lowConfidenceWords) * 0.045)
+            score -= min(framePolicy.lowConfidenceWordMaxPenalty, Double(lowConfidenceWords) * framePolicy.lowConfidenceWordPenalty)
         }
-        if (frame.languageConfidence ?? 0.7) < 0.42 {
-            score -= 0.10
+        if (frame.languageConfidence ?? 0.7) < framePolicy.lowLanguageConfidenceThreshold {
+            score -= framePolicy.lowLanguageConfidencePenalty
         }
-        if frame.stability < 0.55 {
-            score -= 0.10
+        if frame.stability < framePolicy.lowStabilityThreshold {
+            score -= framePolicy.lowStabilityPenalty
         }
-        if looksTruncated(normalized) {
-            score -= 0.07
+        if looksTruncated(normalized, policy: framePolicy, textPolicy: textPolicy) {
+            score -= framePolicy.truncationPenalty
         }
         if let dominantLanguage = context?.dominantLanguage,
            let frameLanguage = frame.languageCode,
            SupportedLanguage.normalizedCode(dominantLanguage) == SupportedLanguage.normalizedCode(frameLanguage) {
-            score += 0.025
+            score += framePolicy.dominantLanguageBonus
         }
-        score += contextOverlapBonus(text: normalized, context: context)
+        score += contextOverlapBonus(text: normalized, context: context, policy: framePolicy, textPolicy: textPolicy)
         return min(max(score, 0), 1.2)
     }
 
-    private static func looksTruncated(_ normalized: String) -> Bool {
-        let trailingFragments = [
-            "de", "do", "da", "dos", "das", "para", "pra", "por", "com", "sobre",
-            "of", "for", "to", "with", "about", "the", "a", "an"
-        ]
-        guard let last = normalized.split(separator: " ").last.map(String.init) else { return false }
-        return trailingFragments.contains(last)
+    private static func looksTruncated(
+        _ normalized: String,
+        policy: CopilotSpeechFrameSelectionPolicy,
+        textPolicy: QuestionTextSegmentationPolicy
+    ) -> Bool {
+        guard let last = textPolicy.lexicalTokens(in: normalized).last else { return false }
+        return policy.trailingFragmentTerms.map(QuestionDetectionService.normalize).contains(last)
     }
 
-    private static func contextOverlapBonus(text: String, context: TranscriptContext?) -> Double {
+    private static func contextOverlapBonus(
+        text: String,
+        context: TranscriptContext?,
+        policy: CopilotSpeechFrameSelectionPolicy,
+        textPolicy: QuestionTextSegmentationPolicy
+    ) -> Double {
         guard let context else { return 0 }
         let recent = QuestionDetectionService.normalize(context.recentTranscript + " " + context.mediumTranscript)
         guard !recent.isEmpty else { return 0 }
-        let tokens = text
-            .split(separator: " ")
-            .map(String.init)
-            .filter { $0.count >= 5 }
-            .filter { !["sobre", "qual", "quais", "como", "porque", "quando", "where", "what", "which", "about"].contains($0) }
+        let stopWords = Set(policy.contextStopWords.map(QuestionDetectionService.normalize))
+        let tokens = textPolicy.lexicalTokens(in: text)
+            .filter { token in
+                token.count >= effectiveContextTokenMinimumLength(for: token, policy: policy, textPolicy: textPolicy)
+            }
+            .filter { !stopWords.contains($0) }
         guard !tokens.isEmpty else { return 0 }
-        let matches = tokens.filter { recent.contains($0) }.count
-        return min(0.05, Double(matches) * 0.012)
+        let recentTokens = Set(textPolicy.lexicalTokens(in: recent))
+        let matches = tokens.filter { recentTokens.contains($0) }.count
+        return min(policy.contextOverlapMaxBonus, Double(matches) * policy.contextOverlapPerMatchBonus)
+    }
+
+    private static func effectiveContextTokenMinimumLength(
+        for token: String,
+        policy: CopilotSpeechFrameSelectionPolicy,
+        textPolicy: QuestionTextSegmentationPolicy
+    ) -> Int {
+        textPolicy.containsCompactScript(in: token)
+            ? textPolicy.meaningfulTokenMinimumLength(for: token)
+            : policy.contextTokenMinimumLength
     }
 }
 
@@ -2435,10 +2534,20 @@ struct CopilotAnswerPresenter {
         intent: CopilotIntentKind,
         sources: [AnswerSource],
         preferredFormat: CopilotAnswerFormat? = nil,
-        richAnswer: RichAnswerPayload? = nil
+        richAnswer: RichAnswerPayload? = nil,
+        presentationPolicy: AnswerPresentationPolicy = .default
     ) throws -> CopilotAnswerPresentation {
-        let format = answerFormat(for: rawText, tool: tool, intent: intent, question: candidate.rawText, preferredFormat: preferredFormat)
-        let cleaned = try validatedText(rawText, format: format)
+        let presentationPolicy = presentationPolicy.normalized()
+        let format = answerFormat(
+            for: rawText,
+            tool: tool,
+            intent: intent,
+            candidate: candidate,
+            classification: classification,
+            preferredFormat: preferredFormat,
+            presentationPolicy: presentationPolicy
+        )
+        let cleaned = try validatedText(rawText, format: format, policy: presentationPolicy)
         let compacted = compact(cleaned, format: format)
         let sourceCleaned = sources.isEmpty ? compacted : RichAnswerTextSanitizer.removingRenderedSourceURLs(from: compacted, sources: sources)
         let redacted = privacyGuard.redact(sourceCleaned)
@@ -2448,15 +2557,17 @@ struct CopilotAnswerPresenter {
             text: text,
             format: format,
             sources: sources,
+            question: candidate.rawText,
             confidence: classification.confidence,
             riskLevel: .safe,
             tone: classification.expectedAnswerStyle,
-            caveats: sourceCaveat.map { [$0] } ?? []
+            caveats: sourceCaveat.map { [$0] } ?? [],
+            policy: presentationPolicy
         )
         let validatedRichAnswer = RichAnswerValidator().validated(richAnswer, sources: sources) ?? fallbackRichAnswer
         return CopilotAnswerPresentation(
             text: text,
-            shortText: AnswerPresentationFormatter.shortAnswer(from: text),
+            shortText: AnswerPresentationFormatter.shortAnswer(from: text, policy: presentationPolicy),
             format: format,
             caveats: sourceCaveat.map { [$0] } ?? [],
             sources: sources,
@@ -2475,9 +2586,29 @@ struct CopilotAnswerPresenter {
         )
     }
 
-    private func answerFormat(for text: String, tool: CopilotToolKind, intent: CopilotIntentKind, question: String, preferredFormat: CopilotAnswerFormat?) -> CopilotAnswerFormat {
-        if preferredFormat == .code || containsExecutableCodeBlock(text) {
+    private func answerFormat(
+        for text: String,
+        tool: CopilotToolKind,
+        intent: CopilotIntentKind,
+        candidate: QuestionCandidate,
+        classification: QuestionClassification,
+        preferredFormat: CopilotAnswerFormat?,
+        presentationPolicy: AnswerPresentationPolicy
+    ) -> CopilotAnswerFormat {
+        let decision = AnswerPresentationFormatter.presentationDecision(
+            for: candidate,
+            classification: classification,
+            generatedText: text,
+            policy: presentationPolicy
+        )
+        if preferredFormat == .code || decision.preservesCodeBlocks {
             return .code
+        }
+        if asksForFreshNews(candidate.rawText, policy: presentationPolicy) || intent == .newsSearch {
+            return .newsWithSources
+        }
+        if looksLikeCalculationQuestion(candidate.rawText, policy: presentationPolicy) {
+            return .calculation
         }
         if let preferredFormat, preferredFormat != .errorState, preferredFormat != .code {
             return preferredFormat
@@ -2492,6 +2623,18 @@ struct CopilotAnswerPresenter {
         case .webSearch:
             return intent == .newsSearch ? .newsWithSources : .bullets
         case .answerSynthesis:
+            switch decision.format {
+            case .code, .command, .structuredData:
+                return .code
+            case .numberedSteps:
+                return .steps
+            case .bullets:
+                return .bullets
+            case .plainText:
+                return .plainShort
+            case .mixed:
+                break
+            }
             let proseCandidate = stripCodeFences(from: text)
             let normalized = QuestionDetectionService.normalize(proseCandidate)
             if normalized.count <= 90 && !proseCandidate.contains("\n\n") {
@@ -2503,13 +2646,27 @@ struct CopilotAnswerPresenter {
         }
     }
 
-    private func validatedText(_ text: String, format: CopilotAnswerFormat) throws -> String {
+    private func asksForFreshNews(_ text: String, policy: AnswerPresentationPolicy) -> Bool {
+        let normalized = QuestionDetectionService.normalize(text)
+        return policy.freshNewsQuestionMarkers.contains { marker in
+            QuestionIntentRulePack.default.textSegmentationPolicy.containsMarker(marker, in: normalized)
+        }
+    }
+
+    private func looksLikeCalculationQuestion(_ text: String, policy: AnswerPresentationPolicy) -> Bool {
+        let normalized = QuestionDetectionService.normalize(text)
+        let pattern = policy.arithmeticQuestionPattern
+        guard !pattern.isEmpty else { return false }
+        return normalized.range(of: pattern, options: .regularExpression) != nil
+    }
+
+    private func validatedText(_ text: String, format: CopilotAnswerFormat, policy: AnswerPresentationPolicy) throws -> String {
         var trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else {
             throw CopilotFailure(.emptyResponse)
         }
         if !format.allowsCodeBlocks {
-            trimmed = stripCodeFences(from: trimmed)
+            trimmed = stripCodeFences(from: trimmed, policy: policy)
         }
         guard !trimmed.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
             throw CopilotFailure(.emptyResponse)
@@ -2517,11 +2674,12 @@ struct CopilotAnswerPresenter {
         return trimmed
     }
 
-    private func stripCodeFences(from text: String) -> String {
-        guard containsCodeBlock(text) else { return text }
+    private func stripCodeFences(from text: String, policy: AnswerPresentationPolicy = .default) -> String {
+        let policy = policy.normalized()
+        guard containsCodeBlock(text, policy: policy) else { return text }
         let lines = text.split(separator: "\n", omittingEmptySubsequences: false).map(String.init)
-        guard lines.first?.trimmingCharacters(in: .whitespacesAndNewlines).hasPrefix("```") == true,
-              lines.last?.trimmingCharacters(in: .whitespacesAndNewlines).hasPrefix("```") == true else {
+        guard lines.first?.trimmingCharacters(in: .whitespacesAndNewlines).hasPrefix(policy.codeFenceMarker) == true,
+              lines.last?.trimmingCharacters(in: .whitespacesAndNewlines).hasPrefix(policy.codeFenceMarker) == true else {
             return text
         }
         return lines.dropFirst().dropLast().joined(separator: "\n").trimmingCharacters(in: .whitespacesAndNewlines)
@@ -2545,23 +2703,8 @@ struct CopilotAnswerPresenter {
         return hasValidURL ? nil : "Fontes web indisponiveis ou incompletas nesta resposta."
     }
 
-    private func containsCodeBlock(_ text: String) -> Bool {
-        text.contains("```")
-    }
-
-    private func containsExecutableCodeBlock(_ text: String) -> Bool {
-        guard containsCodeBlock(text) else { return false }
-        let lowercased = text.lowercased()
-        let codeLanguages = ["```swift", "```python", "```js", "```javascript", "```ts", "```typescript", "```json", "```yaml", "```bash", "```sh", "```sql", "```xml", "```diff"]
-        if codeLanguages.contains(where: lowercased.contains) {
-            return true
-        }
-        return ["func ", "let ", "var ", "def ", "class ", "import ", "const ", "=>", "{", "}", "</", "$ "].contains { lowercased.contains($0) }
-    }
-
-    private func explicitlyRequestsCode(_ text: String) -> Bool {
-        let normalized = QuestionDetectionService.normalize(text)
-        return ["codigo", "código", "code", "swift", "python", "json", "yaml", "terminal", "comando", "command"].contains { normalized.contains($0) }
+    private func containsCodeBlock(_ text: String, policy: AnswerPresentationPolicy) -> Bool {
+        text.contains(policy.codeFenceMarker)
     }
 }
 
@@ -2709,8 +2852,166 @@ struct CopilotIntentLabelPolicy: Codable, Hashable, Sendable {
     var weight: Double
     var requiresWeb: Bool?
     var cues: [String]
+    var aliases: [String]?
     var prefixCues: [String]?
     var signals: [String]
+}
+
+struct CopilotStructuralSemanticRegexPolicy: Codable, Hashable, Sendable {
+    var pattern: String
+    var score: Double
+}
+
+struct CopilotStructuralSemanticRulePolicy: Codable, Hashable, Sendable {
+    var label: String?
+    var kind: CopilotIntentKind
+    var tool: CopilotToolKind
+    var requiresWeb: Bool?
+    var reason: String
+    var requiredSurfaceSignals: [String]
+    var requiresSurfaceNegativeSignals: Bool
+    var minimumSyntaxScore: Double?
+    var maximumSyntaxScore: Double?
+    var minimumContentScore: Double?
+    var minimumNumericScore: Double?
+    var confidenceBase: Double
+    var syntaxConfidenceWeight: Double
+    var contentConfidenceWeight: Double
+    var numericConfidenceWeight: Double
+    var minimumConfidence: Double
+    var maximumConfidence: Double
+    var signals: [String]
+    var propagateSurfaceNegativeSignals: Bool
+}
+
+struct CopilotStructuralSemanticPolicy: Codable, Hashable, Sendable {
+    var syntaxSurfaceSignalWeights: [String: Double]
+    var cjkSyntaxBonus: Double
+    var cjkMinimumCharacters: Int
+    var maximumSyntaxScore: Double
+    var meaningfulTokenMinimumLength: Int
+    var meaningfulTokenTargetCount: Int
+    var numericPatterns: [CopilotStructuralSemanticRegexPolicy]
+    var rules: [CopilotStructuralSemanticRulePolicy]
+
+    static func fallback(signals: CopilotIntentPolicySignals) -> CopilotStructuralSemanticPolicy {
+        CopilotStructuralSemanticPolicy(
+            syntaxSurfaceSignalWeights: [
+                QuestionUnderstandingSignal.terminalQuestionMark.rawValue: 0.34,
+                QuestionUnderstandingSignal.interrogativeStarter.rawValue: 0.28,
+                QuestionUnderstandingSignal.modalQuestionFrame.rawValue: 0.26,
+                QuestionUnderstandingSignal.indirectQuestionFrame.rawValue: 0.24,
+                QuestionUnderstandingSignal.actionRequestFrame.rawValue: 0.22,
+                QuestionUnderstandingSignal.concreteObject.rawValue: 0.10,
+                QuestionUnderstandingSignal.contextualCarryover.rawValue: 0.06
+            ],
+            cjkSyntaxBonus: 0.28,
+            cjkMinimumCharacters: 5,
+            maximumSyntaxScore: 1.0,
+            meaningfulTokenMinimumLength: 3,
+            meaningfulTokenTargetCount: 5,
+            numericPatterns: [
+                CopilotStructuralSemanticRegexPolicy(
+                    pattern: #"\d+(?:\.\d+)?\s*(?:%|\+|\-|\*|/|×|÷)\s*\d+"#,
+                    score: 1.0
+                ),
+                CopilotStructuralSemanticRegexPolicy(
+                    pattern: #"\d+(?:\.\d+)?\s*%[^\d]{0,16}\d+(?:\.\d+)?"#,
+                    score: 0.96
+                ),
+                CopilotStructuralSemanticRegexPolicy(
+                    pattern: #"\d+(?:\.\d+)?\s*(?:%|percent).*?\s+\d+(?:\.\d+)?"#,
+                    score: 0.94
+                )
+            ],
+            rules: [
+                CopilotStructuralSemanticRulePolicy(
+                    label: "calculation",
+                    kind: .calculation,
+                    tool: .answerSynthesis,
+                    requiresWeb: false,
+                    reason: "structural_numeric_expression",
+                    requiredSurfaceSignals: [],
+                    requiresSurfaceNegativeSignals: false,
+                    minimumSyntaxScore: nil,
+                    maximumSyntaxScore: nil,
+                    minimumContentScore: nil,
+                    minimumNumericScore: 0.92,
+                    confidenceBase: 0.70,
+                    syntaxConfidenceWeight: 0.08,
+                    contentConfidenceWeight: 0,
+                    numericConfidenceWeight: 0.12,
+                    minimumConfidence: 0,
+                    maximumConfidence: 0.90,
+                    signals: [signals.semanticIntent, signals.toolIntent, signals.questionSyntax],
+                    propagateSurfaceNegativeSignals: true
+                ),
+                CopilotStructuralSemanticRulePolicy(
+                    label: "action_request",
+                    kind: .actionRequest,
+                    tool: .answerSynthesis,
+                    requiresWeb: false,
+                    reason: "structural_action_request",
+                    requiredSurfaceSignals: [QuestionUnderstandingSignal.actionRequestFrame.rawValue],
+                    requiresSurfaceNegativeSignals: false,
+                    minimumSyntaxScore: nil,
+                    maximumSyntaxScore: nil,
+                    minimumContentScore: 0.35,
+                    minimumNumericScore: nil,
+                    confidenceBase: 0.66,
+                    syntaxConfidenceWeight: 0.12,
+                    contentConfidenceWeight: 0.10,
+                    numericConfidenceWeight: 0,
+                    minimumConfidence: 0,
+                    maximumConfidence: 0.88,
+                    signals: [signals.semanticIntent, signals.questionSyntax, signals.meaningfulContent],
+                    propagateSurfaceNegativeSignals: true
+                ),
+                CopilotStructuralSemanticRulePolicy(
+                    label: "answerable_question",
+                    kind: .answerableQuestion,
+                    tool: .answerSynthesis,
+                    requiresWeb: false,
+                    reason: "structural_question",
+                    requiredSurfaceSignals: [],
+                    requiresSurfaceNegativeSignals: false,
+                    minimumSyntaxScore: 0.52,
+                    maximumSyntaxScore: nil,
+                    minimumContentScore: 0.40,
+                    minimumNumericScore: nil,
+                    confidenceBase: 0.64,
+                    syntaxConfidenceWeight: 0.14,
+                    contentConfidenceWeight: 0.08,
+                    numericConfidenceWeight: 0,
+                    minimumConfidence: 0,
+                    maximumConfidence: 0.87,
+                    signals: [signals.semanticIntent, signals.questionSyntax, signals.meaningfulContent],
+                    propagateSurfaceNegativeSignals: true
+                ),
+                CopilotStructuralSemanticRulePolicy(
+                    label: nil,
+                    kind: .statement,
+                    tool: .unavailable,
+                    requiresWeb: false,
+                    reason: "structural_negative",
+                    requiredSurfaceSignals: [],
+                    requiresSurfaceNegativeSignals: true,
+                    minimumSyntaxScore: nil,
+                    maximumSyntaxScore: 0.40,
+                    minimumContentScore: nil,
+                    minimumNumericScore: nil,
+                    confidenceBase: 0.74,
+                    syntaxConfidenceWeight: 0,
+                    contentConfidenceWeight: 0,
+                    numericConfidenceWeight: 0,
+                    minimumConfidence: 0,
+                    maximumConfidence: 0.74,
+                    signals: [],
+                    propagateSurfaceNegativeSignals: true
+                )
+            ]
+        )
+    }
 }
 
 struct CopilotIntentPolicy: Codable, Hashable, Sendable {
@@ -2727,6 +3028,7 @@ struct CopilotIntentPolicy: Codable, Hashable, Sendable {
     var lowInformationWords: [String]
     var numberWords: [String]
     var operatorWords: [String]
+    var structuralSemantic: CopilotStructuralSemanticPolicy?
     var semanticLabels: [CopilotIntentLabelPolicy]
     var toolLabels: [CopilotIntentLabelPolicy]
     var negativeLabels: [CopilotIntentLabelPolicy]
@@ -2741,6 +3043,20 @@ struct CopilotIntentPolicy: Codable, Hashable, Sendable {
             minimumSignals: 2,
             partialMinimumTokens: 4
         )
+    }
+
+    var structuralSemanticPolicy: CopilotStructuralSemanticPolicy {
+        structuralSemantic ?? .fallback(signals: signals)
+    }
+}
+
+private extension CopilotIntentLabelPolicy {
+    func matches(normalizedLabel: String) -> Bool {
+        label == normalizedLabel
+            || kind.rawValue == normalizedLabel
+            || (aliases ?? []).contains {
+                QuestionDetectionService.normalize($0).replacingOccurrences(of: " ", with: "_") == normalizedLabel
+            }
     }
 }
 
@@ -2826,6 +3142,7 @@ enum CopilotIntentPolicyStore {
             lowInformationWords: [],
             numberWords: [],
             operatorWords: [],
+            structuralSemantic: nil,
             semanticLabels: [],
             toolLabels: [],
             negativeLabels: []
@@ -2932,83 +3249,9 @@ struct CoreMLCopilotIntentProvider: CopilotSemanticIntentProvider {
 
     private func mappedPrediction(label rawLabel: String, policy: CopilotIntentPolicy) -> CopilotIntentLabelPolicy? {
         let label = QuestionDetectionService.normalize(rawLabel).replacingOccurrences(of: " ", with: "_")
-        if let policyLabel = (policy.semanticLabels + policy.toolLabels + policy.negativeLabels).first(where: { $0.label == label || $0.kind.rawValue == label }) {
-            return policyLabel
+        return (policy.semanticLabels + policy.toolLabels + policy.negativeLabels).first { policyLabel in
+            policyLabel.matches(normalizedLabel: label)
         }
-        let tool: CopilotToolKind
-        let kind: CopilotIntentKind
-        let confidence: Double
-        let requiresWeb: Bool
-        switch label {
-        case "answerable_question", "question":
-            kind = .answerableQuestion
-            tool = .answerSynthesis
-            confidence = 0.88
-            requiresWeb = false
-        case "action_request", "request":
-            kind = .actionRequest
-            tool = .answerSynthesis
-            confidence = 0.88
-            requiresWeb = false
-        case "calculation", "math", "date_math":
-            kind = .calculation
-            tool = .answerSynthesis
-            confidence = 0.91
-            requiresWeb = false
-        case "conversion":
-            kind = .conversion
-            tool = .answerSynthesis
-            confidence = 0.88
-            requiresWeb = false
-        case "web_search":
-            kind = .webSearch
-            tool = .webSearch
-            confidence = 0.90
-            requiresWeb = true
-        case "news", "news_search":
-            kind = .newsSearch
-            tool = .webSearch
-            confidence = 0.90
-            requiresWeb = true
-        case "reminder":
-            kind = .reminder
-            tool = .reminder
-            confidence = 0.90
-            requiresWeb = false
-        case "memory_lookup":
-            kind = .memoryLookup
-            tool = .localMemory
-            confidence = 0.86
-            requiresWeb = false
-        case "statement":
-            kind = .statement
-            tool = .unavailable
-            confidence = 0.84
-            requiresWeb = false
-        case "noise", "ambient_noise":
-            kind = .ambientNoise
-            tool = .unavailable
-            confidence = 0.84
-            requiresWeb = false
-        case "ambiguous":
-            kind = .ambiguous
-            tool = .unavailable
-            confidence = 0.62
-            requiresWeb = false
-        default:
-            return nil
-        }
-        return CopilotIntentLabelPolicy(
-            label: label,
-            kind: kind,
-            tool: tool,
-            confidence: confidence,
-            weight: 1.0,
-            requiresWeb: requiresWeb,
-            cues: [],
-            prefixCues: [],
-            signals: [policy.signals.semanticIntent]
-        )
     }
 
     private func negativeSignals(for label: CopilotIntentLabelPolicy, policy: CopilotIntentPolicy) -> [String] {
@@ -3023,97 +3266,118 @@ struct CoreMLCopilotIntentProvider: CopilotSemanticIntentProvider {
 
 struct PolicyDrivenCopilotSemanticIntentProvider: CopilotSemanticIntentProvider {
     func prediction(for frame: CopilotIntentFrame, policy: CopilotIntentPolicy) -> CopilotSemanticIntentPrediction? {
-        let syntaxScore = questionSyntaxScore(frame: frame)
-        let contentScore = meaningfulContentScore(in: frame.cleanedText)
-        let numericScore = numericExpressionScore(in: frame.cleanedText)
+        let structuralPolicy = policy.structuralSemanticPolicy
+        let syntaxScore = questionSyntaxScore(frame: frame, policy: structuralPolicy)
+        let contentScore = meaningfulContentScore(frame: frame, policy: structuralPolicy)
+        let numericScore = numericExpressionScore(in: frame.cleanedText, policy: structuralPolicy)
         let negativeSignals = frame.surface.negativeSignals
 
-        if numericScore >= 0.92 {
-            return CopilotSemanticIntentPrediction(
-                kind: .calculation,
-                tool: .answerSynthesis,
-                confidence: min(0.90, 0.70 + numericScore * 0.12 + syntaxScore * 0.08),
-                requiresWeb: false,
-                signals: [policy.signals.semanticIntent, policy.signals.toolIntent, policy.signals.questionSyntax],
-                negativeSignals: negativeSignals,
-                reason: "structural_numeric_expression"
+        return structuralPolicy.rules.lazy.compactMap { rule in
+            prediction(
+                for: rule,
+                frame: frame,
+                policy: policy,
+                syntaxScore: syntaxScore,
+                contentScore: contentScore,
+                numericScore: numericScore,
+                negativeSignals: negativeSignals
             )
-        }
-
-        if frame.surface.strongSignals.contains(.actionRequestFrame), contentScore >= 0.35 {
-            return CopilotSemanticIntentPrediction(
-                kind: .actionRequest,
-                tool: .answerSynthesis,
-                confidence: min(0.88, 0.66 + syntaxScore * 0.12 + contentScore * 0.10),
-                requiresWeb: false,
-                signals: [policy.signals.semanticIntent, policy.signals.questionSyntax, policy.signals.meaningfulContent],
-                negativeSignals: negativeSignals,
-                reason: "structural_action_request"
-            )
-        }
-
-        if syntaxScore >= 0.52, contentScore >= 0.40 {
-            return CopilotSemanticIntentPrediction(
-                kind: .answerableQuestion,
-                tool: .answerSynthesis,
-                confidence: min(0.87, 0.64 + syntaxScore * 0.14 + contentScore * 0.08),
-                requiresWeb: false,
-                signals: [policy.signals.semanticIntent, policy.signals.questionSyntax, policy.signals.meaningfulContent],
-                negativeSignals: negativeSignals,
-                reason: "structural_question"
-            )
-        }
-
-        if frame.surface.negativeSignals.isEmpty == false, syntaxScore < 0.40 {
-            return CopilotSemanticIntentPrediction(
-                kind: .statement,
-                tool: .unavailable,
-                confidence: 0.74,
-                requiresWeb: false,
-                signals: [],
-                negativeSignals: negativeSignals,
-                reason: "structural_negative"
-            )
-        }
-
-        return nil
+        }.first
     }
 
-    private func questionSyntaxScore(frame: CopilotIntentFrame) -> Double {
+    private func prediction(
+        for rule: CopilotStructuralSemanticRulePolicy,
+        frame: CopilotIntentFrame,
+        policy: CopilotIntentPolicy,
+        syntaxScore: Double,
+        contentScore: Double,
+        numericScore: Double,
+        negativeSignals: [String]
+    ) -> CopilotSemanticIntentPrediction? {
+        guard rule.matches(
+            frame: frame,
+            syntaxScore: syntaxScore,
+            contentScore: contentScore,
+            numericScore: numericScore
+        ) else {
+            return nil
+        }
+        let labelPolicy = rule.label.flatMap { label in
+            (policy.semanticLabels + policy.toolLabels + policy.negativeLabels)
+                .first { $0.matches(normalizedLabel: QuestionDetectionService.normalize(label).replacingOccurrences(of: " ", with: "_")) }
+        }
+        let confidence = min(
+            max(
+                rule.confidenceBase
+                    + syntaxScore * rule.syntaxConfidenceWeight
+                    + contentScore * rule.contentConfidenceWeight
+                    + numericScore * rule.numericConfidenceWeight,
+                rule.minimumConfidence
+            ),
+            rule.maximumConfidence
+        )
+        return CopilotSemanticIntentPrediction(
+            kind: labelPolicy?.kind ?? rule.kind,
+            tool: labelPolicy?.tool ?? rule.tool,
+            confidence: confidence,
+            requiresWeb: rule.requiresWeb ?? labelPolicy?.requiresWeb ?? false,
+            signals: Set(rule.signals + (labelPolicy?.signals ?? [])),
+            negativeSignals: rule.propagateSurfaceNegativeSignals ? negativeSignals : [],
+            reason: rule.reason
+        )
+    }
+
+    private func questionSyntaxScore(frame: CopilotIntentFrame, policy: CopilotStructuralSemanticPolicy) -> Double {
         var score = 0.0
-        if frame.surface.hasQuestionPunctuation { score += 0.34 }
-        if frame.surface.strongSignals.contains(.interrogativeStarter) { score += 0.28 }
-        if frame.surface.strongSignals.contains(.modalQuestionFrame) { score += 0.26 }
-        if frame.surface.strongSignals.contains(.indirectQuestionFrame) { score += 0.24 }
-        if frame.surface.strongSignals.contains(.actionRequestFrame) { score += 0.22 }
-        if frame.surface.strongSignals.contains(.concreteObject) { score += 0.10 }
-        if frame.surface.strongSignals.contains(.contextualCarryover) { score += 0.06 }
-        if QuestionDetectionService.containsCJK(frame.cleanedText), frame.cleanedText.count >= 5 { score += 0.28 }
-        return min(score, 1.0)
+        for signal in frame.surface.strongSignals {
+            score += policy.syntaxSurfaceSignalWeights[signal.rawValue] ?? 0
+        }
+        if QuestionDetectionService.containsCJK(frame.cleanedText),
+           frame.cleanedText.count >= policy.cjkMinimumCharacters {
+            score += policy.cjkSyntaxBonus
+        }
+        return min(score, policy.maximumSyntaxScore)
     }
 
-    private func numericExpressionScore(in text: String) -> Double {
+    private func numericExpressionScore(in text: String, policy: CopilotStructuralSemanticPolicy) -> Double {
         let decimalText = text.replacingOccurrences(of: ",", with: ".")
-        if decimalText.range(of: #"\d+(?:\.\d+)?\s*(?:%|\+|\-|\*|/|×|÷)\s*\d+"#, options: .regularExpression) != nil {
-            return 1.0
+        return policy.numericPatterns.reduce(0) { best, rule in
+            decimalText.range(of: rule.pattern, options: .regularExpression) == nil ? best : max(best, rule.score)
         }
-        if decimalText.range(of: #"\d+(?:\.\d+)?\s*%[^\d]{0,16}\d+(?:\.\d+)?"#, options: .regularExpression) != nil {
-            return 0.96
-        }
-        if decimalText.range(of: #"\d+(?:\.\d+)?\s*(?:%|percent).*?\s+\d+(?:\.\d+)?"#, options: .regularExpression) != nil {
-            return 0.94
-        }
-        return 0
     }
 
-    private func meaningfulContentScore(in text: String) -> Double {
-        let tokenCount = text
-            .split(separator: " ")
+    private func meaningfulContentScore(frame: CopilotIntentFrame, policy: CopilotStructuralSemanticPolicy) -> Double {
+        let tokenCount = frame.surface.meaningfulTokens
             .filter { token in
-                token.count >= 3 && token.unicodeScalars.contains { CharacterSet.letters.contains($0) || CharacterSet.decimalDigits.contains($0) }
+                token.count >= policy.meaningfulTokenMinimumLength
+                    || QuestionDetectionService.containsCompactScript(token)
+            }
+            .filter { token in
+                token.unicodeScalars.contains { CharacterSet.letters.contains($0) || CharacterSet.decimalDigits.contains($0) }
             }
             .count
-        return min(Double(tokenCount) / 5.0, 1.0)
+        return min(Double(tokenCount) / Double(max(1, policy.meaningfulTokenTargetCount)), 1.0)
+    }
+}
+
+private extension CopilotStructuralSemanticRulePolicy {
+    func matches(
+        frame: CopilotIntentFrame,
+        syntaxScore: Double,
+        contentScore: Double,
+        numericScore: Double
+    ) -> Bool {
+        guard requiredSurfaceSignals.allSatisfy({ required in
+            frame.surface.strongSignals.contains { $0.rawValue == required }
+        }) else {
+            return false
+        }
+        guard !requiresSurfaceNegativeSignals || !frame.surface.negativeSignals.isEmpty else { return false }
+        if let minimumSyntaxScore, syntaxScore < minimumSyntaxScore { return false }
+        if let maximumSyntaxScore, syntaxScore >= maximumSyntaxScore { return false }
+        if let minimumContentScore, contentScore < minimumContentScore { return false }
+        if let minimumNumericScore, numericScore < minimumNumericScore { return false }
+        return true
     }
 }
 
@@ -3199,7 +3463,8 @@ struct CopilotIntentEngine {
         if policy.partialIncompleteCues.contains(where: { normalized == QuestionDetectionService.normalize($0) }) {
             return false
         }
-        return normalized.split(separator: " ").count >= policy.thresholds(for: preferences.qaPrecisionMode).partialMinimumTokens
+        return rulePack.textSegmentationPolicy.lexicalTokenCount(in: normalized) >=
+            policy.thresholds(for: preferences.qaPrecisionMode).partialMinimumTokens
     }
 
     private func decision(
@@ -3827,10 +4092,13 @@ struct QuestionAnsweringAdaptiveProfile: Codable, Hashable, Sendable {
     }
 
     private static func meaningfulTerms(from plainText: String) -> [String] {
-        plainText
-            .split(separator: " ")
-            .map(String.init)
-            .filter { $0.count >= 4 && !QuestionIntentRulePack.default.stopWords.contains($0) }
+        let rulePack = QuestionIntentRulePack.default
+        let textPolicy = rulePack.textSegmentationPolicy
+        return textPolicy.lexicalTokens(in: plainText)
+            .filter { token in
+                token.count >= textPolicy.meaningfulTokenMinimumLength(for: token)
+                    && !rulePack.stopWords.contains(token)
+            }
     }
 
     private static func topEntries(_ source: [String: Int], limit: Int) -> [String: Int] {

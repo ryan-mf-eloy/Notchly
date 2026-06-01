@@ -22,7 +22,11 @@ struct MeetingContextRetriever: ContextRetrievalProvider {
         meetingContext: MeetingContext
     ) async throws -> AnswerContext {
         let preferences = meetingContext.preferences
-        let ragQuery = RAGQuestionContextBuilder().query(for: question, classification: classification)
+        let ragQuery = RAGQuestionContextBuilder().query(
+            for: question,
+            classification: classification,
+            context: meetingContext.transcriptContext
+        )
         let ragResults: [KnowledgeSearchResult]
         let retrievedRAGContext: String
         let ragGrounding: KnowledgeRetrievalGrounding?

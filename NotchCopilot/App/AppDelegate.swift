@@ -462,6 +462,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         appState.currentMeeting = meeting
         appState.upsertQuestionInQueue(candidate: candidate, classification: classification, stage: .ready, decision: "ui_harness", select: true)
         appState.updateQueuedQuestionAnswer(candidate: candidate, answer: answer)
+        appState.updateQueuedQuestionStage(questionId: candidate.id, stage: .drafting)
         appState.showQuestionAnswerPanel(mode: .answer, selecting: candidate.id)
         appState.statusMessage = "Suggested answer"
     }

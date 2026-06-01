@@ -296,9 +296,10 @@ struct AppleMetalFlowMarkView: NSViewRepresentable {
     var levels: [CGFloat] = []
     var isPaused: Bool = false
     var reduceMotion: Bool = false
+    var accent: WhiprFlowAudioAccent = .neutral
 
     func makeCoordinator() -> Renderer {
-        Renderer(levels: levels, isPaused: isPaused, reduceMotion: reduceMotion)
+        Renderer(levels: levels, isPaused: isPaused, reduceMotion: reduceMotion, accent: accent)
     }
 
     func makeNSView(context: Context) -> MTKView {
@@ -322,7 +323,7 @@ struct AppleMetalFlowMarkView: NSViewRepresentable {
     }
 
     func updateNSView(_ nsView: MTKView, context: Context) {
-        context.coordinator.update(levels: levels, isPaused: isPaused, reduceMotion: reduceMotion)
+        context.coordinator.update(levels: levels, isPaused: isPaused, reduceMotion: reduceMotion, accent: accent)
     }
 
     nonisolated fileprivate static func makePipelineState(device: MTLDevice) throws -> MTLRenderPipelineState {
@@ -360,6 +361,7 @@ struct AppleMetalFlowMarkView: NSViewRepresentable {
         float bandD;
         float paused;
         float reduceMotion;
+        float accent;
     };
 
     vertex FlowVertexOut notchFlowMarkVertex(uint vertexID [[vertex_id]]) {
@@ -479,7 +481,12 @@ struct AppleMetalFlowMarkView: NSViewRepresentable {
             float3 restGray = float3(0.48, 0.48, 0.47);
             float3 white = float3(0.98, 0.98, 0.95);
             float tintAmount = min(1.0, shapedBand * 0.52 + intensity * 0.32 + peak * 0.12 + flux * response * 0.12);
-            float3 barColor = mix(restGray, white, active * tintAmount);
+            float3 neutralColor = mix(restGray, white, active * tintAmount);
+            float3 questionGreen = float3(0.34, 0.88, 0.52);
+            float3 restingGreen = mix(restGray, questionGreen, 0.44);
+            float3 brightGreen = mix(questionGreen, white, 0.16);
+            float3 activeGreen = mix(restingGreen, brightGreen, tintAmount);
+            float3 barColor = mix(neutralColor, activeGreen, active * clamp(uniforms.accent, 0.0, 1.0));
 
             if (barAlpha > alpha) {
                 alpha = barAlpha;
@@ -502,13 +509,15 @@ struct AppleMetalFlowMarkView: NSViewRepresentable {
         private var smoothed = WhiprFlowAudioSignal.empty
         private var isPaused: Bool
         private var reduceMotion: Bool
+        private var accent: WhiprFlowAudioAccent
 
-        init(levels: [CGFloat], isPaused: Bool, reduceMotion: Bool) {
+        init(levels: [CGFloat], isPaused: Bool, reduceMotion: Bool, accent: WhiprFlowAudioAccent) {
             let signal = WhiprFlowAudioMark.signal(for: levels, isPaused: isPaused)
             self.target = signal
             self.smoothed = signal
             self.isPaused = isPaused
             self.reduceMotion = reduceMotion
+            self.accent = accent
         }
 
         func configure(device: MTLDevice, pipelineState: MTLRenderPipelineState) {
@@ -516,10 +525,11 @@ struct AppleMetalFlowMarkView: NSViewRepresentable {
             self.pipelineState = pipelineState
         }
 
-        func update(levels: [CGFloat], isPaused: Bool, reduceMotion: Bool) {
+        func update(levels: [CGFloat], isPaused: Bool, reduceMotion: Bool, accent: WhiprFlowAudioAccent) {
             target = WhiprFlowAudioMark.signal(for: levels, isPaused: isPaused)
             self.isPaused = isPaused
             self.reduceMotion = reduceMotion
+            self.accent = accent
         }
 
         func mtkView(_ view: MTKView, drawableSizeWillChange size: CGSize) {}
@@ -545,7 +555,8 @@ struct AppleMetalFlowMarkView: NSViewRepresentable {
                 bandsC: SIMD4<Float>(Float(smoothed.bands[8]), Float(smoothed.bands[9]), Float(smoothed.bands[10]), Float(smoothed.bands[11])),
                 bandD: Float(smoothed.bands[12]),
                 paused: isPaused ? 1 : 0,
-                reduceMotion: reduceMotion ? 1 : 0
+                reduceMotion: reduceMotion ? 1 : 0,
+                accent: accent == .questionActive ? 1 : 0
             )
 
             encoder.setRenderPipelineState(pipelineState)
@@ -596,4 +607,5 @@ private struct FlowMarkUniforms {
     var bandD: Float
     var paused: Float
     var reduceMotion: Float
+    var accent: Float
 }

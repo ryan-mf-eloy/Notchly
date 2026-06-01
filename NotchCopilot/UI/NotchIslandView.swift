@@ -249,6 +249,13 @@ struct NotchIslandView: View {
             appState.shouldShowAmbientCopilotMicroState
     }
 
+    private var isCompactMeetingQuestionInProgress: Bool {
+        appState.currentMeeting != nil &&
+            !appState.isPanelExpanded &&
+            appState.activeQuestion != nil &&
+            appState.answerStage.isInProgress
+    }
+
     private var usesFlushCompactCopilotChrome: Bool {
         false
     }
@@ -559,7 +566,7 @@ struct NotchIslandView: View {
             } else if appState.shouldShowAmbientCopilotIdle {
                 ambientCopilotContent
             } else {
-                recordButton(iconResolution: defaultRecordIconResolution) {
+                recordButton(iconResolution: defaultRecordIconResolution, showsIcon: false) {
                     appState.startManualMeeting()
                 }
             }
@@ -680,10 +687,10 @@ struct NotchIslandView: View {
         listeningContentView(isPaused: appState.currentMeeting?.status == .paused)
     }
 
-    private func listeningContentView(isPaused: Bool) -> some View {
+    private func listeningContentView(isPaused: Bool, accent: WhiprFlowAudioAccent = .neutral) -> some View {
         notchAwareBar {
             HStack(spacing: 8) {
-                WhiprFlowAudioMark(levels: appState.waveformLevels, isPaused: isPaused)
+                WhiprFlowAudioMark(levels: appState.waveformLevels, isPaused: isPaused, accent: accent)
                 Text(DateFormatting.duration(appState.elapsed))
                     .font(.system(size: 11.5, weight: .semibold, design: .monospaced))
                     .foregroundStyle(Color.white.opacity(0.62))
@@ -713,7 +720,9 @@ struct NotchIslandView: View {
 
     private var thinkingContent: some View {
         Group {
-            if appState.currentMeeting == nil && !appState.isPanelExpanded {
+            if isCompactMeetingQuestionInProgress {
+                listeningContentView(isPaused: appState.currentMeeting?.status == .paused, accent: .questionActive)
+            } else if appState.currentMeeting == nil && !appState.isPanelExpanded {
                 ambientThinkingContent
             } else {
                 notchAwareBar {
@@ -1088,9 +1097,9 @@ private struct RecordPillButton: View {
 
     var body: some View {
         Button(action: action) {
-            HStack(spacing: 10) {
-                Group {
-                    if showsIcon {
+            Group {
+                if showsIcon {
+                    HStack(spacing: 10) {
                         RecordPillLeadingIcon(
                             resolution: iconResolution,
                             fallbackOpacity: iconOpacity
@@ -1098,38 +1107,22 @@ private struct RecordPillButton: View {
                         .scaleEffect(isPressing ? 0.965 : (isHovering ? 1.018 : 1))
                         .animation(.easeOut(duration: 0.22), value: isHovering)
                         .animation(.interactiveSpring(response: 0.24, dampingFraction: 0.86), value: isPressing)
-                    } else {
-                        Color.clear
-                            .frame(
-                                width: NotchIslandChromeMetrics.compactRecordLogoSize.width,
-                                height: 1
-                            )
-                            .accessibilityHidden(true)
+                        .layoutPriority(1)
+
+                        Spacer(minLength: 8)
+
+                        recordButtonText
+                            .frame(maxWidth: .infinity, alignment: .trailing)
+                            .layoutPriority(2)
                     }
+                    .padding(.leading, 13)
+                    .padding(.trailing, 16)
+                } else {
+                    recordButtonText
+                        .frame(maxWidth: .infinity, alignment: .center)
+                        .padding(.horizontal, 16)
                 }
-                .layoutPriority(1)
-
-                Spacer(minLength: 8)
-
-                HStack(spacing: 7) {
-                    if let remainingSeconds {
-                        Text("\(remainingSeconds)s")
-                            .font(.system(size: 10.5, weight: .semibold, design: .monospaced))
-                            .foregroundStyle(Color.white.opacity(isPressing ? 0.66 : 0.50))
-                            .lineLimit(1)
-                            .minimumScaleFactor(0.72)
-                    }
-
-                    Text("Record")
-                        .font(.system(size: 14.6, weight: .regular))
-                        .lineLimit(1)
-                        .minimumScaleFactor(0.86)
-                }
-                .frame(maxWidth: .infinity, alignment: .trailing)
-                .layoutPriority(2)
             }
-            .padding(.leading, 13)
-            .padding(.trailing, 16)
         }
         .buttonStyle(RecordPillButtonStyle(
             isHovering: isHovering,
@@ -1177,6 +1170,23 @@ private struct RecordPillButton: View {
         if isPressing { return 0.90 }
         if isHovering { return 0.82 }
         return 0.74
+    }
+
+    private var recordButtonText: some View {
+        HStack(spacing: 7) {
+            if let remainingSeconds {
+                Text("\(remainingSeconds)s")
+                    .font(.system(size: 10.5, weight: .semibold, design: .monospaced))
+                    .foregroundStyle(Color.white.opacity(isPressing ? 0.66 : 0.50))
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.72)
+            }
+
+            Text("Record")
+                .font(.system(size: 14.6, weight: .regular))
+                .lineLimit(1)
+                .minimumScaleFactor(0.86)
+        }
     }
 
     private func startRestingMotion() {
@@ -1305,25 +1315,21 @@ private struct NotchlyMarkVectorIcon: View {
             outline.addLine(to: point(30.5, 11.13))
             outline.closeSubpath()
 
-            let color = Color(red: 0.78, green: 0.80, blue: 0.82)
-                .opacity(min(0.90, opacity + 0.04))
-            context.stroke(
-                outline,
-                with: .color(color),
-                style: StrokeStyle(lineWidth: max(1.1, 2 * scale), lineCap: .round, lineJoin: .round)
-            )
+            let fillColor = Color.white.opacity(min(0.96, opacity + 0.08))
+            let waveColor = Color.black.opacity(min(1, opacity + 0.18))
+            context.fill(outline, with: .color(fillColor))
 
             func fillRoundedRect(x: CGFloat, y: CGFloat, width: CGFloat, height: CGFloat, radius: CGFloat) {
                 context.fill(
                     Path(roundedRect: rect(x, y, width, height), cornerSize: CGSize(width: radius * scale, height: radius * scale)),
-                    with: .color(color)
+                    with: .color(waveColor)
                 )
             }
 
             func fillCircle(cx: CGFloat, cy: CGFloat, radius: CGFloat) {
                 context.fill(
                     Path(ellipseIn: rect(cx - radius, cy - radius, radius * 2, radius * 2)),
-                    with: .color(color)
+                    with: .color(waveColor)
                 )
             }
 
@@ -1743,9 +1749,15 @@ private struct NotchCopilotCompactIconView: View {
     }
 }
 
+enum WhiprFlowAudioAccent: Equatable, Sendable {
+    case neutral
+    case questionActive
+}
+
 struct WhiprFlowAudioMark: View {
     let levels: [CGFloat]
     let isPaused: Bool
+    var accent: WhiprFlowAudioAccent = .neutral
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
@@ -1790,7 +1802,8 @@ struct WhiprFlowAudioMark: View {
         for levels: [CGFloat],
         isPaused: Bool,
         seconds: TimeInterval,
-        reduceMotion: Bool = false
+        reduceMotion: Bool = false,
+        accent: WhiprFlowAudioAccent = .neutral
     ) -> WhiprFlowAudioMarkPresentation {
         let signal = signal(for: levels, isPaused: isPaused)
         let activeAmount: CGFloat = isPaused ? 0 : 1
@@ -1845,7 +1858,7 @@ struct WhiprFlowAudioMark: View {
                 width: width,
                 opacity: opacity,
                 verticalOffset: verticalOffset,
-                tint: tint(for: index, band: displayBand, signal: signal, isPaused: isPaused, seconds: seconds, reduceMotion: reduceMotion)
+                tint: tint(for: index, band: displayBand, signal: signal, isPaused: isPaused, seconds: seconds, reduceMotion: reduceMotion, accent: accent)
             )
         }
 
@@ -1862,7 +1875,7 @@ struct WhiprFlowAudioMark: View {
 
     var body: some View {
         if AppleMetalFlowMarkRenderer().isAvailable {
-            AppleMetalFlowMarkView(levels: levels, isPaused: isPaused, reduceMotion: reduceMotion)
+            AppleMetalFlowMarkView(levels: levels, isPaused: isPaused, reduceMotion: reduceMotion, accent: accent)
                 .frame(width: Self.markWidth, height: Self.markHeight)
         } else {
             fallbackFlowMark
@@ -1875,7 +1888,8 @@ struct WhiprFlowAudioMark: View {
                 for: levels,
                 isPaused: isPaused,
                 seconds: timeline.date.timeIntervalSinceReferenceDate,
-                reduceMotion: reduceMotion
+                reduceMotion: reduceMotion,
+                accent: accent
             )
 
             HStack(alignment: .center, spacing: 1.55) {
@@ -2028,7 +2042,8 @@ struct WhiprFlowAudioMark: View {
         signal: WhiprFlowAudioSignal,
         isPaused: Bool,
         seconds: TimeInterval,
-        reduceMotion: Bool
+        reduceMotion: Bool,
+        accent: WhiprFlowAudioAccent
     ) -> WhiprFlowAudioTint {
         _ = seconds
         _ = reduceMotion
@@ -2040,6 +2055,12 @@ struct WhiprFlowAudioMark: View {
         let white = WhiprFlowAudioTint(red: 0.98, green: 0.98, blue: 0.95)
         let shapedBand = pow(band, 0.48)
         let amount = min(1, shapedBand * 0.52 + signal.average * 0.32 + signal.peak * 0.12 + signal.flux * responsiveness[index] * 0.12)
+        if accent == .questionActive {
+            let questionGreen = WhiprFlowAudioTint(red: 0.34, green: 0.88, blue: 0.52)
+            let restingGreen = restGray.mixed(with: questionGreen, amount: 0.44)
+            let brightGreen = questionGreen.mixed(with: white, amount: 0.16)
+            return restingGreen.mixed(with: brightGreen, amount: amount)
+        }
         return restGray.mixed(with: white, amount: amount)
     }
 

@@ -1,0 +1,465 @@
+{
+  "directQuestionMarkers": [
+    "what", "what's", "what is", "when", "who", "who's", "where", "why", "how", "which", "which one",
+    "do we", "do you", "do we have", "can we", "can you", "could we", "could you", "should we",
+    "would it", "does this", "will this", "is there", "are there", "any blockers", "main risk",
+    "do you know if", "do you know whether", "you know if",
+    "qual", "qual e", "qual a", "quais", "quais sao", "quais sao os", "quais sao as", "quando", "quem", "onde", "por que", "porque", "como", "quanto", "quanto e", "quantos", "quantas", "o que", "o que e", "o que sao",
+    "voce acha", "voces acham", "alguem sabe se", "conseguimos", "consegue", "podemos", "pode",
+    "sera que", "faz sentido", "existe", "temos", "tem como", "da pra", "da para",
+    "voce sabe se", "voces sabem se", "me diz qual", "me diz se", "me fala qual", "me fala se",
+    "isso quebra", "isso impacta", "isso afeta", "algum problema", "algum bloqueio", "algum risco", "alguma dependencia",
+    "que ", "que es", "cual", "cuales", "cuales son", "cuando", "quien", "donde", "cuanto", "cuanto es", "cuantos", "cuantas", "podrias", "puedes", "tiene sentido", "hay algun",
+    "hay alguna", "sabemos si", "sabes si", "saben si", "alguien sabe si", "esto rompe", "esto impacta",
+    "どう", "何", "いつ", "誰", "誰が", "どこ", "なぜ", "できますか", "でしょうか", "ですか", "ますか", "ましたか", "ありますか",
+    "終わりましたか", "知っていますか", "わかりますか", "必要ですか", "問題ありますか", "影響しますか", "リスク"
+  ],
+  "indirectQuestionMarkers": [
+    "i want to understand", "i wanted to understand", "i'd like to understand", "we need to know",
+    "we need to find out", "we should figure out", "need clarity on", "not clear",
+    "the question is whether", "the question is if", "do you know if", "do you know whether",
+    "you know if", "can you tell me if", "can you tell me whether", "can you tell me what",
+    "wondering if", "trying to understand",
+    "eu queria entender", "gostaria de entender", "quero entender", "precisamos descobrir",
+    "precisamos saber", "seria bom saber", "seria importante saber", "a duvida e", "a pergunta e se",
+    "nao ficou claro", "queria saber", "queria confirmar se", "preciso entender",
+    "sabe se o", "sabe se a", "sabe se isso", "sabe se esse", "sabe se essa", "sabe se ja",
+    "voce sabe se", "voces sabem se", "alguem sabe se", "me diz se", "me diz qual", "me diz como",
+    "me fala se", "me fala qual", "me fala como",
+    "quisiera entender", "me gustaria entender", "necesitamos saber", "necesitamos descubrir",
+    "tenemos que averiguar", "seria bueno saber", "la duda es", "la pregunta es si", "no queda claro",
+    "no esta claro", "sabes si", "saben si", "alguien sabe si", "quiero saber si",
+    "知りたい", "確認したい", "明確ではない", "はっきりしていません", "わかっていません",
+    "必要があります", "疑問は"
+  ],
+  "actionRequestMarkers": [
+    "please review", "please validate", "please approve", "please explain", "please confirm",
+    "review", "validate", "approve", "explain", "confirm", "take a look", "check this", "take care",
+    "can you review", "can you validate", "can you explain", "could you review", "could you validate",
+    "own this", "revisar", "validar", "aprovar", "explicar", "confirmar", "dar uma olhada",
+    "checar", "testar", "cuidar disso", "me diz", "me fala", "diz pra mim", "fala pra mim",
+    "monte", "crie", "gere", "resuma", "liste", "compare", "calcule", "converta",
+    "organize", "planeje", "escreva", "prepare", "analise", "sugira", "recomende",
+    "busque", "procure", "me ajude", "ajude", "make", "create", "generate", "summarize",
+    "list", "calculate", "convert", "organize", "plan", "write", "prepare", "analyze",
+    "suggest", "recommend", "search", "help",
+    "consegue revisar", "consegue validar", "consegue explicar", "voce pode revisar", "voce pode validar", "voce pode explicar",
+    "aprobar", "echar un vistazo", "probar", "puedes revisar", "puedes validar", "puedes explicar", "podrias revisar", "podrias validar",
+    "レビュー", "確認", "確認して", "承認", "承認してください", "説明", "説明してください", "見てもらえますか", "レビューして", "お願いできますか"
+  ],
+  "modalQuestionStarters": [
+    "can", "could", "should", "would", "do", "does", "did", "is", "are", "will",
+    "do you know if", "do you know whether", "any blockers", "any risks", "main risk",
+    "consegue", "conseguimos", "podemos", "pode", "voce pode", "voces podem", "deve", "deveria", "deveriamos", "vale",
+    "sera que", "tem como", "da pra", "da para", "sabe se o", "sabe se a", "sabe se isso", "sabe se esse", "sabe se essa", "sabe se ja",
+    "voce sabe se", "voces sabem se", "alguem sabe se", "algum problema", "algum bloqueio", "algum risco",
+    "puede", "puedes", "podria", "podrias", "podriamos", "debe", "deberia", "deberiamos", "vale la pena",
+    "hay algun", "hay alguna", "sabes si", "saben si", "alguien sabe si", "esto rompe", "esto impacta"
+  ],
+  "rhetoricalMarkers": [
+    "quem nunca", "vai entender", "o que poderia dar errado", "nao e obvio",
+    "who hasn't", "what could go wrong", "isn't it obvious",
+    "quien no", "que podria salir mal", "no es obvio",
+    "そうでしょう", "当たり前"
+  ],
+  "rhetoricalSuffixes": [" right", " right?", " ne", " ne?", " né", " né?"],
+  "rhetoricalSuffixLeadSeparators": [",", ";", ":", "：", "-", "—", "–", "、"],
+  "rhetoricalSuffixMinimumLeadTokens": 3,
+  "fragmentPhrases": [
+    "como", "how", "what", "qual", "quais", "quais sao", "que", "cual", "cuales", "cuales son", "cuando", "when", "why", "where", "who", "which",
+    "quanto", "quanto e", "quantos", "quantas", "cuanto", "cuanto es", "cuantos", "cuantas",
+    "o que", "o que e", "o que sao", "what is", "what's", "qual e", "qual a",
+    "mas e se", "e quando", "sera que", "but what if", "and when", "what if", "y si", "pero si",
+    "もし", "それで", "何", "どう", "なぜ", "いつ", "誰", "どこ"
+  ],
+  "fragmentPrefixes": [
+    "mas como", "mas e se", "e quando", "sera que", "but how", "but what if", "and when",
+    "what about", "pero como", "y si", "pero si", "que tal si", "can we", "can you",
+    "could we", "could you", "should we", "do we", "podemos", "voce pode", "consegue",
+    "podrias", "puedes"
+  ],
+  "exactSmallTalkPhrases": [
+    "como vai voce", "como voce esta", "como esta voce", "tudo bem", "tudo certo", "beleza",
+    "how are you", "how are you doing", "how's it going", "hows it going", "how is it going",
+    "que tal", "como estas", "como esta", "como te va", "元気ですか", "お元気ですか"
+  ],
+  "operationalNoAnswerPhrases": [
+    "can you hear me", "can you hear me now", "can everyone hear me", "can you guys hear me",
+    "do you hear me", "can you see my screen", "is my mic working", "is my microphone working",
+    "can everyone see my screen", "can everyone see the screen", "can you see the screen",
+    "is my audio working", "am i audible", "am i muted", "are you hearing me",
+    "voce consegue me ouvir", "voces conseguem me ouvir", "consegue me ouvir", "conseguem me ouvir",
+    "me ouvem", "me escutam", "me escuta", "me escutam bem", "da para me ouvir", "da pra me ouvir",
+    "da para ver minha tela", "da pra ver minha tela", "voces conseguem ver minha tela", "conseguem ver minha tela",
+    "estao me ouvindo", "me escuchan", "me oyes", "pueden oirme", "puedes oirme",
+    "se escucha mi audio", "pueden ver mi pantalla",
+    "聞こえますか", "聞こえていますか", "私の声が聞こえますか", "画面見えますか"
+  ],
+  "smallTalkContinuationWords": [
+    "today", "there", "folks", "team", "guys", "everyone", "all", "hoje", "pessoal", "galera",
+    "todos", "equipo", "hoy"
+  ],
+  "quotedOrExplainingMarkers": [
+    "como eu disse", "como disse", "como falei", "como eu falei", "tipo quando", "tipo assim quando",
+    "what i mean is", "what i meant is", "as i said", "you know when", "you know like when",
+    "they asked if", "they asked whether", "someone asked whether", "i was asked if", "i was asked whether",
+    "i wondered if", "but i already resolved", "eles perguntaram se", "me perguntaram se", "perguntaram se",
+    "eu me perguntei se", "mas ja resolvi", "preguntaron si", "me preguntaron si", "me pregunte si",
+    "como dije", "como decia", "la duda era", "pero ya lo resolvi", "a duvida era", "uma duvida era",
+    "質問されました", "聞かれました", "もう解決しました", "説明しました"
+  ],
+  "selfAnsweredMarkers": [
+    "? yes", "? no", "? sim", "? nao", "? si", "? はい", "? いいえ", "？はい", "？いいえ",
+    "but we already decided", "we already decided", "ja decidimos", "já decidimos", "ya decidimos"
+  ],
+  "selfAnswerSuffixMarkers": [
+    "? yes", "? no", "? sim", "? nao", "? não", "? si", "? sí", "？はい", "？いいえ", "? はい", "? いいえ"
+  ],
+  "lowInformationWords": [
+    "what", "how", "why", "when", "where", "who", "which", "como", "qual", "quais", "que", "quando",
+    "onde", "quem", "porque", "cual", "cuando", "donde", "quien", "isso", "this", "that", "eso",
+    "e", "sao", "ai", "aí", "it", "there", "cuales", "son", "何", "どう"
+  ],
+  "stopWords": [
+    "a", "an", "the", "to", "of", "for", "in", "on", "at", "is", "are", "be", "we", "you", "i",
+    "me", "my", "our", "this", "that", "it", "there", "can", "could", "should", "would", "do", "does",
+    "o", "a", "os", "as", "um", "uma", "de", "da", "do", "das", "dos", "para", "em", "no", "na",
+    "nos", "nas", "e", "ou", "eu", "voce", "voces", "nos", "isso", "aquilo", "esse", "essa", "este",
+    "esta", "ser", "estar", "sao", "vai", "vamos", "como", "qual", "quais", "que", "quando", "onde", "quem",
+    "el", "la", "los", "las", "un", "una", "de", "del", "para", "en", "y", "o", "yo", "tu",
+    "usted", "nosotros", "eso", "esto", "como", "cual", "cuales", "son", "cuando", "donde", "quien"
+  ],
+  "contextualPronouns": [
+    "this", "that", "it", "these", "those", "isso", "esse", "essa", "isto", "aquilo", "eso", "esto",
+    "ここ", "これ", "それ"
+  ],
+  "domainHintMarkers": [
+    "api", "backend", "frontend", "auth", "authentication", "autenticacao", "login", "oauth", "jwt",
+    "pr", "pull request", "ticket", "jira", "github", "deploy", "release", "migration", "database",
+    "cache", "queue", "latency", "security", "risk", "risco", "blocker", "cliente", "customer",
+    "python", "swift", "kotlin", "javascript", "typescript", "react", "node", "hash", "hashid",
+    "tree", "binary tree", "binary three", "binary dream", "data structure", "algorithm",
+    "system", "sistema", "availability", "disponibilidade", "scale", "escalar", "architecture",
+    "arquitetura", "programacao", "programming",
+    "サービス", "認証", "移行", "リスク", "デプロイ", "api"
+  ],
+  "discourseLeadPhrases": [
+    "quick question", "one question", "one quick question", "small question",
+    "so quick question", "ok quick question", "okay quick question",
+    "pergunta rapida", "pergunta rápida", "uma pergunta", "uma duvida", "uma dúvida",
+    "tenho uma duvida", "tenho uma dúvida", "minha duvida e", "minha dúvida é",
+    "a minha duvida e", "a minha dúvida é", "a duvida e", "a dúvida é",
+    "a pergunta e", "a pergunta é", "entao", "então", "bom", "beleza",
+    "pregunta rapida", "pregunta rápida", "una pregunta", "una duda", "la duda es",
+    "la pregunta es", "entonces", "bueno",
+    "質問ですが", "質問は", "確認ですが", "疑問は"
+  ],
+  "groupAddressMarkers": [
+    "team", "everyone", "folks", "guys", "anyone",
+    "pessoal", "galera", "alguem", "alguém", "todos",
+    "equipo", "alguien", "チーム", "みんな", "誰か"
+  ],
+  "nonAddressLeadTokens": [
+    "tem", "tiene", "hay", "sabe", "sabemos", "sabes", "da", "dá", "sera", "será",
+    "me", "any", "quick", "one", "isso", "esto", "este", "esta", "essa", "esse"
+  ],
+  "modalQuestionRejectPrefixes": [
+    "tem como objetivo", "tiene como objetivo",
+    "any blockers were", "any blockers are", "any risks were", "any risks are"
+  ],
+  "modalQuestionConditionalPrefixes": [
+    "hay algun", "hay alguna"
+  ],
+  "modalQuestionConditionalObjectMarkers": [
+    "bloqueo", "riesgo", "problema", "dependencia"
+  ],
+  "nonQuestionTitleMarkers": [
+    "livros sobre", "books about", "resumen de", "summary of",
+    "arquitetura de software", "system design"
+  ],
+  "declarativeBridgeMarkers": [
+    " que ", " como ", " that ", " how "
+  ],
+  "numericWords": [
+    "zero", "one", "two", "three", "four", "five", "six", "seven", "eight", "nine", "ten",
+    "um", "uma", "dois", "duas", "tres", "três", "quatro", "cinco", "seis", "sete", "oito", "nove", "dez",
+    "uno", "una", "dos", "cuatro", "siete", "ocho", "nueve", "diez"
+  ],
+  "numericOperatorMarkers": [
+    "+", "-", "*", "/", "×", "÷",
+    "plus", "minus", "times", "divided", "over",
+    "mais", "menos", "vezes", "dividido", "por",
+    "mas", "más"
+  ],
+  "embeddedQuestionSplitMarkers": [
+    "can", "could", "should", "would", "do", "does", "what", "how", "why", "when", "where", "who",
+    "podemos", "consegue", "conseguimos", "pode", "como", "qual", "quais", "por que", "quando", "onde", "quem",
+    "puede", "puedes", "podrias", "podríamos", "que", "como", "cual", "cuando", "donde", "quien",
+    "何", "どう", "なぜ", "いつ", "誰", "どこ"
+  ],
+  "embeddedQuestionSplitPreambleMarkers": [
+    "quick question", "one question", "one quick question", "small question",
+    "so", "ok", "okay",
+    "pergunta rapida", "pergunta rápida", "uma pergunta", "uma duvida", "uma dúvida",
+    "tenho uma duvida", "tenho uma dúvida", "entao", "então", "bom", "beleza",
+    "pregunta rapida", "pregunta rápida", "una pregunta", "una duda", "entonces", "bueno",
+    "質問ですが", "確認ですが"
+  ],
+  "embeddedQuestionSplitContinuationLeadMarkers": [
+    "i want to understand", "i wanted to understand", "i'd like to understand", "we need to know",
+    "we need to find out", "we should figure out", "need clarity on", "not clear",
+    "the question is whether", "the question is if", "do you know if", "do you know whether",
+    "you know if", "can you tell me if", "can you tell me whether", "can you tell me what",
+    "wondering if", "trying to understand",
+    "eu queria entender", "gostaria de entender", "quero entender", "precisamos descobrir",
+    "precisamos saber", "seria bom saber", "seria importante saber", "a duvida e", "a pergunta e se",
+    "nao ficou claro", "queria saber", "queria confirmar se", "preciso entender",
+    "sabe se o", "sabe se a", "sabe se isso", "sabe se esse", "sabe se essa", "sabe se ja",
+    "voce sabe se", "voces sabem se", "alguem sabe se", "me diz se", "me diz qual", "me diz como",
+    "me fala se", "me fala qual", "me fala como",
+    "quisiera entender", "me gustaria entender", "necesitamos saber", "necesitamos descubrir",
+    "tenemos que averiguar", "seria bueno saber", "la duda es", "la pregunta es si", "no queda claro",
+    "no esta claro", "sabes si", "saben si", "alguien sabe si", "quiero saber si",
+    "知りたい", "確認したい", "明確ではない", "はっきりしていません", "わかっていません",
+    "必要があります", "疑問は"
+  ],
+  "embeddedQuestionSplitMaximumPreambleTokens": 4,
+  "hardSuppressionSignals": [
+    "empty",
+    "small_talk",
+    "operational_check",
+    "reported_question",
+    "rhetorical",
+    "self_answered",
+    "fragment",
+    "noun_phrase_or_title",
+    "adaptive_suppressed"
+  ],
+  "signalLabels": {
+    "empty": "empty",
+    "smallTalk": "small_talk",
+    "operationalCheck": "operational_check",
+    "reportedQuestion": "reported_question",
+    "rhetorical": "rhetorical",
+    "selfAnswered": "self_answered",
+    "fragment": "fragment",
+    "nounPhraseOrTitle": "noun_phrase_or_title",
+    "adaptiveSuppressed": "adaptive_suppressed",
+    "declarativeWithoutInterrogativeSyntax": "declarative_without_interrogative_syntax"
+  },
+  "reasons": {
+    "fragmentIncomplete": "Question fragment is incomplete.",
+    "rhetorical": "Question is likely rhetorical.",
+    "quotedPastQuestion": "Question is being reported rather than asked.",
+    "selfAnswered": "Speaker answered their own question.",
+    "answerable": "Question appears answerable.",
+    "adaptivePromoted": "User feedback promoted this kind of question.",
+    "insufficientIntentObject": "Question lacks enough intent and object signal to answer confidently.",
+    "clearIntentObject": "Question has clear intent and an answerable object.",
+    "fragmentNoObject": "Question-like fragment has no answerable object.",
+    "smallTalk": "Small talk greeting does not need a meeting answer.",
+    "quotedOrExplaining": "Question-like text is quoted, reported, or part of an explanation.",
+    "adaptiveSuppressed": "Similar questions were repeatedly dismissed by the user.",
+    "highPrecisionInsufficient": "Utterance does not have enough interrogative structure for high-precision Notchly activation.",
+    "localAnswerableTemplate": "Local detector found a complete answerable question with {strongSignalCount} strong signals.",
+    "operationalCheck": "Operational audio or screen check should not trigger Notchly.",
+    "titleOrStatement": "Statement or title-like utterance is not an answerable question.",
+    "ambiguous": "Question signal is ambiguous below the local precision threshold.",
+    "surfaceBelowCandidateThreshold": "surface_below_candidate_threshold"
+  },
+  "surfaceScoring": {
+    "answerableObjectFocusThreshold": 0.34,
+    "questionLikeThreshold": 0.58,
+    "rejectedConfidence": 0.12,
+    "confidenceBase": 0.50,
+    "questionPunctuationConfidence": 0.18,
+    "interrogativeConfidence": 0.22,
+    "modalConfidence": 0.24,
+    "indirectConfidence": 0.24,
+    "actionConfidence": 0.24,
+    "directedUserConfidence": 0.11,
+    "directedGroupConfidence": 0.07,
+    "concreteObjectConfidence": 0.12,
+    "domainObjectConfidence": 0.05,
+    "semanticShapeConfidenceMax": 0.12,
+    "semanticShapeConfidenceWeight": 0.12,
+    "answerableFocusConfidenceMax": 0.08,
+    "answerableFocusConfidenceWeight": 0.08,
+    "adaptivePromotionConfidence": 0.10,
+    "contextualCarryoverConfidence": 0.04,
+    "finalUtteranceConfidence": 0.04,
+    "weakQuestionWordPenalty": 0.24,
+    "partialHighPrecisionPenalty": 0.12,
+    "partialStandardPenalty": 0.06,
+    "minConfidence": 0.05,
+    "maxConfidence": 0.98,
+    "insufficientSurfaceConfidenceCeiling": 0.48,
+    "adaptiveCandidateObjectThreshold": 0.35,
+    "semanticCandidateQuestionThreshold": 0.74,
+    "objectMeaningfulTokenWeight": 0.18,
+    "objectMeaningfulTokenMax": 0.55,
+    "objectDensityWeight": 0.30,
+    "objectDensityMax": 0.22,
+    "objectNumericPayloadBonus": 0.22,
+    "objectDomainBonus": 0.18,
+    "objectContextOverlapBonus": 0.16,
+    "objectNamedEntityBonus": 0.10,
+    "objectCJKBonus": 0.20,
+    "questionPunctuationScore": 0.34,
+    "questionInterrogativeScore": 0.40,
+    "questionModalScore": 0.36,
+    "questionIndirectScore": 0.36,
+    "questionActionScore": 0.34,
+    "questionCueNearLeadScore": 0.18,
+    "questionCompactUtteranceScore": 0.12,
+    "questionCompactObjectThreshold": 0.42,
+    "questionContextOverlapScore": 0.08,
+    "questionNamedEntityScore": 0.05,
+    "questionCJKScore": 0.18,
+    "questionCJKObjectThreshold": 0.34,
+    "questionFinalUtteranceScore": 0.04,
+    "compactUtteranceMinTokens": 2,
+    "compactUtteranceMaxTokens": 12,
+    "cjkMinimumCharacters": 5,
+    "contextOverlapMaximumRequiredMatches": 2,
+    "contextualCarryoverMinimumRecentTerms": 5
+  },
+  "surfaceCandidate": {
+    "punctuatedAnySignals": [
+      "interrogative_starter",
+      "modal_question_frame",
+      "indirect_question_frame",
+      "action_request_frame",
+      "directed_to_user",
+      "directed_to_group",
+      "domain_object",
+      "concrete_object"
+    ],
+    "unpunctuatedGroups": [
+      {
+        "all": ["indirect_question_frame"],
+        "any": ["concrete_object", "domain_object"]
+      },
+      {
+        "all": ["action_request_frame"],
+        "any": ["directed_to_user", "directed_to_group", "concrete_object"]
+      },
+      {
+        "all": ["modal_question_frame"],
+        "any": ["concrete_object", "domain_object"]
+      },
+      {
+        "all": ["contextual_question_lead"],
+        "any": ["concrete_object", "answerable_object_focus"]
+      },
+      {
+        "all": ["interrogative_starter"],
+        "requiresInterrogativeObject": true
+      },
+      {
+        "all": ["adaptive_promotion"],
+        "any": ["answerable_object_focus", "concrete_object"],
+        "minObjectFocusScore": 0.35
+      },
+      {
+        "all": ["semantic_question_shape", "answerable_object_focus"],
+        "any": ["contextual_carryover", "domain_object", "concrete_object"],
+        "minStructuralQuestionScore": 0.74
+      }
+    ],
+    "weakQuestionWordOnlySignals": [
+      "interrogative_starter",
+      "concrete_object",
+      "final_utterance"
+    ]
+  },
+  "gateScoring": {
+    "adaptivePromotedConfidence": 0.90,
+    "insufficientMinimumConfidence": 0.08,
+    "insufficientMaximumConfidence": 0.42,
+    "acceptedConfidenceBase": 0.58,
+    "acceptedConfidenceDeltaWeight": 0.16,
+    "acceptedMinimumConfidence": 0.56,
+    "acceptedMaximumConfidence": 0.94,
+    "fragmentSuppressionConfidence": 0.12,
+    "smallTalkSuppressionConfidence": 0.18,
+    "quotedSuppressionConfidence": 0.22,
+    "selfAnsweredSuppressionConfidence": 0.22,
+    "rhetoricalSuppressionConfidence": 0.26,
+    "adaptiveSuppressedConfidence": 0.30,
+    "embeddedQuestionRecoveryBonus": 0.25,
+    "answerableThresholdMinimum": 1.10,
+    "answerableThresholdMaximum": 1.90,
+    "questionPunctuationWeight": 0.50,
+    "directQuestionMarkerWeight": 0.80,
+    "indirectQuestionMarkerWeight": 1.00,
+    "actionRequestMarkerWeight": 0.85,
+    "modalQuestionStarterWeight": 0.65,
+    "domainHintWeight": 0.55,
+    "numericPayloadWeight": 0.95,
+    "meaningfulTokenWeight": 0.38,
+    "meaningfulTokenMaximum": 1.35,
+    "codeIdentifierWeight": 0.45,
+    "cjkWeight": 0.55,
+    "cjkMinimumCharacters": 5,
+    "contextualCarryoverWeight": 0.35,
+    "surfaceSemanticShapeBonus": 0.36,
+    "surfaceAnswerableObjectBonus": 0.24,
+    "surfaceAdaptivePromotionBonus": 0.70,
+    "concreteObjectCJKMinimumCharacters": 4,
+    "contextualCarryoverMinimumRecentTerms": 5
+  },
+  "textSegmentation": {
+    "minimumFrameCharacters": 4,
+    "minimumMeaningfulTokenLength": 3,
+    "minimumNamedEntityTokenLength": 2,
+    "minimumNamedEntityLetterCount": 2,
+    "namedEntityUppercaseMinimum": 2,
+    "leadAddressMinimumTokens": 3,
+    "leadAddressMinimumTokenLength": 2,
+    "questionCueLeadTokenLimit": 6,
+    "fragmentEllipsisMaximumTokens": 5,
+    "fragmentTerminalMarkers": ["...", "…", "⋯", "……", "。。。"],
+    "titleMinimumTokens": 5,
+    "declarativeMinimumTokens": 8,
+    "numericPayloadMinimumCount": 2,
+    "questionPunctuationCharacters": "?？¿؟",
+    "lineBoundaryCharacters": "\n\r\u2028\u2029",
+    "sentenceBoundaryCharacters": ".!?؟。;；",
+    "namedEntitySeparatorCharacters": ",.;:!?¿؟()[]{}<>\"“”'`",
+    "spanTrailingTrimCharacters": " ,.;:",
+    "addressSeparatorTrimCharacters": ",:;-",
+    "codeIdentifierCharacters": "_`/#",
+    "codeIdentifierPatterns": [
+      "[A-Za-z]+[A-Z0-9][A-Za-z0-9]*"
+    ],
+    "plainTextSeparatorCharacters": "¿?؟？!！.,;:。、「」()[]\"“”",
+    "tokenizationStrategy": "automatic",
+    "compactScriptMinimumMeaningfulTokenLength": 2,
+    "namedEntityRecognitionStrategy": "automatic",
+    "compactScriptScalarRanges": [
+      { "lowerBound": 3584, "upperBound": 3711 },
+      { "lowerBound": 3712, "upperBound": 3839 },
+      { "lowerBound": 4096, "upperBound": 4255 },
+      { "lowerBound": 4352, "upperBound": 4607 },
+      { "lowerBound": 6016, "upperBound": 6143 },
+      { "lowerBound": 12352, "upperBound": 12543 },
+      { "lowerBound": 12784, "upperBound": 12799 },
+      { "lowerBound": 13312, "upperBound": 19903 },
+      { "lowerBound": 19968, "upperBound": 40959 },
+      { "lowerBound": 44032, "upperBound": 55215 }
+    ]
+  },
+  "contextualCue": {
+    "maximumQuestionExamples": 24,
+    "minimumLeadTokenLength": 2,
+    "maximumLeadTokenCount": 3,
+    "minimumMultiTokenObservations": 1,
+    "minimumSingleTokenObservations": 2,
+    "compactSuffixMinimumCharacters": 1,
+    "compactSuffixMaximumCharacters": 3,
+    "compactSuffixMinimumObservations": 2
+  },
+  "answerableScoreThreshold": 1.45,
+  "partialQuestionPenalty": 0.2
+}
