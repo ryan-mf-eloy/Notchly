@@ -6,7 +6,8 @@ struct AIConnectionSettingsView: View {
     @State private var selectedAuthKind: AIProviderAuthKind = .accountLogin
     @State private var apiKeyDrafts: [AIProviderKind: String] = [:]
     @State private var accountCodeDrafts: [AIProviderKind: String] = [:]
-    @State private var elevenLabsAPIKeyDraft = ""
+    @State private var realtimeTranscriptionAPIKeyDrafts: [RealtimeTranscriptionProvider: String] = [:]
+    @State private var realtimeTranscriptionKeyEditProviders: Set<RealtimeTranscriptionProvider> = []
 
     private var activeProvider: AIProviderDescriptor {
         ProviderRegistry.descriptor(for: appState.preferences.aiConfig.provider)
@@ -46,31 +47,11 @@ struct AIConnectionSettingsView: View {
             AISection(title: "Realtime Transcription") {
                 aiMenuRow("Provider", selection: realtimeTranscriptionProviderSelection, options: realtimeTranscriptionProviderOptions)
                 AIDivider()
-                secureRow("ElevenLabs key", text: $elevenLabsAPIKeyDraft)
-                AIDivider()
-                aiValueRow("Keychain") {
-                    HStack(spacing: 8) {
-                        statusChip(appState.elevenLabsConnectionStatus.title, isPositive: elevenLabsIsConnected)
-                        Button("Save & Test") {
-                            appState.saveElevenLabsAPIKey(elevenLabsAPIKeyDraft)
-                        }
-                        .buttonStyle(AIPillButtonStyle())
-                        .disabled(elevenLabsAPIKeyDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-
-                        Button("Use") {
-                            appState.useElevenLabsRealtimeTranscription()
-                        }
-                        .buttonStyle(AIPillButtonStyle())
-                        .disabled(!appState.hasElevenLabsAPIKey())
-
-                        Button("Clear") {
-                            elevenLabsAPIKeyDraft = ""
-                            appState.saveElevenLabsAPIKey("")
-                        }
-                        .buttonStyle(AIPillButtonStyle(isDestructive: true))
-                        .disabled(!appState.hasElevenLabsAPIKey() && elevenLabsAPIKeyDraft.isEmpty)
-                    }
+                if !appState.realtimeTranscriptionModelOptions.isEmpty {
+                    aiMenuRow("Model", selection: realtimeTranscriptionModelSelection, options: realtimeTranscriptionModelOptions)
+                    AIDivider()
                 }
+                realtimeTranscriptionKeyControls(for: appState.preferences.aiConfig.realtimeTranscriptionProvider ?? .elevenLabs)
             }
         }
         .onAppear {
@@ -109,9 +90,17 @@ struct AIConnectionSettingsView: View {
             get: { appState.preferences.aiConfig.realtimeTranscriptionProvider ?? .elevenLabs },
             set: { provider in
                 appState.preferences.aiConfig.realtimeTranscriptionProvider = provider
-                if provider == .elevenLabs {
-                    appState.preferences.aiConfig.realtimeTranscriptionModel = ElevenLabsRealtimeTranscriptionService.modelID
-                }
+                appState.preferences.aiConfig.realtimeTranscriptionModel = provider.defaultModelID
+                appState.savePreferences()
+            }
+        )
+    }
+
+    private var realtimeTranscriptionModelSelection: Binding<String> {
+        Binding(
+            get: { appState.preferences.aiConfig.realtimeTranscriptionModel ?? (appState.preferences.aiConfig.realtimeTranscriptionProvider ?? .elevenLabs).defaultModelID },
+            set: { modelID in
+                appState.preferences.aiConfig.realtimeTranscriptionModel = modelID
                 appState.savePreferences()
             }
         )
@@ -134,7 +123,17 @@ struct AIConnectionSettingsView: View {
                 value: provider,
                 title: provider.displayName,
                 subtitle: "Realtime transcription",
-                assetName: provider == .elevenLabs ? "ProviderElevenLabs" : nil
+                assetName: realtimeTranscriptionProviderAssetName(provider)
+            )
+        }
+    }
+
+    private var realtimeTranscriptionModelOptions: [SettingsMenuOption<String>] {
+        appState.realtimeTranscriptionModelOptions.map { model in
+            SettingsMenuOption(
+                value: model.id,
+                title: model.displayName,
+                subtitle: model.description
             )
         }
     }
@@ -343,6 +342,74 @@ struct AIConnectionSettingsView: View {
         }
     }
 
+    @ViewBuilder
+    private func realtimeTranscriptionKeyControls(for provider: RealtimeTranscriptionProvider) -> some View {
+        let isEditing = realtimeTranscriptionKeyEditProviders.contains(provider)
+        let hasKey = appState.hasRealtimeTranscriptionAPIKey(provider)
+        if !hasKey || isEditing {
+            secureRow("\(provider.displayName) key", text: realtimeTranscriptionKeyDraft(for: provider))
+            AIDivider()
+            aiValueRow("Keychain") {
+                HStack(spacing: 8) {
+                    statusChip(appState.realtimeTranscriptionConnectionStatus(for: provider).title, isPositive: realtimeTranscriptionIsConnected(provider))
+                    Button("Save & Test") {
+                        appState.saveRealtimeTranscriptionAPIKey(provider, value: realtimeTranscriptionAPIKeyDrafts[provider, default: ""])
+                        realtimeTranscriptionAPIKeyDrafts[provider] = ""
+                        realtimeTranscriptionKeyEditProviders.remove(provider)
+                    }
+                    .buttonStyle(AIPillButtonStyle())
+                    .disabled(realtimeTranscriptionAPIKeyDrafts[provider, default: ""].trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+
+                    if isEditing {
+                        Button("Cancel") {
+                            realtimeTranscriptionAPIKeyDrafts[provider] = ""
+                            realtimeTranscriptionKeyEditProviders.remove(provider)
+                        }
+                        .buttonStyle(AIPillButtonStyle())
+                    }
+                }
+            }
+        } else {
+            aiValueRow("Keychain") {
+                VStack(alignment: .leading, spacing: 8) {
+                    HStack(spacing: 8) {
+                        statusChip(appState.realtimeTranscriptionConnectionStatus(for: provider).title, isPositive: true)
+                        Text(provider.usesSharedLLMAPIKey ? "Uses the same API key as LLM" : "Stored securely in Keychain")
+                            .font(.system(size: 11.5, weight: .medium))
+                            .foregroundStyle(MinimalTheme.tertiary)
+                            .lineLimit(1)
+                    }
+                    HStack(spacing: 8) {
+                        Button("Use") {
+                            appState.useRealtimeTranscriptionProvider(provider)
+                        }
+                        .buttonStyle(AIPillButtonStyle())
+
+                        Button("Change key") {
+                            realtimeTranscriptionAPIKeyDrafts[provider] = ""
+                            realtimeTranscriptionKeyEditProviders.insert(provider)
+                        }
+                        .buttonStyle(AIPillButtonStyle())
+
+                        Button("Remove") {
+                            realtimeTranscriptionAPIKeyDrafts[provider] = ""
+                            realtimeTranscriptionKeyEditProviders.remove(provider)
+                            appState.saveRealtimeTranscriptionAPIKey(provider, value: "")
+                        }
+                        .buttonStyle(AIPillButtonStyle(isDestructive: true))
+                    }
+                }
+            }
+        }
+    }
+
+    private func realtimeTranscriptionKeyDraft(for provider: RealtimeTranscriptionProvider) -> Binding<String> {
+        Binding(
+            get: { realtimeTranscriptionAPIKeyDrafts[provider, default: ""] },
+            set: { realtimeTranscriptionAPIKeyDrafts[provider] = $0 }
+        )
+    }
+
     private func loginSessionRows(
         authURL: URL?,
         userCode: String?,
@@ -416,11 +483,22 @@ struct AIConnectionSettingsView: View {
         return false
     }
 
-    private var elevenLabsIsConnected: Bool {
-        if case .connected = appState.elevenLabsConnectionStatus {
+    private func realtimeTranscriptionIsConnected(_ provider: RealtimeTranscriptionProvider) -> Bool {
+        if case .connected = appState.realtimeTranscriptionConnectionStatus(for: provider) {
             return true
         }
         return false
+    }
+
+    private func realtimeTranscriptionProviderAssetName(_ provider: RealtimeTranscriptionProvider) -> String? {
+        switch provider {
+        case .elevenLabs:
+            return "ProviderElevenLabs"
+        case .openAI:
+            return "ProviderOpenAI"
+        case .googleGemini:
+            return "ProviderGoogle"
+        }
     }
 
     private func loginInProgress(_ provider: AIProviderKind) -> Bool {

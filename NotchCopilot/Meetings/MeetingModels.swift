@@ -253,12 +253,69 @@ enum AIModelCapability: String, Codable, CaseIterable, Hashable {
 
 enum RealtimeTranscriptionProvider: String, Codable, CaseIterable, Identifiable, Hashable, Sendable {
     case elevenLabs
+    case openAI
+    case googleGemini
 
     var id: String { rawValue }
 
     var displayName: String {
         switch self {
         case .elevenLabs: "ElevenLabs"
+        case .openAI: "OpenAI"
+        case .googleGemini: "Google Gemini"
+        }
+    }
+
+    var defaultModelID: String {
+        switch self {
+        case .elevenLabs:
+            "scribe_v2_realtime"
+        case .openAI:
+            "gpt-realtime-whisper"
+        case .googleGemini:
+            "gemini-3.1-flash-live-preview"
+        }
+    }
+
+    var usesSharedLLMAPIKey: Bool {
+        switch self {
+        case .openAI, .googleGemini:
+            true
+        case .elevenLabs:
+            false
+        }
+    }
+
+    var authProviderType: AuthProviderType {
+        switch self {
+        case .elevenLabs:
+            .elevenLabsAPIKey
+        case .openAI:
+            .apiKeyLegacy
+        case .googleGemini:
+            .googleGeminiAPIKey
+        }
+    }
+
+    var llmProviderKind: AIProviderKind? {
+        switch self {
+        case .openAI:
+            .openAI
+        case .googleGemini:
+            .googleGemini
+        case .elevenLabs:
+            nil
+        }
+    }
+
+    var llmAuthMode: AIAuthMode? {
+        switch self {
+        case .openAI:
+            .apiKeyLegacy
+        case .googleGemini:
+            .googleGeminiAPIKey
+        case .elevenLabs:
+            nil
         }
     }
 
@@ -344,7 +401,14 @@ struct AIModelCatalog: Codable, Hashable {
             AIModelOption(id: "gpt-4o", capabilities: [.translation])
         ],
         realtimeModels: [AIModelOption(id: "gpt-realtime", capabilities: [.realtime])],
-        transcriptionModels: [],
+        transcriptionModels: [
+            AIModelOption(
+                id: "gpt-realtime-whisper",
+                displayName: "GPT Realtime Whisper",
+                description: "OpenAI realtime transcription model",
+                capabilities: [.transcription, .realtime]
+            )
+        ],
         embeddingModels: [AIModelOption(id: "text-embedding-3-small", capabilities: [.embedding])],
         source: "OpenAI fallback",
         isDynamic: false
@@ -378,8 +442,34 @@ struct AIModelCatalog: Codable, Hashable {
             AIModelOption(id: "gemini-2.5-flash", displayName: "Gemini 2.5 Flash", capabilities: [.translation]),
             AIModelOption(id: "gemini-2.5-flash-lite", displayName: "Gemini 2.5 Flash-Lite", capabilities: [.translation])
         ],
-        realtimeModels: [],
-        transcriptionModels: [],
+        realtimeModels: [
+            AIModelOption(
+                id: "gemini-3.1-flash-live-preview",
+                displayName: "Gemini 3.1 Flash Live Preview",
+                description: "Gemini Live input audio transcription preview",
+                capabilities: [.transcription, .realtime]
+            ),
+            AIModelOption(
+                id: "gemini-2.5-flash-live-preview",
+                displayName: "Gemini 2.5 Flash Live Preview",
+                description: "Gemini Live input audio transcription preview",
+                capabilities: [.transcription, .realtime]
+            )
+        ],
+        transcriptionModels: [
+            AIModelOption(
+                id: "gemini-3.1-flash-live-preview",
+                displayName: "Gemini 3.1 Flash Live Preview",
+                description: "Gemini Live input audio transcription preview",
+                capabilities: [.transcription, .realtime]
+            ),
+            AIModelOption(
+                id: "gemini-2.5-flash-live-preview",
+                displayName: "Gemini 2.5 Flash Live Preview",
+                description: "Gemini Live input audio transcription preview",
+                capabilities: [.transcription, .realtime]
+            )
+        ],
         embeddingModels: [AIModelOption(id: "text-embedding-004", displayName: "Text Embedding 004", capabilities: [.embedding])],
         source: "Gemini fallback",
         isDynamic: false
@@ -439,6 +529,26 @@ struct AIModelCatalog: Codable, Hashable {
         isDynamic: false
     )
 
+    static let openAIRealtimeTranscription = AIModelCatalog(
+        chatModels: [],
+        translationModels: [],
+        realtimeModels: [],
+        transcriptionModels: openAIFallback.transcriptionModels,
+        embeddingModels: [],
+        source: "OpenAI realtime fallback",
+        isDynamic: false
+    )
+
+    static let geminiLiveRealtime = AIModelCatalog(
+        chatModels: [],
+        translationModels: [],
+        realtimeModels: geminiFallback.realtimeModels,
+        transcriptionModels: geminiFallback.transcriptionModels,
+        embeddingModels: [],
+        source: "Gemini Live fallback",
+        isDynamic: false
+    )
+
     static func openAI(from modelIds: [String], source: String = "OpenAI API") -> AIModelCatalog {
         let uniqueIds = Array(Set(modelIds.map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }.filter { !$0.isEmpty }))
         let options = uniqueIds.map { id in
@@ -447,13 +557,16 @@ struct AIModelCatalog: Codable, Hashable {
         let chat = options.filter { $0.capabilities.contains(.chat) }.sortedByModelName()
         let translation = chat.map { AIModelOption(id: $0.id, displayName: $0.displayName, description: $0.description, capabilities: [.translation]) }
         let realtime = options.filter { $0.capabilities.contains(.realtime) }.sortedByModelName()
-        let transcription = options.filter { $0.capabilities.contains(.transcription) }.sortedByModelName()
+        let transcription = options.filter { $0.capabilities.contains(.transcription) }
+        let transcriptionWithRealtimeWhisper = (transcription + openAIFallback.transcriptionModels.filter { fallback in
+            !transcription.contains(where: { $0.id == fallback.id })
+        }).sortedByModelName()
         let embeddings = options.filter { $0.capabilities.contains(.embedding) }.sortedByModelName()
         return AIModelCatalog(
             chatModels: chat.isEmpty ? openAIFallback.chatModels : chat,
             translationModels: translation.isEmpty ? openAIFallback.translationModels : translation,
             realtimeModels: realtime,
-            transcriptionModels: transcription,
+            transcriptionModels: transcriptionWithRealtimeWhisper,
             embeddingModels: embeddings.isEmpty ? openAIFallback.embeddingModels : embeddings,
             source: source,
             isDynamic: true
@@ -495,12 +608,14 @@ struct AIModelCatalog: Codable, Hashable {
         }
         let chat = options.filter { $0.capabilities.contains(.chat) }.sortedByModelName()
         let translation = chat.map { AIModelOption(id: $0.id, displayName: $0.displayName, description: $0.description, capabilities: [.translation]) }
+        let realtime = options.filter { $0.capabilities.contains(.realtime) }.sortedByModelName()
+        let transcription = options.filter { $0.capabilities.contains(.transcription) }.sortedByModelName()
         let embeddings = options.filter { $0.capabilities.contains(.embedding) }.sortedByModelName()
         return AIModelCatalog(
             chatModels: chat.isEmpty ? geminiFallback.chatModels : chat,
             translationModels: translation.isEmpty ? geminiFallback.translationModels : translation,
-            realtimeModels: [],
-            transcriptionModels: [],
+            realtimeModels: realtime.isEmpty ? geminiFallback.realtimeModels : realtime,
+            transcriptionModels: transcription.isEmpty ? geminiFallback.transcriptionModels : transcription,
             embeddingModels: embeddings.isEmpty ? geminiFallback.embeddingModels : embeddings,
             source: source,
             isDynamic: true
@@ -526,10 +641,13 @@ struct AIModelCatalog: Codable, Hashable {
 
     private static func capabilities(forOpenAIModel id: String) -> Set<AIModelCapability> {
         let lower = id.lowercased()
+        if lower == "gpt-realtime-whisper" {
+            return [.transcription, .realtime]
+        }
         if lower.contains("realtime") {
             return [.realtime]
         }
-        if lower.contains("transcribe") { return [] }
+        if lower.contains("transcribe") { return [.transcription] }
         if lower.contains("embedding") {
             return [.embedding]
         }
@@ -545,6 +663,9 @@ struct AIModelCatalog: Codable, Hashable {
 
     private static func capabilities(forGeminiModel model: GeminiModelDescriptor) -> Set<AIModelCapability> {
         let lower = model.id.lowercased()
+        if lower.contains("live") || lower.contains("native-audio") || model.supportedGenerationMethods.contains("bidiGenerateContent") {
+            return [.transcription, .realtime]
+        }
         if lower.contains("embedding") || model.supportedGenerationMethods.contains("embedContent") || model.supportedGenerationMethods.contains("batchEmbedContents") {
             return [.embedding]
         }
@@ -615,6 +736,8 @@ enum EngineName: String, Codable, CaseIterable, Identifiable {
     case appleSpeech = "Apple Speech"
     case speechAnalyzer = "SpeechAnalyzer"
     case elevenLabs = "ElevenLabs Realtime STT"
+    case openAIRealtimeTranscription = "OpenAI Realtime STT"
+    case googleGeminiLiveTranscription = "Google Gemini Live STT"
     case appleNaturalLanguage = "Apple Natural Language"
     case appleTranslation = "Apple Translation"
     case appleFoundationModels = "Apple On-Device AI"
@@ -656,6 +779,8 @@ enum TranscriptionEngineName: String, Codable, CaseIterable, Identifiable, Senda
     case dictationTranscriber
     case whisperKit
     case elevenLabs
+    case openAIRealtime
+    case googleGeminiLive
     case unavailable
 
     var id: String { rawValue }
@@ -1187,10 +1312,19 @@ struct AIProviderConfig: Codable, Hashable {
 extension AIProviderConfig {
     mutating func normalizeRealtimeTranscriptionDefaults() {
         realtimeTranscriptionProvider = realtimeTranscriptionProvider ?? .elevenLabs
-        if realtimeTranscriptionProvider == .elevenLabs,
-           realtimeTranscriptionModel != "scribe_v2_realtime" {
-            realtimeTranscriptionModel = "scribe_v2_realtime"
+        let provider = realtimeTranscriptionProvider ?? .elevenLabs
+        let supportedModelIDs: Set<String>
+        switch provider {
+        case .elevenLabs:
+            supportedModelIDs = Set(AIModelCatalog.elevenLabsRealtime.transcriptionModels.map(\.id))
+        case .openAI:
+            supportedModelIDs = Set(AIModelCatalog.openAIRealtimeTranscription.transcriptionModels.map(\.id))
+        case .googleGemini:
+            supportedModelIDs = Set(AIModelCatalog.geminiLiveRealtime.transcriptionModels.map(\.id))
         }
-        realtimeTranscriptionModel = realtimeTranscriptionModel ?? "scribe_v2_realtime"
+        if let realtimeTranscriptionModel, supportedModelIDs.contains(realtimeTranscriptionModel) {
+            return
+        }
+        realtimeTranscriptionModel = provider.defaultModelID
     }
 }

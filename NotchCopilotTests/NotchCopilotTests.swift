@@ -17,6 +17,14 @@ final class NotchCopilotTests: XCTestCase {
         try LocalDataCryptor.ephemeralForTests(byte: byte)
     }
 
+    private func environmentAPIKey(_ name: String) throws -> String {
+        let value = ProcessInfo.processInfo.environment[name]?.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let value, !value.isEmpty else {
+            throw XCTSkip("Set \(name) to run this provider integration smoke test.")
+        }
+        return value
+    }
+
     func testPrivacyGuardRedactsSecrets() {
         let guardrail = PrivacyGuard()
         let redacted = guardrail.redact("token=supersecret12345 and key sk-proj-abcdefghijklmnopqrstuvwxyz")
@@ -3898,16 +3906,18 @@ final class NotchCopilotTests: XCTestCase {
         XCTAssertTrue(service is MultiSourceCloudRealtimeTranscriptionService)
     }
 
-    func testOpenAICatalogDoesNotExposeTranscriptionModels() {
+    func testOpenAICatalogExposesRealtimeTranscriptionModels() {
         let catalog = AIModelCatalog.openAI(from: [
             "gpt-realtime",
+            "gpt-realtime-whisper",
             "gpt-4o-transcribe",
             "gpt-4o-mini-transcribe",
             "audio-transcribe"
         ])
 
         XCTAssertTrue(catalog.realtimeModels.contains { $0.id == "gpt-realtime" })
-        XCTAssertTrue(catalog.transcriptionModels.isEmpty)
+        XCTAssertTrue(catalog.transcriptionModels.contains { $0.id == "gpt-realtime-whisper" })
+        XCTAssertTrue(catalog.transcriptionModels.contains { $0.id == "gpt-4o-transcribe" })
     }
 
     func testElevenLabsRealtimeURLUsesZeroRetentionAndCurrentEndpoint() {
@@ -3974,6 +3984,143 @@ final class NotchCopilotTests: XCTestCase {
         XCTAssertFalse(options.contains { $0.id == "scribe_v1" || $0.id == "scribe_v2" })
     }
 
+    func testRealtimeTranscriptionProviderDefaultsIncludeOpenAIAndGemini() {
+        XCTAssertEqual(RealtimeTranscriptionProvider.elevenLabs.defaultModelID, "scribe_v2_realtime")
+        XCTAssertEqual(RealtimeTranscriptionProvider.openAI.defaultModelID, "gpt-realtime-whisper")
+        XCTAssertEqual(RealtimeTranscriptionProvider.googleGemini.defaultModelID, "gemini-3.1-flash-live-preview")
+        XCTAssertTrue(RealtimeTranscriptionProvider.openAI.usesSharedLLMAPIKey)
+        XCTAssertTrue(RealtimeTranscriptionProvider.googleGemini.usesSharedLLMAPIKey)
+        XCTAssertFalse(RealtimeTranscriptionProvider.elevenLabs.usesSharedLLMAPIKey)
+    }
+
+    func testOpenAIRealtimeURLAndPayloadUseExpectedSafeShape() throws {
+        let url = OpenAIRealtimeTranscriptionService.webSocketURL()
+        let components = URLComponents(url: url, resolvingAgainstBaseURL: false)
+        let query = Dictionary(uniqueKeysWithValues: (components?.queryItems ?? []).compactMap { item in
+            item.value.map { (item.name, $0) }
+        })
+        let payload = try OpenAIRealtimeTranscriptionService.sessionUpdatePayload(languageCode: "pt-BR")
+        let object = try JSONSerialization.jsonObject(with: Data(payload.utf8)) as? [String: Any]
+        let session = object?["session"] as? [String: Any]
+        let audio = session?["audio"] as? [String: Any]
+        let input = audio?["input"] as? [String: Any]
+        let format = input?["format"] as? [String: Any]
+        let transcription = input?["transcription"] as? [String: Any]
+        let turnDetection = input?["turn_detection"]
+
+        XCTAssertEqual(url.scheme, "wss")
+        XCTAssertEqual(url.host, "api.openai.com")
+        XCTAssertEqual(url.path, "/v1/realtime")
+        XCTAssertEqual(query["model"], "gpt-realtime-whisper")
+        XCTAssertNil(query["api_key"])
+        XCTAssertEqual(object?["type"] as? String, "session.update")
+        XCTAssertEqual(session?["type"] as? String, "transcription")
+        XCTAssertEqual(format?["type"] as? String, "audio/pcm")
+        XCTAssertEqual(format?["rate"] as? Int, 24_000)
+        XCTAssertEqual(transcription?["model"] as? String, "gpt-realtime-whisper")
+        XCTAssertEqual(transcription?["delay"] as? String, "low")
+        XCTAssertEqual(transcription?["language"] as? String, "pt")
+        XCTAssertTrue(turnDetection is NSNull)
+        XCTAssertFalse(OpenAIRealtimeTranscriptionService.shouldCommitAudioBuffer(pendingBytes: 0, elapsedSinceLastCommit: 10))
+        XCTAssertTrue(OpenAIRealtimeTranscriptionService.shouldCommitAudioBuffer(
+            pendingBytes: OpenAIRealtimeTranscriptionService.manualCommitMinimumBytes,
+            elapsedSinceLastCommit: 0
+        ))
+        XCTAssertTrue(OpenAIRealtimeTranscriptionService.shouldCommitAudioBuffer(pendingBytes: 1, elapsedSinceLastCommit: 1.1))
+    }
+
+    func testOpenAIRealtimeParserMapsDeltaAndCompletedEvents() throws {
+        let delta = try OpenAIRealtimeTranscriptEvent.parse(Data("""
+        {"type":"conversation.item.input_audio_transcription.delta","item_id":"item_1","delta":"hello "}
+        """.utf8))
+        let completed = try OpenAIRealtimeTranscriptEvent.parse(Data("""
+        {"type":"conversation.item.input_audio_transcription.completed","item_id":"item_1","transcript":"hello world"}
+        """.utf8))
+
+        XCTAssertEqual(delta?.kind, .delta)
+        XCTAssertEqual(delta?.itemID, "item_1")
+        XCTAssertEqual(delta?.text, "hello ")
+        XCTAssertEqual(completed?.kind, .completed)
+        XCTAssertEqual(completed?.itemID, "item_1")
+        XCTAssertEqual(completed?.text, "hello world")
+    }
+
+    func testGeminiLiveURLAndPayloadUseExpectedSafeShape() throws {
+        let url = GeminiLiveRealtimeTranscriptionService.webSocketURL(apiKey: "test-gemini-key")
+        let urlComponents = URLComponents(url: url, resolvingAgainstBaseURL: false)
+        let query = Dictionary(uniqueKeysWithValues: (urlComponents?.queryItems ?? []).compactMap { item in
+            item.value.map { (item.name, $0) }
+        })
+        let setup = try GeminiLiveRealtimeTranscriptionService.setupPayload(languageCode: "en-US")
+        let configFallback = try GeminiLiveRealtimeTranscriptionService.setupPayload(
+            languageCode: "en-US",
+            envelope: .config
+        )
+        let audio = try GeminiLiveRealtimeTranscriptionService.audioPayload(audioBase64: "AAAA")
+        let setupObject = try JSONSerialization.jsonObject(with: Data(setup.utf8)) as? [String: Any]
+        let setupBody = setupObject?["setup"] as? [String: Any]
+        let generationConfig = setupBody?["generationConfig"] as? [String: Any]
+        let fallbackObject = try JSONSerialization.jsonObject(with: Data(configFallback.utf8)) as? [String: Any]
+        let fallbackBody = fallbackObject?["config"] as? [String: Any]
+        let realtimeInputObject = try JSONSerialization.jsonObject(with: Data(audio.utf8)) as? [String: Any]
+        let realtimeInput = realtimeInputObject?["realtimeInput"] as? [String: Any]
+        let audioBody = realtimeInput?["audio"] as? [String: Any]
+
+        XCTAssertEqual(url.scheme, "wss")
+        XCTAssertEqual(url.host, "generativelanguage.googleapis.com")
+        XCTAssertEqual(url.path, "/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContent")
+        XCTAssertEqual(query["key"], "test-gemini-key")
+        XCTAssertEqual(setupBody?["model"] as? String, "models/gemini-3.1-flash-live-preview")
+        XCTAssertNotNil(setupBody?["inputAudioTranscription"])
+        XCTAssertEqual(generationConfig?["responseModalities"] as? [String], ["TEXT"])
+        XCTAssertEqual(fallbackBody?["model"] as? String, "models/gemini-3.1-flash-live-preview")
+        XCTAssertNotNil(fallbackBody?["inputAudioTranscription"])
+        XCTAssertEqual(fallbackBody?["responseModalities"] as? [String], ["TEXT"])
+        XCTAssertNil(fallbackBody?["generationConfig"])
+        XCTAssertEqual(audioBody?["mimeType"] as? String, "audio/pcm;rate=16000")
+        XCTAssertEqual(audioBody?["data"] as? String, "AAAA")
+    }
+
+    func testGeminiLiveParserMapsInputTranscription() throws {
+        let event = try GeminiLiveTranscriptEvent.parse(Data("""
+        {"serverContent":{"inputTranscription":{"text":"ola mundo"},"turnComplete":true}}
+        """.utf8))
+
+        XCTAssertEqual(event?.kind, .inputTranscription)
+        XCTAssertEqual(event?.text, "ola mundo")
+        XCTAssertEqual(event?.isFinal, true)
+    }
+
+    func testElevenLabsRealtimeHandshakeWhenAPIKeyEnvironmentIsProvided() async throws {
+        let apiKey = try environmentAPIKey("NOTCHLY_ELEVENLABS_API_KEY")
+
+        try await ElevenLabsRealtimeTranscriptionService.validateAPIKey(
+            apiKey,
+            modelID: RealtimeTranscriptionProvider.elevenLabs.defaultModelID,
+            languageCode: "en"
+        )
+    }
+
+    func testOpenAIRealtimeHandshakeWhenAPIKeyEnvironmentIsProvided() async throws {
+        let apiKey = try environmentAPIKey("NOTCHLY_OPENAI_API_KEY")
+
+        try await OpenAIRealtimeTranscriptionService.validateAPIKey(
+            apiKey,
+            modelID: RealtimeTranscriptionProvider.openAI.defaultModelID,
+            languageCode: "en"
+        )
+    }
+
+    func testGeminiLiveHandshakeWhenAPIKeyEnvironmentIsProvided() async throws {
+        let apiKey = try environmentAPIKey("NOTCHLY_GEMINI_API_KEY")
+
+        try await GeminiLiveRealtimeTranscriptionService.validateAPIKey(
+            apiKey,
+            modelID: RealtimeTranscriptionProvider.googleGemini.defaultModelID,
+            languageCode: "en"
+        )
+    }
+
     func testProviderRouterUsesElevenLabsCloudRealtimeWhenConfigured() throws {
         var preferences = AppPreferences()
         preferences.localOnlyMode = false
@@ -3999,6 +4146,123 @@ final class NotchCopilotTests: XCTestCase {
         XCTAssertTrue(service is ElevenLabsRealtimeTranscriptionService)
         XCTAssertEqual(router.report(preferences: preferences).transcriptionEngine, .elevenLabs)
         XCTAssertEqual(router.report(preferences: preferences).transcriptionMode, .cloud)
+    }
+
+    func testProviderRouterUsesOpenAICloudRealtimeWhenConfigured() throws {
+        var preferences = AppPreferences()
+        preferences.localOnlyMode = false
+        preferences.transcriptionEngineMode = try JSONDecoder().decode(
+            TranscriptionEngineMode.self,
+            from: Data(#""cloudRealtime""#.utf8)
+        )
+        preferences.aiConfig.realtimeTranscriptionProvider = .openAI
+        preferences.aiConfig.realtimeTranscriptionModel = "gpt-realtime-whisper"
+        let authProvider = EphemeralAuthProvider(session: AuthSession(
+            provider: .apiKeyLegacy,
+            accessToken: "test-openai-key",
+            refreshToken: nil,
+            expiresAt: nil,
+            accountEmail: nil,
+            accountId: nil,
+            scopes: ["api-key"]
+        ))
+        let router = ProviderRouter(openAIAPIKeyAuthProvider: authProvider)
+
+        let service = router.transcriptionService(preferences: preferences)
+
+        XCTAssertTrue(router.shouldUseCloudRealtimeTranscription(preferences: preferences))
+        XCTAssertTrue(service is OpenAIRealtimeTranscriptionService)
+        XCTAssertEqual(router.report(preferences: preferences).transcriptionEngine, .openAIRealtimeTranscription)
+        XCTAssertEqual(router.report(preferences: preferences).transcriptionMode, .cloud)
+    }
+
+    func testProviderRouterUsesGeminiLiveCloudRealtimeWhenConfigured() throws {
+        var preferences = AppPreferences()
+        preferences.localOnlyMode = false
+        preferences.transcriptionEngineMode = try JSONDecoder().decode(
+            TranscriptionEngineMode.self,
+            from: Data(#""cloudRealtime""#.utf8)
+        )
+        preferences.aiConfig.realtimeTranscriptionProvider = .googleGemini
+        preferences.aiConfig.realtimeTranscriptionModel = "gemini-3.1-flash-live-preview"
+        let authProvider = EphemeralAuthProvider(session: AuthSession(
+            provider: .googleGeminiAPIKey,
+            accessToken: "test-gemini-key",
+            refreshToken: nil,
+            expiresAt: nil,
+            accountEmail: nil,
+            accountId: nil,
+            scopes: ["api-key"]
+        ))
+        let router = ProviderRouter(googleGeminiAPIKeyAuthProvider: authProvider)
+
+        let service = router.transcriptionService(preferences: preferences)
+
+        XCTAssertTrue(router.shouldUseCloudRealtimeTranscription(preferences: preferences))
+        XCTAssertTrue(service is GeminiLiveRealtimeTranscriptionService)
+        XCTAssertEqual(router.report(preferences: preferences).transcriptionEngine, .googleGeminiLiveTranscription)
+        XCTAssertEqual(router.report(preferences: preferences).transcriptionMode, .cloud)
+    }
+
+    func testProviderRouterFallsBackToAppleSpeechWhenCloudRealtimeKeyIsMissing() throws {
+        var preferences = AppPreferences()
+        preferences.localOnlyMode = false
+        preferences.transcriptionEngineMode = try JSONDecoder().decode(
+            TranscriptionEngineMode.self,
+            from: Data(#""cloudRealtime""#.utf8)
+        )
+        preferences.aiConfig.realtimeTranscriptionProvider = .openAI
+        let router = ProviderRouter(openAIAPIKeyAuthProvider: nil)
+
+        let service = router.transcriptionService(preferences: preferences)
+
+        XCTAssertFalse(router.shouldUseCloudRealtimeTranscription(preferences: preferences))
+        XCTAssertTrue(service is AppleNativeTranscriptionService)
+    }
+
+    func testRealtimeTranscriptionUsesSharedLLMKeychainCredentials() throws {
+        let keychain = AppleKeychainService.inMemory()
+        let openAIAuthProvider = OpenAIApiKeyAuthProvider(keychain: keychain)
+        let geminiAuthProvider = ProviderAPIKeyAuthProvider(providerType: .googleGeminiAPIKey, keychain: keychain)
+        let appState = AppState()
+        appState.legacyAPIKeyAuthProvider = openAIAuthProvider
+        appState.geminiAPIKeyAuthProvider = geminiAuthProvider
+
+        XCTAssertFalse(appState.hasRealtimeTranscriptionAPIKey(.openAI))
+        XCTAssertFalse(appState.hasRealtimeTranscriptionAPIKey(.googleGemini))
+
+        try openAIAuthProvider.setAPIKey("sk-test-openai")
+        try geminiAuthProvider.setAPIKey("test-gemini")
+
+        XCTAssertTrue(appState.hasProviderAPIKey(.openAI))
+        XCTAssertTrue(appState.hasProviderAPIKey(.googleGemini))
+        XCTAssertTrue(appState.hasRealtimeTranscriptionAPIKey(.openAI))
+        XCTAssertTrue(appState.hasRealtimeTranscriptionAPIKey(.googleGemini))
+        XCTAssertEqual(appState.realtimeTranscriptionConnectionStatus(for: .openAI), .connected(email: nil))
+        XCTAssertEqual(appState.realtimeTranscriptionConnectionStatus(for: .googleGemini), .connected(email: nil))
+    }
+
+    func testUsingSharedRealtimeTranscriptionKeyDoesNotSwitchActiveLLMProvider() throws {
+        let keychain = AppleKeychainService.inMemory()
+        let openAIAuthProvider = OpenAIApiKeyAuthProvider(keychain: keychain)
+        let geminiAuthProvider = ProviderAPIKeyAuthProvider(providerType: .googleGeminiAPIKey, keychain: keychain)
+        let appState = AppState()
+        appState.legacyAPIKeyAuthProvider = openAIAuthProvider
+        appState.geminiAPIKeyAuthProvider = geminiAuthProvider
+        try openAIAuthProvider.setAPIKey("sk-test-openai")
+
+        appState.preferences.aiConfig.provider = .anthropicClaude
+        appState.preferences.aiConfig.authMode = .anthropicClaudeAPIKey
+        appState.preferences.aiConfig.cloudProcessingEnabled = false
+
+        appState.useRealtimeTranscriptionProvider(.openAI)
+
+        XCTAssertEqual(appState.preferences.aiConfig.provider, .anthropicClaude)
+        XCTAssertEqual(appState.preferences.aiConfig.authMode, .anthropicClaudeAPIKey)
+        XCTAssertFalse(appState.preferences.aiConfig.cloudProcessingEnabled)
+        XCTAssertEqual(appState.preferences.aiConfig.realtimeTranscriptionProvider, .openAI)
+        XCTAssertEqual(appState.preferences.transcriptionEngineMode, .cloudRealtime)
+        XCTAssertTrue(appState.preferences.aiConfig.legacyAPIKeyAccessEnabled)
     }
 
     func testProviderRouterKeepsLegacyCloudRealtimeOnAppleSpeechInLocalOnlyMode() throws {
@@ -9359,10 +9623,20 @@ final class NotchCopilotTests: XCTestCase {
         XCTAssertEqual(catalog.chatModels.map(\.id), ["gemini-2.5-flash"])
         XCTAssertEqual(catalog.translationModels.map(\.id), ["gemini-2.5-flash"])
         XCTAssertEqual(catalog.embeddingModels.map(\.id), ["text-embedding-004"])
-        XCTAssertTrue(catalog.transcriptionModels.isEmpty)
+        XCTAssertEqual(
+            catalog.transcriptionModels.map(\.id),
+            ["gemini-3.1-flash-live-preview", "gemini-2.5-flash-live-preview"]
+        )
+        XCTAssertEqual(catalog.realtimeModels.map(\.id), catalog.transcriptionModels.map(\.id))
     }
 
     func testProviderCatalogsFilterUnsupportedPurposes() {
+        XCTAssertTrue(AIModelCatalog.codexFallback.transcriptionModels.isEmpty)
+        XCTAssertTrue(AIModelCatalog.codexFallback.realtimeModels.isEmpty)
+        XCTAssertEqual(
+            AIModelCatalog.geminiLiveRealtime.transcriptionModels.map(\.id),
+            ["gemini-3.1-flash-live-preview", "gemini-2.5-flash-live-preview"]
+        )
         XCTAssertTrue(AIModelCatalog.anthropicFallback.transcriptionModels.isEmpty)
         XCTAssertTrue(AIModelCatalog.anthropicFallback.realtimeModels.isEmpty)
         XCTAssertTrue(AIModelCatalog.perplexityFallback.transcriptionModels.isEmpty)
@@ -9680,7 +9954,7 @@ final class NotchCopilotTests: XCTestCase {
         XCTAssertEqual(OpenAITestURLProtocol.lastRequest?.value(forHTTPHeaderField: "Authorization"), "Bearer legacy-token")
         XCTAssertEqual(catalog.chatModels.map(\.id), ["gpt-5.3-codex"])
         XCTAssertEqual(catalog.realtimeModels.map(\.id), ["gpt-realtime"])
-        XCTAssertTrue(catalog.transcriptionModels.isEmpty)
+        XCTAssertEqual(catalog.transcriptionModels.map(\.id), ["gpt-4o-mini-transcribe", "gpt-realtime-whisper"])
         XCTAssertTrue(catalog.isDynamic)
     }
 

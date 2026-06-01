@@ -14,6 +14,8 @@ struct ProviderRouter {
     var anthropicCLIProvider: ProviderCLIAIProvider?
     var perplexityProvider: PerplexityProvider?
     var elevenLabsAPIKeyAuthProvider: (any AuthProvider)?
+    var openAIAPIKeyAuthProvider: (any AuthProvider)?
+    var googleGeminiAPIKeyAuthProvider: (any AuthProvider)?
 
     init(
         capabilityChecker: CapabilityChecker = CapabilityChecker(),
@@ -25,7 +27,9 @@ struct ProviderRouter {
         anthropicAPIKeyProvider: AnthropicClaudeProvider? = nil,
         anthropicCLIProvider: ProviderCLIAIProvider? = nil,
         perplexityProvider: PerplexityProvider? = nil,
-        elevenLabsAPIKeyAuthProvider: (any AuthProvider)? = nil
+        elevenLabsAPIKeyAuthProvider: (any AuthProvider)? = nil,
+        openAIAPIKeyAuthProvider: (any AuthProvider)? = nil,
+        googleGeminiAPIKeyAuthProvider: (any AuthProvider)? = nil
     ) {
         self.capabilityChecker = capabilityChecker
         self.openAIProvider = openAIProvider
@@ -37,6 +41,8 @@ struct ProviderRouter {
         self.anthropicCLIProvider = anthropicCLIProvider
         self.perplexityProvider = perplexityProvider
         self.elevenLabsAPIKeyAuthProvider = elevenLabsAPIKeyAuthProvider
+        self.openAIAPIKeyAuthProvider = openAIAPIKeyAuthProvider
+        self.googleGeminiAPIKeyAuthProvider = googleGeminiAPIKeyAuthProvider
     }
 
     func transcriptionService(preferences: AppPreferences) -> any TranscriptionService {
@@ -50,26 +56,8 @@ struct ProviderRouter {
     }
 
     func transcriptionService(preferences: AppPreferences, sources: [MultiSourceAutoLanguageTranscriptionService.Source]) -> any TranscriptionService {
-        if shouldUseCloudRealtimeTranscription(preferences: preferences) {
-            guard let elevenLabsAPIKeyAuthProvider,
-                  elevenLabsAPIKeyAuthProvider.isAuthenticated else {
-                return UnavailableTranscriptionService(error: .cloudProviderUnavailable("Save an ElevenLabs API key before using realtime transcription."))
-            }
-            return MultiSourceCloudRealtimeTranscriptionService(
-                sources: sources.map {
-                    MultiSourceCloudRealtimeTranscriptionService.Source(
-                        speakerLabel: $0.speakerLabel,
-                        audioSource: $0.audioSource,
-                        audioStream: $0.audioStream
-                    )
-                },
-                serviceFactory: {
-                    ElevenLabsRealtimeTranscriptionService(
-                        authProvider: elevenLabsAPIKeyAuthProvider,
-                        modelID: preferences.aiConfig.realtimeTranscriptionModel ?? ElevenLabsRealtimeTranscriptionService.modelID
-                    )
-                }
-            )
+        if let cloudService = multiSourceCloudRealtimeTranscriptionService(preferences: preferences, sources: sources) {
+            return cloudService
         }
         if sources.count > 0,
            supportsAutoLanguageAppleSpeech() || capabilityChecker.supportsAppleSpeechRecognition(language: preferences.defaultLanguage) {
@@ -82,26 +70,8 @@ struct ProviderRouter {
         guard !sources.isEmpty else {
             return UnavailableTranscriptionService(error: .recognizerUnavailable)
         }
-        if shouldUseCloudRealtimeTranscription(preferences: preferences) {
-            guard let elevenLabsAPIKeyAuthProvider,
-                  elevenLabsAPIKeyAuthProvider.isAuthenticated else {
-                return UnavailableTranscriptionService(error: .cloudProviderUnavailable("Save an ElevenLabs API key before using realtime transcription."))
-            }
-            return MultiSourceCloudRealtimeTranscriptionService(
-                sources: sources.map {
-                    MultiSourceCloudRealtimeTranscriptionService.Source(
-                        speakerLabel: $0.speakerLabel,
-                        audioSource: $0.audioSource,
-                        audioStream: $0.audioStream
-                    )
-                },
-                serviceFactory: {
-                    ElevenLabsRealtimeTranscriptionService(
-                        authProvider: elevenLabsAPIKeyAuthProvider,
-                        modelID: preferences.aiConfig.realtimeTranscriptionModel ?? ElevenLabsRealtimeTranscriptionService.modelID
-                    )
-                }
-            )
+        if let cloudService = multiSourceCloudRealtimeTranscriptionService(preferences: preferences, sources: sources) {
+            return cloudService
         }
         if supportsAutoLanguageAppleSpeech() || capabilityChecker.supportsAppleSpeechRecognition(language: preferences.defaultLanguage) {
             return StreamingASRRouter(sources: sources, conditioningTarget: .nativeSpeech)
@@ -123,10 +93,10 @@ struct ProviderRouter {
 
     func shouldUseCloudRealtimeTranscription(preferences: AppPreferences) -> Bool {
         guard preferences.effectiveTranscriptionFeatureFlags.cloudFallbackEnabled else { return false }
-        guard !preferences.localOnlyMode,
-              preferences.aiConfig.realtimeTranscriptionProvider == .elevenLabs else { return false }
+        guard !preferences.localOnlyMode else { return false }
         guard preferences.transcriptionEngineMode == .cloudRealtime else { return false }
-        return elevenLabsAPIKeyAuthProvider?.isAuthenticated == true
+        guard let provider = preferences.aiConfig.realtimeTranscriptionProvider else { return false }
+        return realtimeTranscriptionAuthProvider(for: provider)?.isAuthenticated == true
     }
 
     func supportsAutoLanguageAppleSpeech() -> Bool {
@@ -223,8 +193,8 @@ struct ProviderRouter {
     func report(preferences: AppPreferences) -> LocalCapabilityReport {
         var report = capabilityChecker.localReport(preferences: preferences)
         if shouldUseCloudRealtimeTranscription(preferences: preferences) {
-            report.transcriptionEngine = elevenLabsAPIKeyAuthProvider?.isAuthenticated == true ? .elevenLabs : .unavailable
-            report.transcriptionMode = report.transcriptionEngine == .elevenLabs ? .cloud : .unavailable
+            report.transcriptionEngine = engineName(for: preferences.aiConfig.realtimeTranscriptionProvider)
+            report.transcriptionMode = report.transcriptionEngine == .unavailable ? .unavailable : .cloud
         }
         return report
     }
@@ -233,18 +203,93 @@ struct ProviderRouter {
         guard preferences.effectiveTranscriptionFeatureFlags.cloudFallbackEnabled else { return nil }
         guard !preferences.localOnlyMode else { return nil }
         guard preferences.transcriptionEngineMode == .cloudRealtime else { return nil }
-        switch preferences.aiConfig.realtimeTranscriptionProvider {
-        case .elevenLabs:
-            guard let elevenLabsAPIKeyAuthProvider,
-                  elevenLabsAPIKeyAuthProvider.isAuthenticated else {
-                return UnavailableTranscriptionService(error: .cloudProviderUnavailable("Save an ElevenLabs API key before using realtime transcription."))
-            }
-            return ElevenLabsRealtimeTranscriptionService(
-                authProvider: elevenLabsAPIKeyAuthProvider,
-                modelID: preferences.aiConfig.realtimeTranscriptionModel ?? ElevenLabsRealtimeTranscriptionService.modelID
-            )
-        case .none:
+        guard let provider = preferences.aiConfig.realtimeTranscriptionProvider else { return nil }
+        guard let authProvider = realtimeTranscriptionAuthProvider(for: provider),
+              authProvider.isAuthenticated else {
             return nil
+        }
+        return cloudRealtimeTranscriptionService(provider: provider, authProvider: authProvider, modelID: preferences.aiConfig.realtimeTranscriptionModel)
+    }
+
+    private func multiSourceCloudRealtimeTranscriptionService(
+        preferences: AppPreferences,
+        sources: [MultiSourceAutoLanguageTranscriptionService.Source]
+    ) -> (any TranscriptionService)? {
+        guard preferences.effectiveTranscriptionFeatureFlags.cloudFallbackEnabled else { return nil }
+        guard !preferences.localOnlyMode else { return nil }
+        guard preferences.transcriptionEngineMode == .cloudRealtime else { return nil }
+        guard let provider = preferences.aiConfig.realtimeTranscriptionProvider else { return nil }
+        guard let authProvider = realtimeTranscriptionAuthProvider(for: provider),
+              authProvider.isAuthenticated else {
+            return nil
+        }
+        return MultiSourceCloudRealtimeTranscriptionService(
+            sources: sources.map {
+                MultiSourceCloudRealtimeTranscriptionService.Source(
+                    speakerLabel: $0.speakerLabel,
+                    audioSource: $0.audioSource,
+                    audioStream: $0.audioStream
+                )
+            },
+            serviceFactory: {
+                cloudRealtimeTranscriptionService(
+                    provider: provider,
+                    authProvider: authProvider,
+                    modelID: preferences.aiConfig.realtimeTranscriptionModel
+                )
+            }
+        )
+    }
+
+    private func cloudRealtimeTranscriptionService(
+        provider: RealtimeTranscriptionProvider,
+        authProvider: any AuthProvider,
+        modelID: String?
+    ) -> any TranscriptionService {
+        switch provider {
+        case .elevenLabs:
+            return ElevenLabsRealtimeTranscriptionService(
+                authProvider: authProvider,
+                modelID: modelID ?? provider.defaultModelID
+            )
+        case .openAI:
+            return OpenAIRealtimeTranscriptionService(
+                authProvider: authProvider,
+                modelID: modelID ?? provider.defaultModelID
+            )
+        case .googleGemini:
+            return GeminiLiveRealtimeTranscriptionService(
+                authProvider: authProvider,
+                modelID: modelID ?? provider.defaultModelID
+            )
+        }
+    }
+
+    private func realtimeTranscriptionAuthProvider(for provider: RealtimeTranscriptionProvider) -> (any AuthProvider)? {
+        switch provider {
+        case .elevenLabs:
+            elevenLabsAPIKeyAuthProvider
+        case .openAI:
+            openAIAPIKeyAuthProvider
+        case .googleGemini:
+            googleGeminiAPIKeyAuthProvider
+        }
+    }
+
+    private func missingAPIKeyMessage(for provider: RealtimeTranscriptionProvider) -> String {
+        "Save a \(provider.displayName) API key before using cloud realtime transcription."
+    }
+
+    private func engineName(for provider: RealtimeTranscriptionProvider?) -> EngineName {
+        switch provider {
+        case .elevenLabs:
+            .elevenLabs
+        case .openAI:
+            .openAIRealtimeTranscription
+        case .googleGemini:
+            .googleGeminiLiveTranscription
+        case .none:
+            .unavailable
         }
     }
 

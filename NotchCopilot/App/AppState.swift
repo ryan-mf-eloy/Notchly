@@ -136,9 +136,15 @@ final class AppState: ObservableObject {
     var realtimeTranscriptionModelOptions: [AIModelOption] {
         switch preferences.aiConfig.realtimeTranscriptionProvider {
         case .elevenLabs:
-            AIModelCatalog.elevenLabsRealtime.transcriptionModels
+            return AIModelCatalog.elevenLabsRealtime.transcriptionModels
+        case .openAI:
+            let options = aiModelCatalog.transcriptionModels.filter { $0.id == RealtimeTranscriptionProvider.openAI.defaultModelID || $0.id.lowercased().contains("transcribe") || $0.id.lowercased().contains("whisper") }
+            return options.isEmpty ? AIModelCatalog.openAIRealtimeTranscription.transcriptionModels : options
+        case .googleGemini:
+            let options = aiModelCatalog.transcriptionModels.filter { $0.id.lowercased().contains("live") }
+            return options.isEmpty ? AIModelCatalog.geminiLiveRealtime.transcriptionModels : options
         case .none:
-            []
+            return []
         }
     }
 
@@ -1743,6 +1749,10 @@ final class AppState: ObservableObject {
                     try await openAIAccountOAuthProvider?.signOut()
                 }
                 openAIConnectionStatus = .notConnected
+                if preferences.aiConfig.realtimeTranscriptionProvider == .openAI {
+                    preferences.transcriptionEngineMode = .appleSpeech
+                    savePreferencesWithoutConnectionRefresh()
+                }
                 settingsStatus = "OpenAI account disconnected"
             } catch {
                 settingsStatus = "OpenAI disconnect failed"
@@ -1880,6 +1890,13 @@ final class AppState: ObservableObject {
                     try deleteProviderAPIKey(provider)
                     providerConnectionStatuses[provider] = .notConnected
                     if provider == .openAI { openAIConnectionStatus = .notConnected }
+                    if let realtimeProvider = realtimeTranscriptionProvider(forLLMProvider: provider) {
+                        markRealtimeTranscriptionProviderDisconnected(realtimeProvider)
+                        if preferences.aiConfig.realtimeTranscriptionProvider == realtimeProvider {
+                            preferences.transcriptionEngineMode = .appleSpeech
+                            savePreferencesWithoutConnectionRefresh()
+                        }
+                    }
                     settingsStatus = "\(descriptor.title) API key removed"
                     refreshAIModelCatalog()
                     return
@@ -1899,12 +1916,18 @@ final class AppState: ObservableObject {
                 savePreferencesWithoutConnectionRefresh()
                 providerConnectionStatuses[provider] = .connected(email: nil)
                 if provider == .openAI { openAIConnectionStatus = .connected(email: nil) }
+                if let realtimeProvider = realtimeTranscriptionProvider(forLLMProvider: provider) {
+                    markRealtimeTranscriptionProviderConnected(realtimeProvider)
+                }
                 settingsStatus = "\(descriptor.title) API key saved and verified"
                 refreshAIModelCatalog()
             } catch {
                 providerConnectionStatuses[provider] = hasProviderAPIKey(provider) ? .connected(email: nil) : .notConnected
                 if provider == .openAI {
                     openAIConnectionStatus = hasProviderAPIKey(provider) ? .connected(email: nil) : .notConnected
+                }
+                if let realtimeProvider = realtimeTranscriptionProvider(forLLMProvider: provider) {
+                    refreshRealtimeTranscriptionConnectionStatus(for: realtimeProvider)
                 }
                 settingsStatus = "\(descriptor.title) API key could not be verified. Existing saved key was kept."
             }
@@ -1943,55 +1966,199 @@ final class AppState: ObservableObject {
         refreshAIModelCatalog()
     }
 
-    func hasElevenLabsAPIKey() -> Bool {
-        elevenLabsAPIKeyAuthProvider?.isAuthenticated == true
+    func realtimeTranscriptionConnectionStatus(for provider: RealtimeTranscriptionProvider) -> AIConnectionStatus {
+        return hasRealtimeTranscriptionAPIKey(provider) ? .connected(email: nil) : .notConnected
     }
 
-    func saveElevenLabsAPIKey(_ value: String) {
+    func hasRealtimeTranscriptionAPIKey(_ provider: RealtimeTranscriptionProvider) -> Bool {
+        realtimeTranscriptionAPIKeyAuthProvider(for: provider)?.isAuthenticated == true
+    }
+
+    func saveRealtimeTranscriptionAPIKey(_ provider: RealtimeTranscriptionProvider, value: String) {
         let trimmedValue = value.trimmingCharacters(in: .whitespacesAndNewlines)
         Task {
             do {
                 if trimmedValue.isEmpty {
-                    try elevenLabsAPIKeyAuthProvider?.setAPIKey("")
-                    elevenLabsConnectionStatus = .notConnected
-                    if preferences.aiConfig.realtimeTranscriptionProvider == .elevenLabs {
+                    try deleteRealtimeTranscriptionAPIKey(for: provider)
+                    markRealtimeTranscriptionProviderDisconnected(provider)
+                    if preferences.aiConfig.realtimeTranscriptionProvider == provider {
                         preferences.transcriptionEngineMode = .appleSpeech
                         savePreferencesWithoutConnectionRefresh()
                     }
-                    settingsStatus = "ElevenLabs API key removed"
+                    settingsStatus = "\(provider.displayName) API key removed"
+                    refreshAIModelCatalog()
                     return
                 }
 
-                settingsStatus = "Testing ElevenLabs realtime key with zero retention..."
-                try await ElevenLabsRealtimeTranscriptionService.validateAPIKey(
-                    trimmedValue,
-                    modelID: preferences.aiConfig.realtimeTranscriptionModel ?? ElevenLabsRealtimeTranscriptionService.modelID,
-                    languageCode: preferences.defaultLanguage
-                )
-                try elevenLabsAPIKeyAuthProvider?.setAPIKey(trimmedValue)
-                elevenLabsConnectionStatus = .connected(email: nil)
-                preferences.aiConfig.realtimeTranscriptionProvider = .elevenLabs
-                preferences.aiConfig.realtimeTranscriptionModel = ElevenLabsRealtimeTranscriptionService.modelID
+                settingsStatus = "Testing \(provider.displayName) realtime key..."
+                try await validateRealtimeTranscriptionAPIKey(provider, value: trimmedValue)
+                try saveRealtimeTranscriptionAPIKeyToKeychain(provider, value: trimmedValue)
+
+                preferences.localOnlyMode = false
+                preferences.aiConfig.realtimeTranscriptionProvider = provider
+                preferences.aiConfig.realtimeTranscriptionModel = normalizedRealtimeTranscriptionModel(for: provider)
+                markSharedLLMAPIKeyAvailableIfNeeded(for: provider)
                 savePreferencesWithoutConnectionRefresh()
-                settingsStatus = "ElevenLabs API key saved and verified"
+                markRealtimeTranscriptionProviderConnected(provider)
+                settingsStatus = "\(provider.displayName) API key saved and verified"
+                refreshAIModelCatalog()
             } catch {
-                elevenLabsConnectionStatus = hasElevenLabsAPIKey() ? .connected(email: nil) : .notConnected
-                settingsStatus = "ElevenLabs API key could not be verified. \(error.localizedDescription)"
+                refreshRealtimeTranscriptionConnectionStatus(for: provider)
+                settingsStatus = "\(provider.displayName) API key could not be verified. Existing saved key was kept."
             }
         }
     }
 
-    func useElevenLabsRealtimeTranscription() {
-        guard hasElevenLabsAPIKey() else {
-            settingsStatus = "Save an ElevenLabs API key first."
+    func useRealtimeTranscriptionProvider(_ provider: RealtimeTranscriptionProvider) {
+        guard hasRealtimeTranscriptionAPIKey(provider) else {
+            settingsStatus = "Save a \(provider.displayName) API key first."
             return
         }
         preferences.localOnlyMode = false
-        preferences.aiConfig.realtimeTranscriptionProvider = .elevenLabs
-        preferences.aiConfig.realtimeTranscriptionModel = ElevenLabsRealtimeTranscriptionService.modelID
+        preferences.aiConfig.realtimeTranscriptionProvider = provider
+        preferences.aiConfig.realtimeTranscriptionModel = normalizedRealtimeTranscriptionModel(for: provider)
         preferences.transcriptionEngineMode = .cloudRealtime
+        markSharedLLMAPIKeyAvailableIfNeeded(for: provider)
         savePreferences()
-        settingsStatus = "ElevenLabs realtime transcription enabled"
+        settingsStatus = "\(provider.displayName) realtime transcription enabled"
+        refreshAIModelCatalog()
+    }
+
+    func hasElevenLabsAPIKey() -> Bool {
+        hasRealtimeTranscriptionAPIKey(.elevenLabs)
+    }
+
+    func saveElevenLabsAPIKey(_ value: String) {
+        saveRealtimeTranscriptionAPIKey(.elevenLabs, value: value)
+    }
+
+    func useElevenLabsRealtimeTranscription() {
+        useRealtimeTranscriptionProvider(.elevenLabs)
+    }
+
+    private func realtimeTranscriptionAPIKeyAuthProvider(for provider: RealtimeTranscriptionProvider) -> (any AuthProvider)? {
+        switch provider {
+        case .elevenLabs:
+            elevenLabsAPIKeyAuthProvider
+        case .openAI:
+            legacyAPIKeyAuthProvider
+        case .googleGemini:
+            geminiAPIKeyAuthProvider
+        }
+    }
+
+    private func realtimeTranscriptionProvider(forLLMProvider provider: AIProviderKind) -> RealtimeTranscriptionProvider? {
+        switch provider {
+        case .openAI:
+            .openAI
+        case .googleGemini:
+            .googleGemini
+        case .appleLocal, .appleFoundationModels, .anthropicClaude, .perplexity:
+            nil
+        }
+    }
+
+    private func saveRealtimeTranscriptionAPIKeyToKeychain(_ provider: RealtimeTranscriptionProvider, value: String) throws {
+        switch provider {
+        case .elevenLabs:
+            guard let elevenLabsAPIKeyAuthProvider else { throw AuthError.missingConfiguration }
+            try elevenLabsAPIKeyAuthProvider.setAPIKey(value)
+        case .openAI:
+            try saveProviderAPIKeyToKeychain(.openAI, value: value)
+        case .googleGemini:
+            try saveProviderAPIKeyToKeychain(.googleGemini, value: value)
+        }
+    }
+
+    private func deleteRealtimeTranscriptionAPIKey(for provider: RealtimeTranscriptionProvider) throws {
+        switch provider {
+        case .elevenLabs:
+            guard let elevenLabsAPIKeyAuthProvider else { throw AuthError.missingConfiguration }
+            try elevenLabsAPIKeyAuthProvider.setAPIKey("")
+        case .openAI:
+            try deleteProviderAPIKey(.openAI)
+        case .googleGemini:
+            try deleteProviderAPIKey(.googleGemini)
+        }
+    }
+
+    private func validateRealtimeTranscriptionAPIKey(_ provider: RealtimeTranscriptionProvider, value: String) async throws {
+        let modelID = normalizedRealtimeTranscriptionModel(for: provider)
+        switch provider {
+        case .elevenLabs:
+            try await ElevenLabsRealtimeTranscriptionService.validateAPIKey(
+                value,
+                modelID: modelID,
+                languageCode: preferences.defaultLanguage
+            )
+        case .openAI:
+            try await OpenAIRealtimeTranscriptionService.validateAPIKey(
+                value,
+                modelID: modelID,
+                languageCode: preferences.defaultLanguage
+            )
+        case .googleGemini:
+            try await GeminiLiveRealtimeTranscriptionService.validateAPIKey(
+                value,
+                modelID: modelID,
+                languageCode: preferences.defaultLanguage
+            )
+        }
+    }
+
+    private func normalizedRealtimeTranscriptionModel(for provider: RealtimeTranscriptionProvider) -> String {
+        let current = preferences.aiConfig.realtimeTranscriptionProvider == provider ? preferences.aiConfig.realtimeTranscriptionModel : nil
+        let options: [AIModelOption]
+        switch provider {
+        case .elevenLabs:
+            options = AIModelCatalog.elevenLabsRealtime.transcriptionModels
+        case .openAI:
+            options = AIModelCatalog.openAIRealtimeTranscription.transcriptionModels
+        case .googleGemini:
+            options = AIModelCatalog.geminiLiveRealtime.transcriptionModels
+        }
+        if let current, options.contains(where: { $0.id == current }) {
+            return current
+        }
+        return provider.defaultModelID
+    }
+
+    private func markSharedLLMAPIKeyAvailableIfNeeded(for provider: RealtimeTranscriptionProvider) {
+        if provider == .openAI {
+            preferences.aiConfig.legacyAPIKeyAccessEnabled = true
+        }
+    }
+
+    private func markRealtimeTranscriptionProviderConnected(_ provider: RealtimeTranscriptionProvider) {
+        switch provider {
+        case .elevenLabs:
+            elevenLabsConnectionStatus = .connected(email: nil)
+        case .openAI:
+            openAIConnectionStatus = .connected(email: nil)
+            providerConnectionStatuses[.openAI] = .connected(email: nil)
+        case .googleGemini:
+            providerConnectionStatuses[.googleGemini] = .connected(email: nil)
+        }
+    }
+
+    private func markRealtimeTranscriptionProviderDisconnected(_ provider: RealtimeTranscriptionProvider) {
+        switch provider {
+        case .elevenLabs:
+            elevenLabsConnectionStatus = .notConnected
+        case .openAI:
+            openAIConnectionStatus = .notConnected
+            providerConnectionStatuses[.openAI] = .notConnected
+        case .googleGemini:
+            providerConnectionStatuses[.googleGemini] = .notConnected
+        }
+    }
+
+    private func refreshRealtimeTranscriptionConnectionStatus(for provider: RealtimeTranscriptionProvider) {
+        if hasRealtimeTranscriptionAPIKey(provider) {
+            markRealtimeTranscriptionProviderConnected(provider)
+        } else {
+            markRealtimeTranscriptionProviderDisconnected(provider)
+        }
     }
 
     func useProviderLocalMode(_ provider: AIProviderKind) {
@@ -2013,6 +2180,10 @@ final class AppState: ObservableObject {
                 try await cliAuthProvider(for: provider)?.signOut()
                 try await apiKeyAuthProvider(for: provider)?.signOut()
                 providerConnectionStatuses[provider] = .notConnected
+                if preferences.aiConfig.realtimeTranscriptionProvider?.llmProviderKind == provider {
+                    preferences.transcriptionEngineMode = .appleSpeech
+                    savePreferencesWithoutConnectionRefresh()
+                }
                 settingsStatus = "\(ProviderRegistry.descriptor(for: provider).title) disconnected"
                 refreshAIModelCatalog()
             } catch {
@@ -2023,6 +2194,9 @@ final class AppState: ObservableObject {
 
     func providerConnectionStatus(for provider: AIProviderKind) -> AIConnectionStatus {
         if provider == .openAI {
+            if legacyAPIKeyAuthProvider?.isAuthenticated == true {
+                return .connected(email: nil)
+            }
             return openAIConnectionStatus
         }
         if preferences.localOnlyMode, provider == .appleLocal {
@@ -2411,6 +2585,10 @@ final class AppState: ObservableObject {
     private func updateOpenAIConnectionStatus() async {
         if preferences.localOnlyMode {
             openAIConnectionStatus = .localOnlyMode
+            return
+        }
+        if legacyAPIKeyAuthProvider?.isAuthenticated == true {
+            openAIConnectionStatus = .connected(email: nil)
             return
         }
         if preferences.aiConfig.authMode == .apiKeyLegacy {

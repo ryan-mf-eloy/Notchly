@@ -280,7 +280,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             anthropicAPIKeyProvider: anthropicAPIKeyProvider,
             anthropicCLIProvider: anthropicCLIProvider,
             perplexityProvider: perplexityProvider,
-            elevenLabsAPIKeyAuthProvider: elevenLabsAPIKeyAuthProvider
+            elevenLabsAPIKeyAuthProvider: elevenLabsAPIKeyAuthProvider,
+            openAIAPIKeyAuthProvider: legacyAPIKeyAuthProvider,
+            googleGeminiAPIKeyAuthProvider: geminiAPIKeyAuthProvider
         )
         let container: ModelContainer
         do {
