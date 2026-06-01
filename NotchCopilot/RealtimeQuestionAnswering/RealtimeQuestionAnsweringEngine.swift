@@ -435,6 +435,12 @@ class RealtimeQuestionAnsweringEngine {
         candidateStore.candidates[id]
     }
 
+    func removeTranscriptSegment(_ segment: TranscriptSegment) {
+        pendingDetectionTasks[pendingDetectionKey(for: segment)]?.cancel()
+        pendingDetectionTasks[pendingDetectionKey(for: segment)] = nil
+        buffer.remove(segmentId: segment.id)
+    }
+
     private func process(candidate incoming: QuestionCandidate, meeting: MeetingSession, preferences: AppPreferences) async {
         let profile = UserMeetingProfile(preferences: preferences, meeting: meeting)
         let transcriptContext = buffer.transcriptContext(currentSegment: nil)

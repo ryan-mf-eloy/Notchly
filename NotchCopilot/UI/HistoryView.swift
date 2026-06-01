@@ -435,7 +435,9 @@ struct HistoryView: View {
             TranscriptLiveView(
                 segments: meeting.transcriptSegments,
                 limit: 10,
-                isProtected: appState.preferences.stealthModeEnabled
+                isProtected: appState.preferences.stealthModeEnabled,
+                onCopySegment: { appState.copyTranscriptSegmentToPasteboard($0) },
+                onDeleteSegment: { appState.deleteTranscriptSegment($0) }
             )
             .frame(maxHeight: .infinity)
         }

@@ -113,6 +113,13 @@ final class MeetingRepository {
         try context.save()
     }
 
+    func deleteTranscriptSegment(id: UUID, meetingId: UUID) throws {
+        for segment in try context.fetch(FetchDescriptor<StoredTranscriptSegment>()) where segment.id == id && segment.meetingId == meetingId {
+            context.delete(segment)
+        }
+        try context.save()
+    }
+
     func deleteAll() throws {
         for meeting in try context.fetch(FetchDescriptor<StoredMeeting>()) { context.delete(meeting) }
         for segment in try context.fetch(FetchDescriptor<StoredTranscriptSegment>()) { context.delete(segment) }

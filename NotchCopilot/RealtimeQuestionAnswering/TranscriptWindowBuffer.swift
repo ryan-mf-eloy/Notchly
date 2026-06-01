@@ -12,6 +12,11 @@ struct TranscriptWindowBuffer {
         trim()
     }
 
+    mutating func remove(segmentId: UUID) {
+        segments.removeAll { $0.id == segmentId }
+        completeSegments.removeAll { $0.id == segmentId }
+    }
+
     mutating func reset() {
         segments = []
         completeSegments = []

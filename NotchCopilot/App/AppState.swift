@@ -1107,6 +1107,35 @@ final class AppState: ObservableObject {
         recordAnswerFeedback(.regenerated, note: "Follow-up copied: \(text)")
     }
 
+    func copyTranscriptSegmentToPasteboard(_ segment: TranscriptSegment, text overrideText: String? = nil) {
+        let text = (overrideText ?? transcriptClipboardText(for: segment)).trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty else { return }
+        if !ProcessInfo.processInfo.isQuestionAnsweringUITestHarness {
+            NSPasteboard.general.clearContents()
+            NSPasteboard.general.setString(text, forType: .string)
+        }
+        statusMessage = "Transcript copied"
+    }
+
+    func deleteTranscriptSegment(_ segment: TranscriptSegment) {
+        sessionManager?.deleteTranscriptSegment(segment.id, meetingId: segment.meetingId)
+    }
+
+    private func transcriptClipboardText(for segment: TranscriptSegment) -> String {
+        let original = segment.text.trimmingCharacters(in: .whitespacesAndNewlines)
+        let translated = segment.translatedText?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let draft = segment.draftTranslatedText?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let displayTranslation = (translated?.isEmpty == false ? translated : draft) ?? ""
+
+        if preferences.showTranslatedText, !displayTranslation.isEmpty {
+            if preferences.showOriginalText, !original.isEmpty {
+                return "\(displayTranslation)\n\(original)"
+            }
+            return displayTranslation
+        }
+        return original
+    }
+
     func collapsePanelPreservingContext() {
         isShowingCopilotHistory = false
         if currentMeeting != nil {

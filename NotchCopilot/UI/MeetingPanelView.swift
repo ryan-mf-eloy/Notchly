@@ -358,7 +358,13 @@ struct MeetingPanelView: View {
                 LiveTranscriptScrollView(
                     segments: segments,
                     showOriginalText: appState.preferences.showOriginalText,
-                    showTranslatedText: appState.preferences.showTranslatedText
+                    showTranslatedText: appState.preferences.showTranslatedText,
+                    onCopyBlock: { segment, text in
+                        appState.copyTranscriptSegmentToPasteboard(segment, text: text)
+                    },
+                    onDeleteSegment: { segment in
+                        appState.deleteTranscriptSegment(segment)
+                    }
                 )
                 .frame(width: panelWidth, height: height)
                 .protectedContentRegion(appState.preferences.stealthModeEnabled)
@@ -1671,6 +1677,8 @@ private struct LiveTranscriptScrollView: NSViewRepresentable {
     var segments: [TranscriptSegment]
     var showOriginalText: Bool
     var showTranslatedText: Bool
+    var onCopyBlock: (TranscriptSegment, String) -> Void
+    var onDeleteSegment: (TranscriptSegment) -> Void
 
     func makeCoordinator() -> Coordinator {
         Coordinator()
@@ -1702,7 +1710,9 @@ private struct LiveTranscriptScrollView: NSViewRepresentable {
         context.coordinator.update(
             segments: segments,
             showOriginalText: showOriginalText,
-            showTranslatedText: showTranslatedText
+            showTranslatedText: showTranslatedText,
+            onCopyBlock: onCopyBlock,
+            onDeleteSegment: onDeleteSegment
         )
         context.coordinator.render(in: scrollView)
         context.coordinator.scheduleRender(in: scrollView)
@@ -1717,16 +1727,26 @@ private struct LiveTranscriptScrollView: NSViewRepresentable {
         private var segments: [TranscriptSegment] = []
         private var showOriginalText = true
         private var showTranslatedText = false
+        private var onCopyBlock: (TranscriptSegment, String) -> Void = { _, _ in }
+        private var onDeleteSegment: (TranscriptSegment) -> Void = { _ in }
         private var lastSignature: RenderSignature?
         private var scheduledRender = false
         private var isFollowingLiveEdge = true
         private var isAdjustingScroll = false
         private var boundsObserver: NSObjectProtocol?
 
-        func update(segments: [TranscriptSegment], showOriginalText: Bool, showTranslatedText: Bool) {
+        func update(
+            segments: [TranscriptSegment],
+            showOriginalText: Bool,
+            showTranslatedText: Bool,
+            onCopyBlock: @escaping (TranscriptSegment, String) -> Void,
+            onDeleteSegment: @escaping (TranscriptSegment) -> Void
+        ) {
             self.segments = segments
             self.showOriginalText = showOriginalText
             self.showTranslatedText = showTranslatedText
+            self.onCopyBlock = onCopyBlock
+            self.onDeleteSegment = onDeleteSegment
         }
 
         func bind(to scrollView: NSScrollView) {
@@ -1782,7 +1802,13 @@ private struct LiveTranscriptScrollView: NSViewRepresentable {
                     showOriginalText: showOriginalText,
                     showTranslatedText: showTranslatedText
                 )
-                documentView.replaceRows(layout.rows, documentHeight: layout.documentHeight, width: max(1, viewportSize.width))
+                documentView.replaceRows(
+                    layout.rows,
+                    documentHeight: layout.documentHeight,
+                    width: max(1, viewportSize.width),
+                    onCopyBlock: onCopyBlock,
+                    onDeleteSegment: onDeleteSegment
+                )
                 lastSignature = signature
                 adjustScrollPosition(in: scrollView, shouldFollowLiveEdge: shouldKeepFollowing, previousScrollY: previousScrollY)
             } else if shouldKeepFollowing {
@@ -1953,22 +1979,167 @@ private final class TranscriptScrollView: NSScrollView {
 private final class FlippedTranscriptDocumentView: NSView {
     override var isFlipped: Bool { true }
 
-    func replaceRows(_ rows: [TranscriptLayout.Row], documentHeight: CGFloat, width: CGFloat) {
+    func replaceRows(
+        _ rows: [TranscriptLayout.Row],
+        documentHeight: CGFloat,
+        width: CGFloat,
+        onCopyBlock: @escaping (TranscriptSegment, String) -> Void,
+        onDeleteSegment: @escaping (TranscriptSegment) -> Void
+    ) {
         subviews.forEach { $0.removeFromSuperview() }
         frame = CGRect(x: 0, y: 0, width: width, height: documentHeight)
 
         for row in rows {
-            let label = NSTextField(labelWithString: "")
-            label.attributedStringValue = row.text
-            label.isEditable = false
-            label.isSelectable = true
-            label.isBordered = false
-            label.drawsBackground = false
-            label.maximumNumberOfLines = 0
-            label.lineBreakMode = .byWordWrapping
-            label.frame = row.frame
-            addSubview(label)
+            let rowView = TranscriptRowView(
+                row: row,
+                onCopyBlock: onCopyBlock,
+                onDeleteSegment: onDeleteSegment
+            )
+            addSubview(rowView)
         }
+    }
+}
+
+private final class TranscriptRowView: NSView {
+    override var isFlipped: Bool { true }
+
+    private let label = NSTextField(labelWithString: "")
+    private let copyButton = NSButton()
+    private let deleteButton = NSButton()
+    private var trackingArea: NSTrackingArea?
+    private var row: TranscriptLayout.Row
+    private let onCopyBlock: (TranscriptSegment, String) -> Void
+    private let onDeleteSegment: (TranscriptSegment) -> Void
+    private var isHovered = false
+
+    init(
+        row: TranscriptLayout.Row,
+        onCopyBlock: @escaping (TranscriptSegment, String) -> Void,
+        onDeleteSegment: @escaping (TranscriptSegment) -> Void
+    ) {
+        self.row = row
+        self.onCopyBlock = onCopyBlock
+        self.onDeleteSegment = onDeleteSegment
+        super.init(frame: row.frame)
+        configure()
+        apply(row)
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) {
+        return nil
+    }
+
+    override func layout() {
+        super.layout()
+        let actionSize: CGFloat = 19
+        let actionGap: CGFloat = 4
+        let actionRightInset: CGFloat = 7
+        let textLeftInset: CGFloat = 8
+        let verticalInset: CGFloat = 5
+        let actionsWidth = actionSize * 2 + actionGap + actionRightInset + 5
+        label.frame = CGRect(
+            x: textLeftInset,
+            y: verticalInset,
+            width: max(1, bounds.width - textLeftInset - actionsWidth),
+            height: max(1, bounds.height - verticalInset * 2)
+        )
+        deleteButton.frame = CGRect(
+            x: bounds.width - actionRightInset - actionSize,
+            y: verticalInset,
+            width: actionSize,
+            height: actionSize
+        )
+        copyButton.frame = CGRect(
+            x: deleteButton.frame.minX - actionGap - actionSize,
+            y: verticalInset,
+            width: actionSize,
+            height: actionSize
+        )
+    }
+
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        if let trackingArea {
+            removeTrackingArea(trackingArea)
+        }
+        let area = NSTrackingArea(
+            rect: bounds,
+            options: [.mouseEnteredAndExited, .activeInActiveApp, .inVisibleRect],
+            owner: self,
+            userInfo: nil
+        )
+        addTrackingArea(area)
+        trackingArea = area
+    }
+
+    override func mouseEntered(with event: NSEvent) {
+        setHovered(true)
+    }
+
+    override func mouseExited(with event: NSEvent) {
+        setHovered(false)
+    }
+
+    private func configure() {
+        wantsLayer = true
+        layer?.cornerRadius = 8
+        layer?.masksToBounds = true
+
+        label.isEditable = false
+        label.isSelectable = true
+        label.isBordered = false
+        label.drawsBackground = false
+        label.maximumNumberOfLines = 0
+        label.lineBreakMode = .byWordWrapping
+        addSubview(label)
+
+        configureButton(copyButton, systemName: "doc.on.doc", tooltip: "Copy transcript", action: #selector(copyTranscriptBlock))
+        configureButton(deleteButton, systemName: "trash", tooltip: "Delete transcript", action: #selector(deleteTranscriptSegment))
+        addSubview(copyButton)
+        addSubview(deleteButton)
+        setHovered(false)
+    }
+
+    private func apply(_ row: TranscriptLayout.Row) {
+        self.row = row
+        frame = row.frame
+        label.attributedStringValue = row.text
+        needsLayout = true
+    }
+
+    private func configureButton(_ button: NSButton, systemName: String, tooltip: String, action: Selector) {
+        button.isBordered = false
+        button.bezelStyle = .regularSquare
+        button.imagePosition = .imageOnly
+        button.imageScaling = .scaleProportionallyDown
+        button.target = self
+        button.action = action
+        button.toolTip = tooltip
+        button.contentTintColor = NSColor.white.withAlphaComponent(0.62)
+        if let image = NSImage(systemSymbolName: systemName, accessibilityDescription: tooltip) {
+            button.image = image
+        }
+    }
+
+    private func setHovered(_ hovered: Bool) {
+        isHovered = hovered
+        copyButton.isEnabled = hovered
+        deleteButton.isEnabled = hovered
+        NSAnimationContext.runAnimationGroup { context in
+            context.duration = 0.10
+            layer?.backgroundColor = NSColor.white.withAlphaComponent(hovered ? 0.052 : 0).cgColor
+            copyButton.animator().alphaValue = hovered ? 1 : 0
+            deleteButton.animator().alphaValue = hovered ? 1 : 0
+        }
+    }
+
+    @objc private func copyTranscriptBlock() {
+        onCopyBlock(row.segment, row.copyText)
+    }
+
+    @objc private func deleteTranscriptSegment() {
+        onDeleteSegment(row.segment)
     }
 }
 
@@ -2049,12 +2220,16 @@ struct TranscriptReadableChunker: Sendable, Equatable {
 
 private enum TranscriptLayout {
     private struct Block {
+        var segment: TranscriptSegment
         var text: NSAttributedString
+        var copyText: String
         var spacingAfter: CGFloat
     }
 
     struct Row {
+        var segment: TranscriptSegment
         var text: NSAttributedString
+        var copyText: String
         var frame: CGRect
     }
 
@@ -2066,6 +2241,10 @@ private enum TranscriptLayout {
         showTranslatedText: Bool
     ) -> (rows: [Row], documentHeight: CGFloat) {
         let rowWidth = max(1, min(width - 24, showTranslatedText ? 492 : 520))
+        let rowHorizontalInset: CGFloat = 8
+        let rowVerticalInset: CGFloat = 5
+        let actionReserve: CGFloat = 58
+        let measuredTextWidth = max(1, rowWidth - actionReserve)
         let rowX = max(0, (width - rowWidth) / 2)
         let verticalPadding: CGFloat = 0
         let blocks = segments.flatMap {
@@ -2073,10 +2252,10 @@ private enum TranscriptLayout {
         }
         let heights = blocks.map { block -> CGFloat in
             let rect = block.text.boundingRect(
-                with: CGSize(width: rowWidth, height: .greatestFiniteMagnitude),
+                with: CGSize(width: measuredTextWidth, height: .greatestFiniteMagnitude),
                 options: [.usesLineFragmentOrigin, .usesFontLeading]
             )
-            return ceil(rect.height) + 3
+            return ceil(rect.height) + rowVerticalInset * 2
         }
         let contentHeight = zip(heights, blocks).reduce(CGFloat.zero) { partial, pair in
             partial + pair.0 + pair.1.spacingAfter
@@ -2087,8 +2266,15 @@ private enum TranscriptLayout {
         let rows = zip(blocks, heights).map { block, height -> Row in
             defer { y += height + block.spacingAfter }
             return Row(
+                segment: block.segment,
                 text: block.text,
-                frame: CGRect(x: rowX, y: y, width: rowWidth, height: height)
+                copyText: block.copyText,
+                frame: CGRect(
+                    x: max(0, rowX - rowHorizontalInset),
+                    y: y,
+                    width: min(width, rowWidth + rowHorizontalInset * 2),
+                    height: height
+                )
             )
         }
 
@@ -2108,12 +2294,14 @@ private enum TranscriptLayout {
                 )
                 return pairs.enumerated().map { index, pair in
                     Block(
+                        segment: segment,
                         text: attributedText(
                             for: segment,
                             originalText: pair.original,
                             translatedText: pair.translation,
                             translationOnly: false
                         ),
+                        copyText: copyText(originalText: pair.original, translatedText: pair.translation),
                         spacingAfter: index == pairs.count - 1 ? 14 : 8
                     )
                 }
@@ -2122,12 +2310,14 @@ private enum TranscriptLayout {
             let chunks = TranscriptReadableChunker.chunks(for: translationLine.text)
             return chunks.enumerated().map { index, chunk in
                 Block(
-                        text: attributedText(
-                            for: segment,
-                            originalText: nil,
-                            translatedText: chunk,
-                            translationOnly: true
-                        ),
+                    segment: segment,
+                    text: attributedText(
+                        for: segment,
+                        originalText: nil,
+                        translatedText: chunk,
+                        translationOnly: true
+                    ),
+                    copyText: chunk,
                     spacingAfter: index == chunks.count - 1 ? 14 : 8
                 )
             }
@@ -2136,15 +2326,24 @@ private enum TranscriptLayout {
         let chunks = TranscriptReadableChunker.chunks(for: segment.text)
         return chunks.enumerated().map { index, chunk in
             Block(
+                segment: segment,
                 text: attributedText(
                     for: segment,
                     originalText: chunk,
                     translatedText: nil,
                     translationOnly: false
                 ),
+                copyText: chunk,
                 spacingAfter: index == chunks.count - 1 ? 13 : 7
             )
         }
+    }
+
+    private static func copyText(originalText: String?, translatedText: String?) -> String {
+        [translatedText, originalText]
+            .compactMap { $0?.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+            .joined(separator: "\n")
     }
 
     private static func attributedText(

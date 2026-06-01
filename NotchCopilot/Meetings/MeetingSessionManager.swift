@@ -905,6 +905,44 @@ final class MeetingSessionManager {
         }
     }
 
+    func deleteTranscriptSegment(_ segmentId: UUID, meetingId: UUID) {
+        var removedSegment: TranscriptSegment?
+        var meetingToSave: MeetingSession?
+
+        if var meeting = appState.currentMeeting, meeting.id == meetingId {
+            removedSegment = meeting.transcriptSegments.first { $0.id == segmentId }
+            meeting.transcriptSegments.removeAll { $0.id == segmentId }
+            meetingToSave = meeting
+            appState.currentMeeting = meeting
+        }
+
+        if var selectedMeeting = appState.selectedMeeting, selectedMeeting.id == meetingId {
+            removedSegment = removedSegment ?? selectedMeeting.transcriptSegments.first { $0.id == segmentId }
+            selectedMeeting.transcriptSegments.removeAll { $0.id == segmentId }
+            meetingToSave = meetingToSave ?? selectedMeeting
+            appState.selectedMeeting = selectedMeeting
+        }
+
+        do {
+            try repository.deleteTranscriptSegment(id: segmentId, meetingId: meetingId)
+            if let meetingToSave {
+                try repository.save(meetingToSave)
+            }
+            if let removedSegment {
+                realtimeQuestionEngine?.removeTranscriptSegment(removedSegment)
+            }
+            reloadHistory()
+            if let selectedMeeting = appState.selectedMeeting,
+               selectedMeeting.id == meetingId,
+               let refreshed = appState.history.first(where: { $0.id == meetingId }) {
+                appState.selectedMeeting = refreshed
+            }
+            appState.statusMessage = "Transcript deleted"
+        } catch {
+            appState.statusMessage = "Delete failed"
+        }
+    }
+
     func deleteAllData() {
         do {
             try repository.deleteAll()

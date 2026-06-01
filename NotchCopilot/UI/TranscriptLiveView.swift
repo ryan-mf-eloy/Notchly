@@ -4,6 +4,10 @@ struct TranscriptLiveView: View {
     var segments: [TranscriptSegment]
     var limit = 18
     var isProtected = false
+    var onCopySegment: ((TranscriptSegment) -> Void)?
+    var onDeleteSegment: ((TranscriptSegment) -> Void)?
+
+    @State private var hoveredSegmentID: UUID?
 
     var body: some View {
         ScrollViewReader { proxy in
@@ -36,7 +40,8 @@ struct TranscriptLiveView: View {
     }
 
     private func segmentRow(_ segment: TranscriptSegment) -> some View {
-        VStack(alignment: .leading, spacing: 9) {
+        let isHovered = hoveredSegmentID == segment.id
+        return VStack(alignment: .leading, spacing: 9) {
             HStack(spacing: 8) {
                 Text(DateFormatting.duration(segment.startTime))
                     .font(.system(size: 10, weight: .medium, design: .monospaced))
@@ -78,7 +83,28 @@ struct TranscriptLiveView: View {
             }
         }
         .padding(.vertical, 13)
+        .padding(.horizontal, 8)
         .frame(maxWidth: .infinity, alignment: .leading)
+        .background(
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .fill(Color.white.opacity(isHovered ? 0.045 : 0))
+        )
+        .overlay(alignment: .topTrailing) {
+            if onCopySegment != nil || onDeleteSegment != nil {
+                TranscriptInlineActions(
+                    isVisible: isHovered,
+                    onCopy: { onCopySegment?(segment) },
+                    onDelete: { onDeleteSegment?(segment) }
+                )
+                .padding(.top, 7)
+                .padding(.trailing, 7)
+            }
+        }
+        .contentShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+        .onHover { hovering in
+            hoveredSegmentID = hovering ? segment.id : (hoveredSegmentID == segment.id ? nil : hoveredSegmentID)
+        }
+        .animation(.easeOut(duration: 0.12), value: isHovered)
     }
 
     private func transcriptColor(for segment: TranscriptSegment) -> Color {
@@ -95,5 +121,46 @@ struct TranscriptLiveView: View {
             return draft
         }
         return nil
+    }
+}
+
+private struct TranscriptInlineActions: View {
+    var isVisible: Bool
+    var onCopy: () -> Void
+    var onDelete: () -> Void
+
+    var body: some View {
+        HStack(spacing: 4) {
+            TranscriptInlineActionButton(systemName: "doc.on.doc", accessibilityLabel: "Copy transcript", action: onCopy)
+            TranscriptInlineActionButton(systemName: "trash", accessibilityLabel: "Delete transcript", action: onDelete)
+        }
+        .opacity(isVisible ? 1 : 0)
+        .allowsHitTesting(isVisible)
+        .animation(.easeOut(duration: 0.10), value: isVisible)
+    }
+}
+
+private struct TranscriptInlineActionButton: View {
+    var systemName: String
+    var accessibilityLabel: String
+    var action: () -> Void
+
+    @State private var isHovered = false
+
+    var body: some View {
+        Button(action: action) {
+            Image(systemName: systemName)
+                .font(.system(size: 10.5, weight: .medium))
+                .foregroundStyle(Color.white.opacity(isHovered ? 0.84 : 0.60))
+                .frame(width: 19, height: 19)
+                .background(
+                    RoundedRectangle(cornerRadius: 5, style: .continuous)
+                        .fill(Color.white.opacity(isHovered ? 0.105 : 0.050))
+                )
+        }
+        .buttonStyle(.plain)
+        .help(accessibilityLabel)
+        .accessibilityLabel(accessibilityLabel)
+        .onHover { isHovered = $0 }
     }
 }
