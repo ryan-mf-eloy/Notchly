@@ -87,8 +87,4 @@ struct AppleFoundationModelProvider: AIProvider {
     func generateInsights(transcriptWindow: [TranscriptSegment]) async throws -> [Insight] {
         throw AIProviderError.providerUnavailable("Apple Foundation Models insights are unavailable.")
     }
-
-    func embed(texts: [String]) async throws -> [[Double]] {
-        throw AIProviderError.providerUnavailable("Apple Foundation Models embeddings are unavailable.")
-    }
 }

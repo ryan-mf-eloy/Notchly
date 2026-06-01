@@ -166,10 +166,6 @@ struct OpenAIProvider: AIProvider {
         []
     }
 
-    func embed(texts: [String]) async throws -> [[Double]] {
-        []
-    }
-
     private func callResponsesAPI(model: String, prompt: String, maxOutputTokens: Int, enableWebSearch: Bool) async throws -> String {
         try await callResponses(model: model, prompt: prompt, maxOutputTokens: maxOutputTokens, enableWebSearch: enableWebSearch, responseMode: .plainText).outputTextValue()
     }

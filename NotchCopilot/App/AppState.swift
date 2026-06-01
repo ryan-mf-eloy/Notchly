@@ -66,6 +66,8 @@ final class AppState: ObservableObject {
     @Published var isNotchHovered = false
     @Published var compactRecordButtonFeedbackTrigger = 0
     @Published var knowledgeDocumentNames: [String] = []
+    @Published var knowledgeSources: [SourceConnectionViewModel] = []
+    @Published var retrievalStatus = RetrievalStatusViewModel(title: "Context ready", detail: "Local sources only", quality: "Keyword", isIndexing: false)
     @Published var speechVocabularyTerms: [SpeechVocabularyTerm] = []
     @Published var speechVocabularyStatus: String = "Apple Speech ready"
     @Published var settingsStatus: String = ""
@@ -130,8 +132,17 @@ final class AppState: ObservableObject {
     var anthropicAPIKeyProvider: AnthropicClaudeProvider?
     var anthropicCLIProvider: ProviderCLIAIProvider?
     var perplexityProvider: PerplexityProvider?
-    var knowledgeStore: LocalKnowledgeStore?
+    var knowledgeStore: LocalKnowledgeStore? {
+        didSet {
+            configureKnowledgeStore()
+            reloadKnowledgeDocuments()
+        }
+    }
     var speechVocabularyStore: SpeechVocabularyStore?
+    private let knowledgeSourceFileWatcher = KnowledgeSourceFileWatcher()
+    private var knowledgeEmbeddingIndexTask: Task<Void, Never>?
+    private var knowledgeRetrievalWarmupTask: Task<Void, Never>?
+    private var localEmbeddingBenchmarkTask: Task<Void, Never>?
 
     var realtimeTranscriptionModelOptions: [AIModelOption] {
         switch preferences.aiConfig.realtimeTranscriptionProvider {
@@ -1259,6 +1270,7 @@ final class AppState: ObservableObject {
             lastPersistedPreferences = normalizedPreferences
         }
         isPersistingPreferences = false
+        configureKnowledgeStore()
         capabilityReport = providerRouter?.report(preferences: preferences)
         if refreshConnectionStatus {
             refreshProviderConnectionStatuses()
@@ -1403,12 +1415,7 @@ final class AppState: ObservableObject {
 
     func openSelectedAnswerSources() {
         let sources = suggestedAnswer?.usedSources ?? activeCopilotInteraction?.sources ?? []
-        guard let reference = sources.compactMap(\.reference).first,
-              let url = URL(string: reference) else {
-            statusMessage = "No source link available"
-            return
-        }
-        NSWorkspace.shared.open(url)
+        openAnswerSources(sources)
     }
 
     func regenerateSelectedCopilotAnswerWithWeb() {
@@ -1436,12 +1443,56 @@ final class AppState: ObservableObject {
     }
 
     func openCopilotInteractionSources(_ interaction: CopilotInteraction) {
-        guard let reference = interaction.sources.compactMap(\.reference).first,
-              let url = URL(string: reference) else {
-            statusMessage = "No source link available"
-            return
+        openAnswerSources(interaction.sources)
+    }
+
+    func openAnswerSources(_ sources: [AnswerSource]) {
+        for source in sources {
+            if openLocalKnowledgeSource(source) {
+                return
+            }
+            if openMeetingSource(source) {
+                return
+            }
+            if let reference = source.reference,
+               let url = URL(string: reference),
+               ["http", "https"].contains(url.scheme?.lowercased()) {
+                NSWorkspace.shared.open(url)
+                statusMessage = "Source opened"
+                return
+            }
         }
-        NSWorkspace.shared.open(url)
+        statusMessage = "No source link available"
+    }
+
+    private func openLocalKnowledgeSource(_ source: AnswerSource) -> Bool {
+        guard let url = try? knowledgeStore?.fileURL(for: source) else { return false }
+        if url.isFileURL {
+            NSWorkspace.shared.activateFileViewerSelecting([url])
+        } else {
+            NSWorkspace.shared.open(url)
+        }
+        statusMessage = source.locationLabel.map { "Opened source at \($0)" } ?? "Source opened"
+        return true
+    }
+
+    private func openMeetingSource(_ source: AnswerSource) -> Bool {
+        guard let reference = source.reference,
+              let url = URL(string: reference),
+              url.scheme == "notchly",
+              url.host == "meeting" else {
+            return false
+        }
+        let meetingIdString = url.pathComponents.dropFirst().first
+        guard let meetingIdString,
+              let meetingId = UUID(uuidString: meetingIdString),
+              let meeting = history.first(where: { $0.id == meetingId }) else {
+            return false
+        }
+        selectedMeeting = meeting
+        openHistoryHandler?()
+        statusMessage = source.locationLabel.map { "Opened meeting source at \($0)" } ?? "Meeting source opened"
+        return true
     }
 
     func regenerateCopilotInteraction(_ interaction: CopilotInteraction, forceWeb: Bool) {
@@ -1524,11 +1575,247 @@ final class AppState: ObservableObject {
     }
 
     func reloadKnowledgeDocuments() {
-        guard let knowledgeStore, let documents = try? knowledgeStore.documents() else {
+        configureKnowledgeStore()
+        guard let knowledgeStore else {
             knowledgeDocumentNames = []
+            knowledgeSources = []
+            knowledgeSourceFileWatcher.stopAll()
             return
         }
+        let documents = (try? knowledgeStore.documents()) ?? []
         knowledgeDocumentNames = documents.map(\.displayName)
+        knowledgeSources = (try? knowledgeStore.sourceConnectionViewModels(workspaceId: preferences.workspaceId)) ?? []
+        let totalChunks = knowledgeSources.map(\.chunkCount).reduce(0, +)
+        let isIndexing = knowledgeSources.contains { $0.status == .indexing }
+        let localProvider = localEmbeddingProvider()
+        let healthReport = try? knowledgeStore.indexHealthReport(
+            model: localProvider.modelIdentifier,
+            workspaceId: preferences.workspaceId,
+            latencyTargetMs: preferences.ragRealtimeLatencyTargetMs
+        )
+        let embeddedChunks = healthReport?.embeddedChunkCount ?? 0
+        let indexedChunks = healthReport?.chunkCount ?? totalChunks
+        retrievalStatus = RetrievalStatusViewModel(
+            title: retrievalTitle(for: healthReport, sourceCount: knowledgeSources.count),
+            detail: retrievalDetail(report: healthReport, totalChunks: indexedChunks, embeddedChunks: embeddedChunks),
+            quality: "Local \(preferences.ragLocalEmbeddingTier.displayName) / \(localProvider.activeRuntime.displayName)",
+            isIndexing: isIndexing || embeddedChunks < indexedChunks
+        )
+        refreshKnowledgeSourceWatcher()
+        scheduleLocalEmbeddingBenchmarkIfNeeded(reason: "knowledge reload")
+        if embeddedChunks < indexedChunks {
+            scheduleKnowledgeEmbeddingIndexing(reason: "coverage")
+        } else if indexedChunks > 0 {
+            scheduleKnowledgeRetrievalWarmup(reason: "coverage ready")
+        }
+    }
+
+    private func configureKnowledgeStore() {
+        knowledgeStore?.configure(preferences: preferences)
+    }
+
+    private func localEmbeddingProvider() -> LocalEmbeddingProvider {
+        LocalEmbeddingProvider(
+            tier: preferences.ragLocalEmbeddingTier,
+            runtime: preferences.resolvedLocalEmbeddingRuntime,
+            allowModelDownloads: preferences.allowLocalModelDownloads,
+            allowMetalAcceleration: preferences.ragAppleMetalAccelerationEnabled,
+            serverConfiguration: preferences.localEmbeddingServerConfiguration
+        )
+    }
+
+    private func retrievalDetail(totalChunks: Int, embeddedChunks: Int) -> String {
+        let chunkText = totalChunks == 1 ? "1 indexed chunk" : "\(totalChunks) indexed chunks"
+        guard totalChunks > 0 else { return chunkText }
+        return "\(chunkText) • \(embeddedChunks)/\(totalChunks) local vectors"
+    }
+
+    private func retrievalTitle(for report: KnowledgeIndexHealthReport?, sourceCount: Int) -> String {
+        guard sourceCount > 0 else { return "No sources connected" }
+        guard let report else { return "\(sourceCount) sources connected" }
+        if report.failedSourceCount > 0 {
+            return "Knowledge needs attention"
+        }
+        if report.staleChunkCount > 0 {
+            return "Preparing local knowledge"
+        }
+        return report.isReadyForRealtime ? "Local knowledge ready" : "\(sourceCount) sources connected"
+    }
+
+    private func retrievalDetail(
+        report: KnowledgeIndexHealthReport?,
+        totalChunks: Int,
+        embeddedChunks: Int
+    ) -> String {
+        var detail = retrievalDetail(totalChunks: totalChunks, embeddedChunks: embeddedChunks)
+        if let latency = report?.slowTraceP95Ms {
+            detail += " • p95 \(latency)ms"
+        }
+        if report?.weakTraceCount ?? 0 > 0 {
+            detail += " • \(report?.weakTraceCount ?? 0) weak"
+        }
+        return detail
+    }
+
+    private func scheduleKnowledgeEmbeddingIndexing(reason: String) {
+        guard preferences.knowledgeSourcesEnabled, let knowledgeStore else { return }
+        let workspaceId = preferences.workspaceId
+        let provider = localEmbeddingProvider()
+        knowledgeEmbeddingIndexTask?.cancel()
+        knowledgeEmbeddingIndexTask = Task { @MainActor in
+            await provider.prewarm()
+            do {
+                var didIndexAnyChunk = false
+                while !Task.isCancelled {
+                    let indexed = try await knowledgeStore.indexMissingEmbeddings(
+                        provider: provider,
+                        workspaceId: workspaceId,
+                        limit: provider.tier.defaultBatchSize,
+                        finalizeVectorShard: false
+                    )
+                    let coverage = (try? knowledgeStore.embeddingCoverage(model: provider.modelIdentifier, workspaceId: workspaceId)) ?? (embedded: 0, total: 0)
+                    retrievalStatus = RetrievalStatusViewModel(
+                        title: "Preparing local knowledge",
+                        detail: retrievalDetail(totalChunks: coverage.total, embeddedChunks: coverage.embedded),
+                        quality: "Local \(provider.tier.displayName) / \(provider.activeRuntime.displayName)",
+                        isIndexing: coverage.embedded < coverage.total
+                    )
+                    if indexed == 0 {
+                        if didIndexAnyChunk {
+                            try knowledgeStore.finalizeEmbeddingIndex(model: provider.modelIdentifier, workspaceId: workspaceId)
+                        }
+                        break
+                    }
+                    didIndexAnyChunk = true
+                    await Task.yield()
+                }
+                reloadKnowledgeDocuments()
+            } catch {
+                retrievalStatus = RetrievalStatusViewModel(
+                    title: "Local knowledge paused",
+                    detail: error.localizedDescription,
+                    quality: "Local \(provider.tier.displayName) / \(provider.activeRuntime.displayName)",
+                    isIndexing: false
+                )
+                AppLog.persistence.error("Local embedding indexing failed: \(error.localizedDescription, privacy: .public)")
+            }
+        }
+    }
+
+    private func scheduleKnowledgeRetrievalWarmup(reason: String) {
+        guard preferences.knowledgeSourcesEnabled, let knowledgeStore else { return }
+        guard knowledgeRetrievalWarmupTask == nil else { return }
+        let workspaceId = preferences.workspaceId
+        let provider = localEmbeddingProvider()
+        knowledgeRetrievalWarmupTask = Task { @MainActor in
+            defer { knowledgeRetrievalWarmupTask = nil }
+            do {
+                let maintenance = try knowledgeStore.repairEmbeddingIndex(
+                    model: provider.modelIdentifier,
+                    workspaceId: workspaceId,
+                    rebuildVectorShard: false
+                )
+                if maintenance.missingEmbeddingCount > 0 {
+                    scheduleKnowledgeEmbeddingIndexing(reason: "maintenance")
+                    return
+                }
+                let report = try knowledgeStore.warmRetrievalIndexes(
+                    model: provider.modelIdentifier,
+                    workspaceId: workspaceId
+                )
+                guard !Task.isCancelled, report.chunkCount > 0 else { return }
+                retrievalStatus = RetrievalStatusViewModel(
+                    title: "Local knowledge ready",
+                    detail: retrievalDetail(totalChunks: report.chunkCount, embeddedChunks: report.embeddedVectorCount),
+                    quality: "Local \(provider.tier.displayName) / \(provider.activeRuntime.displayName)",
+                    isIndexing: false
+                )
+            } catch {
+                AppLog.persistence.error("Local retrieval warmup failed: \(error.localizedDescription, privacy: .public)")
+            }
+        }
+    }
+
+    func runLocalEmbeddingBenchmark() {
+        scheduleLocalEmbeddingBenchmark(reason: "manual", force: true)
+    }
+
+    private func scheduleLocalEmbeddingBenchmarkIfNeeded(reason: String) {
+        guard preferences.ragLocalEmbeddingRuntime == .automatic else { return }
+        guard localEmbeddingBenchmarkTask == nil else { return }
+        if shouldRefreshLocalEmbeddingBenchmark() {
+            scheduleLocalEmbeddingBenchmark(reason: reason, force: false)
+        }
+    }
+
+    private func shouldRefreshLocalEmbeddingBenchmark() -> Bool {
+        guard preferences.ragLocalEmbeddingRuntime == .automatic else { return false }
+        guard let benchmark = preferences.ragLocalEmbeddingBenchmark else { return true }
+        return benchmark.tier != preferences.ragLocalEmbeddingTier ||
+            benchmark.targetModelId != preferences.ragLocalEmbeddingTier.modelProfile.targetModelId ||
+            benchmark.targetLatencyMs != preferences.ragRealtimeLatencyTargetMs ||
+            benchmark.machineFingerprint != LocalEmbeddingRuntimeSelector.machineFingerprint() ||
+            (benchmark.selectedRuntime == .mlx && !preferences.ragAppleMetalAccelerationEnabled) ||
+            (benchmark.selectedRuntime == .localServer && !preferences.localEmbeddingServerConfiguration.isUsable)
+    }
+
+    private func scheduleLocalEmbeddingBenchmark(reason: String, force: Bool) {
+        guard force || shouldRefreshLocalEmbeddingBenchmark() else { return }
+        let tier = preferences.ragLocalEmbeddingTier
+        let targetLatencyMs = preferences.ragRealtimeLatencyTargetMs
+        localEmbeddingBenchmarkTask?.cancel()
+        localEmbeddingBenchmarkTask = Task { @MainActor in
+            retrievalStatus = RetrievalStatusViewModel(
+                title: "Benchmarking local embedding",
+                detail: "\(tier.modelProfile.displayName) runtime selection",
+                quality: "Local \(tier.displayName)",
+                isIndexing: true
+            )
+            let result = await LocalEmbeddingRuntimeSelector(
+                targetLatencyMs: targetLatencyMs,
+                allowModelDownloads: preferences.allowLocalModelDownloads,
+                allowMetalAcceleration: preferences.ragAppleMetalAccelerationEnabled,
+                serverConfiguration: preferences.localEmbeddingServerConfiguration
+            ).benchmark(tier: tier)
+            guard !Task.isCancelled else { return }
+            preferences.ragLocalEmbeddingBenchmark = result
+            settingsStatus = "Local embedding: \(result.summary)"
+            savePreferencesWithoutConnectionRefresh()
+            localEmbeddingBenchmarkTask = nil
+            reloadKnowledgeDocuments()
+        }
+    }
+
+    private func refreshKnowledgeSourceWatcher() {
+        guard preferences.knowledgeSourcesEnabled, !knowledgeSources.isEmpty else {
+            knowledgeSourceFileWatcher.stopAll()
+            return
+        }
+        knowledgeSourceFileWatcher.update(sources: knowledgeSources) { [weak self] sourceId in
+            Task { @MainActor in
+                self?.handleKnowledgeSourceDidChange(sourceId)
+            }
+        }
+    }
+
+    private func handleKnowledgeSourceDidChange(_ sourceId: UUID) {
+        guard preferences.knowledgeSourcesEnabled else { return }
+        guard knowledgeSources.contains(where: { $0.id == sourceId }) else { return }
+        retrievalStatus = RetrievalStatusViewModel(
+            title: "Syncing source",
+            detail: "Reindexing changed files",
+            quality: "Local \(preferences.ragLocalEmbeddingTier.displayName)",
+            isIndexing: true
+        )
+        do {
+            configureKnowledgeStore()
+            _ = try knowledgeStore?.indexSource(sourceId)
+            reloadKnowledgeDocuments()
+            statusMessage = "Source updated"
+        } catch {
+            reloadKnowledgeDocuments()
+            statusMessage = "Source sync failed"
+        }
     }
 
     func reloadSpeechVocabulary() {
@@ -1609,6 +1896,7 @@ final class AppState: ObservableObject {
 
     func addKnowledgeFiles(urls: [URL]) {
         guard let knowledgeStore else { return }
+        configureKnowledgeStore()
         let ingestion = DocumentIngestionService()
         for url in urls {
             guard url.startAccessingSecurityScopedResource() else { continue }
@@ -1618,6 +1906,52 @@ final class AppState: ObservableObject {
             }
         }
         reloadKnowledgeDocuments()
+    }
+
+    func connectKnowledgeFiles() {
+        let panel = NSOpenPanel()
+        panel.canChooseDirectories = false
+        panel.canChooseFiles = true
+        panel.allowsMultipleSelection = true
+        panel.prompt = "Add Files"
+        panel.message = "Choose files Notchly can index for grounded Copilot answers."
+        guard panel.runModal() == .OK else { return }
+        addKnowledgeFiles(urls: panel.urls)
+        statusMessage = panel.urls.count == 1 ? "File added" : "\(panel.urls.count) files added"
+    }
+
+    func connectKnowledgeDirectory(kind: KnowledgeSourceKind) {
+        guard let knowledgeStore else { return }
+        configureKnowledgeStore()
+        let panel = NSOpenPanel()
+        panel.canChooseDirectories = true
+        panel.canChooseFiles = false
+        panel.allowsMultipleSelection = false
+        panel.prompt = kind == .obsidian ? "Connect Vault" : "Connect Folder"
+        panel.message = kind == .obsidian ? "Choose an Obsidian vault folder." : "Choose a folder Notchly can index for meeting context."
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        do {
+            let source = try knowledgeStore.connectDirectory(url, kind: kind, workspaceId: preferences.workspaceId)
+            preferences.selectedKnowledgeSourceId = source.id
+            preferences.copilotKnowledgeScope = .selectedSource
+            savePreferences()
+            reloadKnowledgeDocuments()
+            statusMessage = "\(source.displayName) connected"
+        } catch {
+            statusMessage = "Could not connect source"
+        }
+    }
+
+    func reindexKnowledgeSource(_ sourceId: UUID) {
+        guard let knowledgeStore else { return }
+        configureKnowledgeStore()
+        do {
+            _ = try knowledgeStore.indexSource(sourceId)
+            reloadKnowledgeDocuments()
+            statusMessage = "Source reindexed"
+        } catch {
+            statusMessage = "Reindex failed"
+        }
     }
 
     func clearKnowledge() {

@@ -102,10 +102,6 @@ struct CodexCLIAIProvider: AIProvider {
         []
     }
 
-    func embed(texts: [String]) async throws -> [[Double]] {
-        []
-    }
-
     private func runCodexPrompt(_ prompt: String, model: String, enableWebSearch: Bool = false) async throws -> String {
         let outputURL = FileManager.default.temporaryDirectory
             .appendingPathComponent("notch-copilot-codex-\(UUID().uuidString).txt")

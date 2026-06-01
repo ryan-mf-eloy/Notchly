@@ -59,7 +59,7 @@ enum ProviderRegistry {
             apiKeyAuthMode: .apiKeyLegacy,
             localAuthMode: nil,
             defaultAuthMode: .openAICodexCLI,
-            supportedCapabilities: [.chat, .translation, .realtime, .embedding, .webSearch],
+            supportedCapabilities: [.chat, .translation, .realtime, .webSearch],
             accountLoginRequiresCLI: true,
             accountLoginUnsupportedMessage: nil
         ),
@@ -80,14 +80,14 @@ enum ProviderRegistry {
         AIProviderDescriptor(
             kind: .googleGemini,
             title: "Google Gemini",
-            subtitle: "Gemini models for chat, translation and embeddings.",
+            subtitle: "Gemini models for chat and translation.",
             logoAssetName: "ProviderGoogle",
             supportedAuthKinds: [.accountLogin, .apiKey],
             accountAuthMode: .googleGeminiOAuth,
             apiKeyAuthMode: .googleGeminiAPIKey,
             localAuthMode: nil,
             defaultAuthMode: .googleGeminiAPIKey,
-            supportedCapabilities: [.chat, .translation, .embedding, .realtime],
+            supportedCapabilities: [.chat, .translation, .realtime],
             accountLoginRequiresCLI: true,
             accountLoginUnsupportedMessage: nil
         ),

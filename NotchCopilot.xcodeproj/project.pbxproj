@@ -15,6 +15,16 @@
 		0D3EF421E4361405C95615EE /* SpeechVocabularyStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 73D7C3B82D0A8B3B02F1999E /* SpeechVocabularyStore.swift */; };
 		0D5BC4A49AFCC758D5C191DD /* MicrophoneUsageMonitor.swift in Sources */ = {isa = PBXBuildFile; fileRef = 93027BDA99EC0DC9A7C16244 /* MicrophoneUsageMonitor.swift */; };
 		0FAD2EB9AE3C294A47197EF2 /* LocalKnowledgeStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 52DE6EEC1DD4D404567C782B /* LocalKnowledgeStore.swift */; };
+		BEEFC0DE0000000000000001 /* KnowledgeTypes.swift in Sources */ = {isa = PBXBuildFile; fileRef = BEEFC0DE0000000000000004 /* KnowledgeTypes.swift */; };
+		BEEFC0DE0000000000000002 /* KnowledgeRetrievalService.swift in Sources */ = {isa = PBXBuildFile; fileRef = BEEFC0DE0000000000000005 /* KnowledgeRetrievalService.swift */; };
+		BEEFC0DE0000000000000003 /* RAGPipelineTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = BEEFC0DE0000000000000006 /* RAGPipelineTests.swift */; };
+		BEEFC0DE0000000000000007 /* KnowledgeSourceFileWatcher.swift in Sources */ = {isa = PBXBuildFile; fileRef = BEEFC0DE0000000000000008 /* KnowledgeSourceFileWatcher.swift */; };
+		BEEFC0DE0000000000000009 /* LocalEmbeddingProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = BEEFC0DE000000000000000A /* LocalEmbeddingProvider.swift */; };
+		BEEFC0DE000000000000000C /* LocalVectorANNIndex.swift in Sources */ = {isa = PBXBuildFile; fileRef = BEEFC0DE000000000000000B /* LocalVectorANNIndex.swift */; };
+		BEEFC0DE000000000000000D /* LocalBM25Index.swift in Sources */ = {isa = PBXBuildFile; fileRef = BEEFC0DE000000000000000E /* LocalBM25Index.swift */; };
+		BEEFC0DE000000000000000F /* LocalVectorBlobStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = BEEFC0DE0000000000000010 /* LocalVectorBlobStore.swift */; };
+		BEEFC0DE0000000000000011 /* LocalEmbeddingModelManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = BEEFC0DE0000000000000012 /* LocalEmbeddingModelManager.swift */; };
+		BEEFC0DE0000000000000013 /* MLXEmbedders in Frameworks */ = {isa = PBXBuildFile; productRef = BEEFC0DE0000000000000014 /* MLXEmbedders */; };
 		0FC5415F790AD8811209D876 /* SummaryEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = 03C6BE5B7D2D8D6A001C264D /* SummaryEngine.swift */; };
 		1242E55E092F7862DD46ACD7 /* notchly-multiqt-v1.mlmodelc in Resources */ = {isa = PBXBuildFile; fileRef = 83A1A5ADC5275E6B8FF39F93 /* notchly-multiqt-v1.mlmodelc */; };
 		13229CB525631296FFFC8E71 /* MeetingSessionManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 831ED26D0A2A82665C6D00B9 /* MeetingSessionManager.swift */; };
@@ -222,6 +232,15 @@
 		513013A4B005B98C4C4E5C55 /* LocalDataCryptor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LocalDataCryptor.swift; sourceTree = "<group>"; };
 		5185D9F34DDD81926C11CBE9 /* QuestionAnswerPromptBuilder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QuestionAnswerPromptBuilder.swift; sourceTree = "<group>"; };
 		52DE6EEC1DD4D404567C782B /* LocalKnowledgeStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LocalKnowledgeStore.swift; sourceTree = "<group>"; };
+		BEEFC0DE0000000000000004 /* KnowledgeTypes.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KnowledgeTypes.swift; sourceTree = "<group>"; };
+		BEEFC0DE0000000000000005 /* KnowledgeRetrievalService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KnowledgeRetrievalService.swift; sourceTree = "<group>"; };
+		BEEFC0DE0000000000000006 /* RAGPipelineTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RAGPipelineTests.swift; sourceTree = "<group>"; };
+		BEEFC0DE0000000000000008 /* KnowledgeSourceFileWatcher.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KnowledgeSourceFileWatcher.swift; sourceTree = "<group>"; };
+		BEEFC0DE000000000000000A /* LocalEmbeddingProvider.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LocalEmbeddingProvider.swift; sourceTree = "<group>"; };
+		BEEFC0DE000000000000000B /* LocalVectorANNIndex.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LocalVectorANNIndex.swift; sourceTree = "<group>"; };
+		BEEFC0DE000000000000000E /* LocalBM25Index.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LocalBM25Index.swift; sourceTree = "<group>"; };
+		BEEFC0DE0000000000000010 /* LocalVectorBlobStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LocalVectorBlobStore.swift; sourceTree = "<group>"; };
+		BEEFC0DE0000000000000012 /* LocalEmbeddingModelManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LocalEmbeddingModelManager.swift; sourceTree = "<group>"; };
 		52EE0E0BB59E454D932445F6 /* SummaryView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SummaryView.swift; sourceTree = "<group>"; };
 		559F410D39A194A5010A4810 /* AppleLocalAIProvider.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppleLocalAIProvider.swift; sourceTree = "<group>"; };
 		5936684FAF8945F1CE35B080 /* WebSearchQuestionContextBuilder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WebSearchQuestionContextBuilder.swift; sourceTree = "<group>"; };
@@ -325,6 +344,7 @@
 				C51EB742EB330759FFA2335A /* MLXLLM in Frameworks */,
 				CB8D041C0B6A240DCC4EA8CC /* MLXLMCommon in Frameworks */,
 				E6A2D3C1A1257F9E1A2DF423 /* MLXHuggingFace in Frameworks */,
+				BEEFC0DE0000000000000013 /* MLXEmbedders in Frameworks */,
 				8BFB5BD3DDAB75569C0C26C7 /* HuggingFace in Frameworks */,
 				8786BB02D74CAD1E53F0E29F /* Tokenizers in Frameworks */,
 				4ADE6DDFD7A437EA272A8EF1 /* GRPC in Frameworks */,
@@ -522,6 +542,7 @@
 			isa = PBXGroup;
 			children = (
 				9F25920F73AB891876C73C89 /* NotchCopilotTests.swift */,
+				BEEFC0DE0000000000000006 /* RAGPipelineTests.swift */,
 				EAED0BFD874B8A8D2CB5CAA0 /* TestDoubles.swift */,
 				9EEB39CD135B4A20A43B5935 /* TranscriptionAudioFixtureGenerator.swift */,
 				4943FBDFAEF487DDC55C30B8 /* TranscriptionPipelineTests.swift */,
@@ -583,7 +604,15 @@
 			children = (
 				E7B94A96289B19AE8C1B2881 /* DocumentIngestionService.swift */,
 				2D3C0C3D22FE32F84D706200 /* EmbeddingProvider.swift */,
-				52DE6EEC1DD4D404567C782B /* LocalKnowledgeStore.swift */,
+				BEEFC0DE0000000000000005 /* KnowledgeRetrievalService.swift */,
+					BEEFC0DE0000000000000008 /* KnowledgeSourceFileWatcher.swift */,
+					BEEFC0DE0000000000000004 /* KnowledgeTypes.swift */,
+					BEEFC0DE000000000000000E /* LocalBM25Index.swift */,
+					BEEFC0DE000000000000000A /* LocalEmbeddingProvider.swift */,
+					BEEFC0DE0000000000000012 /* LocalEmbeddingModelManager.swift */,
+					52DE6EEC1DD4D404567C782B /* LocalKnowledgeStore.swift */,
+					BEEFC0DE000000000000000B /* LocalVectorANNIndex.swift */,
+					BEEFC0DE0000000000000010 /* LocalVectorBlobStore.swift */,
 				3DBB92F256A623B9A2235177 /* RAGContextBuilder.swift */,
 				766A779E47142B798FD84987 /* VectorSearchService.swift */,
 				38F6C342AC42993615A21964 /* WebSearchService.swift */,
@@ -689,6 +718,7 @@
 				00337E303B5B32DDBB31EDFB /* MLXLLM */,
 				34B8BB2DFC4816C4B210152B /* MLXLMCommon */,
 				133E40FEC35A5BDF5337E364 /* MLXHuggingFace */,
+				BEEFC0DE0000000000000014 /* MLXEmbedders */,
 				494627CC1EE1ABD0CE03C992 /* HuggingFace */,
 				4B9ECEE6182111681C8DFA47 /* Tokenizers */,
 				96608928A3D7A0DA16D8AFD2 /* GRPC */,
@@ -872,7 +902,15 @@
 				BE90E9087E8117862E50AF9E /* GoogleGeminiProvider.swift in Sources */,
 				8D9BC1322E1AEDEF6DB43BF0 /* HistoryView.swift in Sources */,
 				B52F65A8A221FCBFE7F144D2 /* IconButton.swift in Sources */,
-				A8B875E8075C16721BB0FFC4 /* KeychainService.swift in Sources */,
+				BEEFC0DE0000000000000002 /* KnowledgeRetrievalService.swift in Sources */,
+					BEEFC0DE0000000000000007 /* KnowledgeSourceFileWatcher.swift in Sources */,
+					BEEFC0DE0000000000000001 /* KnowledgeTypes.swift in Sources */,
+					BEEFC0DE000000000000000D /* LocalBM25Index.swift in Sources */,
+					BEEFC0DE0000000000000009 /* LocalEmbeddingProvider.swift in Sources */,
+					BEEFC0DE0000000000000011 /* LocalEmbeddingModelManager.swift in Sources */,
+					A8B875E8075C16721BB0FFC4 /* KeychainService.swift in Sources */,
+					BEEFC0DE000000000000000C /* LocalVectorANNIndex.swift in Sources */,
+					BEEFC0DE000000000000000F /* LocalVectorBlobStore.swift in Sources */,
 				9D63A5BB73211CBDF838CBD3 /* LanguageContinuityResolver.swift in Sources */,
 				8F00644455B7FF9CC3E10CD8 /* LocalASRRefinementService.swift in Sources */,
 				1453CC004288D434C0F0F5FE /* LocalCapabilityReport.swift in Sources */,
@@ -957,6 +995,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				6D1EB9AA273C322E9EEB2A2C /* NotchCopilotTests.swift in Sources */,
+				BEEFC0DE0000000000000003 /* RAGPipelineTests.swift in Sources */,
 				55F1BC7F54EB0BB3E1C344D9 /* TestDoubles.swift in Sources */,
 				899AD0DBFAEA23F32D1B620A /* TranscriptionAudioFixtureGenerator.swift in Sources */,
 				ADE4764756BAE3B00278B790 /* TranscriptionPipelineTests.swift in Sources */,
@@ -1328,6 +1367,11 @@
 			isa = XCSwiftPackageProductDependency;
 			package = 53014E08BA326F71DA2EA239 /* XCRemoteSwiftPackageReference "mlx-swift-lm" */;
 			productName = MLXLMCommon;
+		};
+		BEEFC0DE0000000000000014 /* MLXEmbedders */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 53014E08BA326F71DA2EA239 /* XCRemoteSwiftPackageReference "mlx-swift-lm" */;
+			productName = MLXEmbedders;
 		};
 		494627CC1EE1ABD0CE03C992 /* HuggingFace */ = {
 			isa = XCSwiftPackageProductDependency;

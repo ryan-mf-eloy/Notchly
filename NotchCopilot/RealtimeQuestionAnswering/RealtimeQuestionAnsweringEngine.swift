@@ -617,7 +617,16 @@ extension RealtimeQuestionAnsweringEngine {
     ) {
         let classifier = providerRouter.questionClassifierProvider(preferences: preferences)
         let answerProvider = providerRouter.meetingAnswerProvider(preferences: preferences)
-        let contextRetriever = MeetingContextRetriever(knowledgeStore: knowledgeStore)
+        let contextRetriever = MeetingContextRetriever(
+            knowledgeStore: knowledgeStore,
+            embeddingProvider: LocalEmbeddingProvider(
+                tier: preferences.ragLocalEmbeddingTier,
+                runtime: preferences.resolvedLocalEmbeddingRuntime,
+                allowModelDownloads: preferences.allowLocalModelDownloads,
+                allowMetalAcceleration: preferences.ragAppleMetalAccelerationEnabled,
+                serverConfiguration: preferences.localEmbeddingServerConfiguration
+            )
+        )
         self.init(
             detectionService: QuestionDetectionService(
                 adaptiveProfile: preferences.questionAnsweringProfile,

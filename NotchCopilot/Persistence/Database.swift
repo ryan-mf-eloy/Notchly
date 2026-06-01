@@ -323,6 +323,373 @@ final class StoredKnowledgeDocument {
 }
 
 @Model
+final class StoredKnowledgeSource {
+    static let displayNameContext = "StoredKnowledgeSource.displayName.v1"
+    static let rootPathContext = "StoredKnowledgeSource.rootPath.v1"
+    static let bookmarkContext = "StoredKnowledgeSource.bookmarkDataBase64.v1"
+    static let lastErrorContext = "StoredKnowledgeSource.lastError.v1"
+    static let metadataContext = "StoredKnowledgeSource.metadataJSON.v1"
+
+    @Attribute(.unique) var id: UUID
+    var kindRaw: String
+    var displayName: String
+    var rootPath: String?
+    var bookmarkDataBase64: String?
+    var workspaceId: String
+    var statusRaw: String
+    var isEnabled: Bool
+    var lastIndexedAt: Date?
+    var lastError: String?
+    var documentCount: Int
+    var chunkCount: Int
+    var sourceFingerprint: String?
+    var metadataJSON: String?
+    var createdAt: Date
+    var updatedAt: Date
+
+    init(
+        source: KnowledgeSource,
+        metadata: [String: String] = [:],
+        cryptor: LocalDataCryptor
+    ) throws {
+        id = source.id
+        kindRaw = source.kind.rawValue
+        displayName = try cryptor.encryptString(source.displayName, context: Self.displayNameContext)
+        rootPath = try cryptor.encryptOptionalString(source.rootPath, context: Self.rootPathContext)
+        bookmarkDataBase64 = try cryptor.encryptOptionalString(source.bookmarkData?.base64EncodedString(), context: Self.bookmarkContext)
+        workspaceId = source.workspaceId
+        statusRaw = source.status.rawValue
+        isEnabled = source.isEnabled
+        lastIndexedAt = source.lastIndexedAt
+        lastError = try cryptor.encryptOptionalString(source.lastError, context: Self.lastErrorContext)
+        documentCount = source.documentCount
+        chunkCount = source.chunkCount
+        sourceFingerprint = source.rootPath
+        metadataJSON = try cryptor.encryptOptionalString(encodedJSONString(metadata, encoder: JSONEncoder(), fallback: "{}"), context: Self.metadataContext)
+        createdAt = source.createdAt
+        updatedAt = source.updatedAt
+    }
+
+    func update(from source: KnowledgeSource, metadata: [String: String] = [:], cryptor: LocalDataCryptor) throws {
+        kindRaw = source.kind.rawValue
+        displayName = try cryptor.encryptString(source.displayName, context: Self.displayNameContext)
+        rootPath = try cryptor.encryptOptionalString(source.rootPath, context: Self.rootPathContext)
+        bookmarkDataBase64 = try cryptor.encryptOptionalString(source.bookmarkData?.base64EncodedString(), context: Self.bookmarkContext)
+        workspaceId = source.workspaceId
+        statusRaw = source.status.rawValue
+        isEnabled = source.isEnabled
+        lastIndexedAt = source.lastIndexedAt
+        lastError = try cryptor.encryptOptionalString(source.lastError, context: Self.lastErrorContext)
+        documentCount = source.documentCount
+        chunkCount = source.chunkCount
+        sourceFingerprint = source.rootPath
+        metadataJSON = try cryptor.encryptOptionalString(encodedJSONString(metadata, encoder: JSONEncoder(), fallback: "{}"), context: Self.metadataContext)
+        updatedAt = source.updatedAt
+    }
+
+    func decrypt(cryptor: LocalDataCryptor) throws -> KnowledgeSource {
+        let bookmarkBase64 = try cryptor.decryptOptionalString(bookmarkDataBase64, context: Self.bookmarkContext)
+        return KnowledgeSource(
+            id: id,
+            kind: KnowledgeSourceKind(rawValue: kindRaw) ?? .legacy,
+            displayName: try cryptor.decryptString(displayName, context: Self.displayNameContext),
+            rootPath: try cryptor.decryptOptionalString(rootPath, context: Self.rootPathContext),
+            bookmarkData: bookmarkBase64.flatMap { Data(base64Encoded: $0) },
+            workspaceId: workspaceId,
+            status: KnowledgeSourceStatus(rawValue: statusRaw) ?? .connected,
+            isEnabled: isEnabled,
+            lastIndexedAt: lastIndexedAt,
+            lastError: try cryptor.decryptOptionalString(lastError, context: Self.lastErrorContext),
+            documentCount: documentCount,
+            chunkCount: chunkCount,
+            createdAt: createdAt,
+            updatedAt: updatedAt
+        )
+    }
+
+    func encryptSensitiveFieldsIfNeeded(cryptor: LocalDataCryptor) throws {
+        displayName = try cryptor.encryptStringIfNeeded(displayName, context: Self.displayNameContext)
+        rootPath = try cryptor.encryptOptionalStringIfNeeded(rootPath, context: Self.rootPathContext)
+        bookmarkDataBase64 = try cryptor.encryptOptionalStringIfNeeded(bookmarkDataBase64, context: Self.bookmarkContext)
+        lastError = try cryptor.encryptOptionalStringIfNeeded(lastError, context: Self.lastErrorContext)
+        metadataJSON = try cryptor.encryptOptionalStringIfNeeded(metadataJSON, context: Self.metadataContext)
+    }
+}
+
+@Model
+final class StoredKnowledgeDocumentRecord {
+    static let displayNameContext = "StoredKnowledgeDocumentRecord.displayName.v1"
+    static let filePathContext = "StoredKnowledgeDocumentRecord.filePath.v1"
+    static let metadataContext = "StoredKnowledgeDocumentRecord.metadataJSON.v1"
+
+    @Attribute(.unique) var id: UUID
+    var sourceId: UUID
+    var displayName: String
+    var filePath: String?
+    var contentHash: String
+    var fileSize: Int
+    var modifiedAt: Date?
+    var workspaceId: String
+    var kindRaw: String
+    var metadataJSON: String
+    var createdAt: Date
+    var updatedAt: Date
+
+    init(document: KnowledgeDocumentRecord, encoder: JSONEncoder = JSONEncoder(), cryptor: LocalDataCryptor) throws {
+        id = document.id
+        sourceId = document.sourceId
+        displayName = try cryptor.encryptString(document.displayName, context: Self.displayNameContext)
+        filePath = try cryptor.encryptOptionalString(document.filePath, context: Self.filePathContext)
+        contentHash = document.contentHash
+        fileSize = document.fileSize
+        modifiedAt = document.modifiedAt
+        workspaceId = document.workspaceId
+        kindRaw = document.kind.rawValue
+        metadataJSON = try cryptor.encryptString(encodedJSONString(document.metadata, encoder: encoder, fallback: "{}"), context: Self.metadataContext)
+        createdAt = document.createdAt
+        updatedAt = document.updatedAt
+    }
+
+    func update(from document: KnowledgeDocumentRecord, encoder: JSONEncoder = JSONEncoder(), cryptor: LocalDataCryptor) throws {
+        sourceId = document.sourceId
+        displayName = try cryptor.encryptString(document.displayName, context: Self.displayNameContext)
+        filePath = try cryptor.encryptOptionalString(document.filePath, context: Self.filePathContext)
+        contentHash = document.contentHash
+        fileSize = document.fileSize
+        modifiedAt = document.modifiedAt
+        workspaceId = document.workspaceId
+        kindRaw = document.kind.rawValue
+        metadataJSON = try cryptor.encryptString(encodedJSONString(document.metadata, encoder: encoder, fallback: "{}"), context: Self.metadataContext)
+        updatedAt = document.updatedAt
+    }
+
+    func decrypt(cryptor: LocalDataCryptor) throws -> KnowledgeDocumentRecord {
+        let metadataString = try cryptor.decryptString(metadataJSON, context: Self.metadataContext)
+        let metadata = (try? JSONDecoder().decode([String: String].self, from: Data(metadataString.utf8))) ?? [:]
+        return KnowledgeDocumentRecord(
+            id: id,
+            sourceId: sourceId,
+            displayName: try cryptor.decryptString(displayName, context: Self.displayNameContext),
+            filePath: try cryptor.decryptOptionalString(filePath, context: Self.filePathContext),
+            contentHash: contentHash,
+            fileSize: fileSize,
+            modifiedAt: modifiedAt,
+            workspaceId: workspaceId,
+            kind: KnowledgeDocumentKind(rawValue: kindRaw) ?? .unknown,
+            metadata: metadata,
+            createdAt: createdAt,
+            updatedAt: updatedAt
+        )
+    }
+
+    func encryptSensitiveFieldsIfNeeded(cryptor: LocalDataCryptor) throws {
+        displayName = try cryptor.encryptStringIfNeeded(displayName, context: Self.displayNameContext)
+        filePath = try cryptor.encryptOptionalStringIfNeeded(filePath, context: Self.filePathContext)
+        metadataJSON = try cryptor.encryptStringIfNeeded(metadataJSON, context: Self.metadataContext)
+    }
+}
+
+@Model
+final class StoredKnowledgeChunk {
+    static let headingContext = "StoredKnowledgeChunk.heading.v1"
+    static let contentContext = "StoredKnowledgeChunk.content.v1"
+    static let locationLabelContext = "StoredKnowledgeChunk.locationLabel.v1"
+
+    @Attribute(.unique) var id: UUID
+    var documentId: UUID
+    var sourceId: UUID
+    var sequence: Int
+    var heading: String?
+    var content: String
+    var tokenEstimate: Int
+    var locationLabel: String?
+    var contentHash: String
+    var workspaceId: String
+    var createdAt: Date
+    var updatedAt: Date
+
+    init(chunk: KnowledgeChunkRecord, cryptor: LocalDataCryptor) throws {
+        id = chunk.id
+        documentId = chunk.documentId
+        sourceId = chunk.sourceId
+        sequence = chunk.sequence
+        heading = try cryptor.encryptOptionalString(chunk.heading, context: Self.headingContext)
+        content = try cryptor.encryptString(chunk.content, context: Self.contentContext)
+        tokenEstimate = chunk.tokenEstimate
+        locationLabel = try cryptor.encryptOptionalString(chunk.locationLabel, context: Self.locationLabelContext)
+        contentHash = chunk.contentHash
+        workspaceId = chunk.workspaceId
+        createdAt = chunk.createdAt
+        updatedAt = chunk.updatedAt
+    }
+
+    func update(from chunk: KnowledgeChunkRecord, cryptor: LocalDataCryptor) throws {
+        documentId = chunk.documentId
+        sourceId = chunk.sourceId
+        sequence = chunk.sequence
+        heading = try cryptor.encryptOptionalString(chunk.heading, context: Self.headingContext)
+        content = try cryptor.encryptString(chunk.content, context: Self.contentContext)
+        tokenEstimate = chunk.tokenEstimate
+        locationLabel = try cryptor.encryptOptionalString(chunk.locationLabel, context: Self.locationLabelContext)
+        contentHash = chunk.contentHash
+        workspaceId = chunk.workspaceId
+        updatedAt = chunk.updatedAt
+    }
+
+    func decrypt(cryptor: LocalDataCryptor) throws -> KnowledgeChunkRecord {
+        KnowledgeChunkRecord(
+            id: id,
+            documentId: documentId,
+            sourceId: sourceId,
+            sequence: sequence,
+            heading: try cryptor.decryptOptionalString(heading, context: Self.headingContext),
+            content: try cryptor.decryptString(content, context: Self.contentContext),
+            tokenEstimate: tokenEstimate,
+            locationLabel: try cryptor.decryptOptionalString(locationLabel, context: Self.locationLabelContext),
+            contentHash: contentHash,
+            workspaceId: workspaceId,
+            createdAt: createdAt,
+            updatedAt: updatedAt
+        )
+    }
+
+    func encryptSensitiveFieldsIfNeeded(cryptor: LocalDataCryptor) throws {
+        heading = try cryptor.encryptOptionalStringIfNeeded(heading, context: Self.headingContext)
+        content = try cryptor.encryptStringIfNeeded(content, context: Self.contentContext)
+        locationLabel = try cryptor.encryptOptionalStringIfNeeded(locationLabel, context: Self.locationLabelContext)
+    }
+}
+
+@Model
+final class StoredKnowledgeEmbeddingRecord {
+    static let vectorContext = "StoredKnowledgeEmbeddingRecord.vectorData.v2"
+
+    @Attribute(.unique) var id: UUID
+    var chunkId: UUID
+    var model: String
+    var contentHash: String
+    var dimensions: Int
+    var quantization: String
+    var vectorData: Data
+    var createdAt: Date
+
+    init(embedding: KnowledgeEmbeddingRecord, cryptor: LocalDataCryptor, sidecarKey: String? = nil) throws {
+        id = embedding.id
+        chunkId = embedding.chunkId
+        model = embedding.model
+        contentHash = embedding.contentHash
+        dimensions = embedding.dimensions
+        if let sidecarKey {
+            quantization = LocalVectorBlobStore.quantization
+            vectorData = try cryptor.encryptData(Data(sidecarKey.utf8), context: Self.vectorContext)
+        } else {
+            quantization = "float16"
+            vectorData = try cryptor.encryptData(Self.encodeVector(embedding.vector), context: Self.vectorContext)
+        }
+        createdAt = embedding.createdAt
+    }
+
+    func decrypt(cryptor: LocalDataCryptor) throws -> KnowledgeEmbeddingRecord {
+        let data = try cryptor.decryptData(vectorData, context: Self.vectorContext)
+        if quantization == LocalVectorBlobStore.quantization {
+            return KnowledgeEmbeddingRecord(id: id, chunkId: chunkId, model: model, contentHash: contentHash, dimensions: dimensions, vector: [], createdAt: createdAt)
+        }
+        let vector = Self.decodeVector(data, dimensions: dimensions, quantization: quantization)
+        return KnowledgeEmbeddingRecord(id: id, chunkId: chunkId, model: model, contentHash: contentHash, dimensions: dimensions, vector: vector, createdAt: createdAt)
+    }
+
+    func sidecarKey(cryptor: LocalDataCryptor) throws -> String? {
+        guard quantization == LocalVectorBlobStore.quantization else { return nil }
+        let data = try cryptor.decryptData(vectorData, context: Self.vectorContext)
+        return String(data: data, encoding: .utf8)
+    }
+
+    func encryptSensitiveFieldsIfNeeded(cryptor: LocalDataCryptor) throws {
+        vectorData = try cryptor.encryptDataIfNeeded(vectorData, context: Self.vectorContext)
+    }
+
+    private static func encodeVector(_ vector: [Double]) -> Data {
+        var data = Data(capacity: vector.count * MemoryLayout<UInt16>.size)
+        for value in vector {
+            var bits = Float16(value).bitPattern.littleEndian
+            withUnsafeBytes(of: &bits) { data.append(contentsOf: $0) }
+        }
+        return data
+    }
+
+    private static func decodeVector(_ data: Data, dimensions: Int, quantization: String) -> [Double] {
+        guard !data.isEmpty else { return [] }
+        if quantization == "float32" || data.count == dimensions * MemoryLayout<Float>.size {
+            return decodeFloat32Vector(data, dimensions: dimensions)
+        }
+        let count = min(dimensions, data.count / MemoryLayout<Float>.size)
+        if quantization != "float16", count == dimensions {
+            return decodeFloat32Vector(data, dimensions: dimensions)
+        }
+        return decodeFloat16Vector(data, dimensions: dimensions)
+    }
+
+    private static func decodeFloat16Vector(_ data: Data, dimensions: Int) -> [Double] {
+        let count = min(dimensions, data.count / MemoryLayout<UInt16>.size)
+        var vector: [Double] = []
+        vector.reserveCapacity(count)
+        for index in 0..<count {
+            let offset = index * MemoryLayout<UInt16>.size
+            var bits: UInt16 = 0
+            for byteIndex in 0..<MemoryLayout<UInt16>.size {
+                bits |= UInt16(data[offset + byteIndex]) << UInt16(byteIndex * 8)
+            }
+            vector.append(Double(Float16(bitPattern: UInt16(littleEndian: bits))))
+        }
+        return vector
+    }
+
+    private static func decodeFloat32Vector(_ data: Data, dimensions: Int) -> [Double] {
+        let count = min(dimensions, data.count / MemoryLayout<Float>.size)
+        var vector: [Double] = []
+        vector.reserveCapacity(count)
+        for index in 0..<count {
+            let offset = index * MemoryLayout<Float>.size
+            var bits: UInt32 = 0
+            for byteIndex in 0..<MemoryLayout<Float>.size {
+                bits |= UInt32(data[offset + byteIndex]) << UInt32(byteIndex * 8)
+            }
+            vector.append(Double(Float(bitPattern: bits)))
+        }
+        return vector
+    }
+}
+
+@Model
+final class StoredRetrievalTrace {
+    static let queryContext = "StoredRetrievalTrace.query.v1"
+    static let resultContext = "StoredRetrievalTrace.resultJSON.v1"
+
+    @Attribute(.unique) var id: UUID
+    var queryHash: String
+    var query: String
+    var workspaceId: String
+    var resultJSON: String
+    var latencyMs: Int
+    var createdAt: Date
+
+    init(id: UUID = UUID(), queryHash: String, query: String, workspaceId: String, resultJSON: String, latencyMs: Int, createdAt: Date = Date(), cryptor: LocalDataCryptor) throws {
+        self.id = id
+        self.queryHash = queryHash
+        self.query = try cryptor.encryptString(query, context: Self.queryContext)
+        self.workspaceId = workspaceId
+        self.resultJSON = try cryptor.encryptString(resultJSON, context: Self.resultContext)
+        self.latencyMs = latencyMs
+        self.createdAt = createdAt
+    }
+
+    func encryptSensitiveFieldsIfNeeded(cryptor: LocalDataCryptor) throws {
+        query = try cryptor.encryptStringIfNeeded(query, context: Self.queryContext)
+        resultJSON = try cryptor.encryptStringIfNeeded(resultJSON, context: Self.resultContext)
+    }
+}
+
+@Model
 final class StoredSpeechVocabularyTerm {
     static let textContext = "StoredSpeechVocabularyTerm.text.v1"
     static let aliasesContext = "StoredSpeechVocabularyTerm.aliasesJSON.v1"
@@ -669,6 +1036,11 @@ enum DatabaseFactory {
             StoredTranscriptSegment.self,
             StoredSummary.self,
             StoredKnowledgeDocument.self,
+            StoredKnowledgeSource.self,
+            StoredKnowledgeDocumentRecord.self,
+            StoredKnowledgeChunk.self,
+            StoredKnowledgeEmbeddingRecord.self,
+            StoredRetrievalTrace.self,
             StoredSpeechVocabularyTerm.self,
             StoredQuestionAnswerRecord.self,
             StoredCopilotInteraction.self,

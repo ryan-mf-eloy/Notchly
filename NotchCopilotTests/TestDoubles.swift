@@ -43,10 +43,6 @@ struct TestAIProvider: AIProvider {
         [Insight(title: "Provider ready", detail: "A real provider is required before drafting.", confidence: 0.9)]
     }
 
-    func embed(texts: [String]) async throws -> [[Double]] {
-        texts.map { text in [Double(text.count), Double(text.lowercased().hashValue & 0xffff) / 65535.0] }
-    }
-
     static func answer(for question: String) -> String {
         let lower = question.lowercased()
         if lower.contains("capital") && (lower.contains("frança") || lower.contains("france")) {

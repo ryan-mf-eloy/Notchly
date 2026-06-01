@@ -123,6 +123,8 @@ struct SettingsView: View {
             audio
         case .ai:
             AIConnectionSettingsView(appState: appState)
+        case .knowledge:
+            knowledge
         case .privacy:
             privacy
         case .about:
@@ -257,6 +259,73 @@ struct SettingsView: View {
         }
     }
 
+    private var knowledge: some View {
+        VStack(spacing: 30) {
+            EssentialSection(title: "Sources") {
+                settingsToggleRow("Knowledge sources", isOn: $appState.preferences.knowledgeSourcesEnabled)
+                SettingsDivider()
+                settingsValueRow("Connected") {
+                    Text("\(appState.knowledgeSources.count) sources")
+                        .settingsSecondaryText()
+                }
+                SettingsDivider()
+                settingsValueRow("Index health") {
+                    HStack(spacing: 8) {
+                        Text(appState.retrievalStatus.detail)
+                            .settingsSecondaryText()
+                            .lineLimit(1)
+                        statusChip(knowledgeHealthStatus.text, isPositive: knowledgeHealthStatus.isPositive)
+                    }
+                }
+                SettingsDivider()
+                settingsMenuRow("Copilot scope", selection: $appState.preferences.copilotKnowledgeScope, options: knowledgeScopeOptions)
+            }
+
+            EssentialSection(title: "Retrieval") {
+                settingsStepperRow("Results", value: $appState.preferences.ragDefaultResultLimit, range: 3...12, suffix: "")
+                SettingsDivider()
+                settingsMenuRow("Embedding", selection: localEmbeddingTierSelection, options: localEmbeddingTierOptions)
+                SettingsDivider()
+                settingsMenuRow("Runtime", selection: localEmbeddingRuntimeSelection, options: localEmbeddingRuntimeOptions)
+                SettingsDivider()
+                appleMetalAccelerationRow
+                SettingsDivider()
+                settingsToggleRow("Model downloads", isOn: allowLocalModelDownloadsSelection)
+                SettingsDivider()
+                settingsToggleRow("Local server", isOn: localEmbeddingServerEnabledSelection)
+                SettingsDivider()
+                settingsTextRow("Endpoint", text: localEmbeddingServerEndpointSelection, placeholder: LocalEmbeddingServerConfiguration.defaultEndpoint)
+                SettingsDivider()
+                settingsTextRow("Server model", text: localEmbeddingServerModelSelection, placeholder: LocalEmbeddingServerConfiguration.defaultModel)
+                SettingsDivider()
+                settingsTextRow("Server dims", text: localEmbeddingServerDimensionsSelection, placeholder: "\(appState.preferences.ragLocalEmbeddingTier.dimensions)")
+                SettingsDivider()
+                settingsValueRow("Runtime status") {
+                    statusChip(localEmbeddingRuntimeStatus.text, isPositive: localEmbeddingRuntimeStatus.isReady)
+                }
+                SettingsDivider()
+                settingsValueRow("Benchmark") {
+                    HStack(spacing: 8) {
+                        statusChip(appState.preferences.ragLocalEmbeddingBenchmark?.summary ?? "Pending", isPositive: appState.preferences.ragLocalEmbeddingBenchmark != nil)
+                        Button("Run") { appState.runLocalEmbeddingBenchmark() }
+                            .buttonStyle(SettingsPillButtonStyle())
+                    }
+                }
+                SettingsDivider()
+                settingsToggleRow("Local rerank", isOn: $appState.preferences.ragLocalRerankEnabled)
+                SettingsDivider()
+                settingsStepperRow("Realtime target", value: $appState.preferences.ragRealtimeLatencyTargetMs, range: 120...500, suffix: "ms")
+                SettingsDivider()
+                settingsStepperRow("Chunk size", value: $appState.preferences.ragChunkTargetTokens, range: 300...1400, suffix: "tokens")
+                SettingsDivider()
+                settingsStepperRow("Overlap", value: $appState.preferences.ragChunkOverlapTokens, range: 0...700, suffix: "tokens")
+            }
+        }
+        .onAppear {
+            appState.reloadKnowledgeDocuments()
+        }
+    }
+
     private var about: some View {
         VStack(spacing: 30) {
             VStack(spacing: 16) {
@@ -344,6 +413,205 @@ struct SettingsView: View {
                 appState.updateTranscriptionMeetingType(meetingType)
             }
         )
+    }
+
+    private var localEmbeddingTierSelection: Binding<LocalEmbeddingTier> {
+        Binding(
+            get: { appState.preferences.ragLocalEmbeddingTier },
+            set: { tier in
+                guard appState.preferences.ragLocalEmbeddingTier != tier else { return }
+                appState.preferences.ragLocalEmbeddingTier = tier
+                appState.preferences.ragLocalEmbeddingBenchmark = nil
+                appState.savePreferences()
+                appState.reloadKnowledgeDocuments()
+            }
+        )
+    }
+
+    private var localEmbeddingRuntimeSelection: Binding<LocalEmbeddingRuntimeKind> {
+        Binding(
+            get: { appState.preferences.ragLocalEmbeddingRuntime },
+            set: { runtime in
+                let canSelectMLX = appState.preferences.ragAppleMetalAccelerationEnabled &&
+                    LocalEmbeddingModelManager.supportsMetalAcceleration
+                guard runtime != .mlx || canSelectMLX else { return }
+                guard appState.preferences.ragLocalEmbeddingRuntime != runtime else { return }
+                appState.preferences.ragLocalEmbeddingRuntime = runtime
+                appState.preferences.ragLocalEmbeddingBenchmark = nil
+                appState.savePreferences()
+                appState.reloadKnowledgeDocuments()
+            }
+        )
+    }
+
+    private var appleMetalAccelerationSelection: Binding<Bool> {
+        Binding(
+            get: { appState.preferences.ragAppleMetalAccelerationEnabled },
+            set: { isEnabled in
+                guard appState.preferences.ragAppleMetalAccelerationEnabled != isEnabled else { return }
+                appState.preferences.ragAppleMetalAccelerationEnabled = isEnabled
+                if !isEnabled && appState.preferences.ragLocalEmbeddingRuntime == .mlx {
+                    appState.preferences.ragLocalEmbeddingRuntime = .automatic
+                }
+                invalidateLocalEmbeddingRuntime()
+            }
+        )
+    }
+
+    private var allowLocalModelDownloadsSelection: Binding<Bool> {
+        Binding(
+            get: { appState.preferences.allowLocalModelDownloads },
+            set: { isAllowed in
+                guard appState.preferences.allowLocalModelDownloads != isAllowed else { return }
+                appState.preferences.allowLocalModelDownloads = isAllowed
+                appState.preferences.ragLocalEmbeddingBenchmark = nil
+                appState.savePreferences()
+                appState.reloadKnowledgeDocuments()
+            }
+        )
+    }
+
+    private var localEmbeddingServerEnabledSelection: Binding<Bool> {
+        Binding(
+            get: { appState.preferences.ragLocalEmbeddingServerEnabled },
+            set: { isEnabled in
+                guard appState.preferences.ragLocalEmbeddingServerEnabled != isEnabled else { return }
+                appState.preferences.ragLocalEmbeddingServerEnabled = isEnabled
+                invalidateLocalEmbeddingRuntime()
+            }
+        )
+    }
+
+    private var localEmbeddingServerEndpointSelection: Binding<String> {
+        Binding(
+            get: { appState.preferences.ragLocalEmbeddingServerEndpoint },
+            set: { endpoint in
+                appState.preferences.ragLocalEmbeddingServerEndpoint = endpoint
+                invalidateLocalEmbeddingRuntime(reload: false)
+            }
+        )
+    }
+
+    private var localEmbeddingServerModelSelection: Binding<String> {
+        Binding(
+            get: { appState.preferences.ragLocalEmbeddingServerModel },
+            set: { model in
+                appState.preferences.ragLocalEmbeddingServerModel = model
+                invalidateLocalEmbeddingRuntime(reload: false)
+            }
+        )
+    }
+
+    private var localEmbeddingServerDimensionsSelection: Binding<String> {
+        Binding(
+            get: {
+                let dimensions = appState.preferences.ragLocalEmbeddingServerDimensions
+                return dimensions > 0 ? "\(dimensions)" : ""
+            },
+            set: { value in
+                let digits = value.filter(\.isNumber)
+                appState.preferences.ragLocalEmbeddingServerDimensions = Int(digits) ?? 0
+                invalidateLocalEmbeddingRuntime(reload: false)
+            }
+        )
+    }
+
+    private var localEmbeddingRuntimeStatus: (text: String, isReady: Bool) {
+        let preferences = appState.preferences
+        let manager = LocalEmbeddingModelManager()
+        let provider = LocalEmbeddingProvider(
+            tier: preferences.ragLocalEmbeddingTier,
+            runtime: preferences.resolvedLocalEmbeddingRuntime,
+            allowModelDownloads: preferences.allowLocalModelDownloads,
+            allowMetalAcceleration: preferences.ragAppleMetalAccelerationEnabled,
+            serverConfiguration: preferences.localEmbeddingServerConfiguration
+        )
+        let runtime = provider.activeRuntime
+        if runtime == .localServer {
+            let configuration = preferences.localEmbeddingServerConfiguration
+            if configuration.isUsable {
+                return ("Local server \(provider.dimensions)d ready", true)
+            }
+            return ("Local server not configured", false)
+        }
+        return (
+            manager.statusText(
+                tier: preferences.ragLocalEmbeddingTier,
+                runtime: runtime,
+                allowDownloads: preferences.allowLocalModelDownloads,
+                allowMetalAcceleration: preferences.ragAppleMetalAccelerationEnabled
+            ),
+            runtime != .mlx || manager.isUsable(
+                tier: preferences.ragLocalEmbeddingTier,
+                runtime: runtime,
+                allowDownloads: preferences.allowLocalModelDownloads,
+                allowMetalAcceleration: preferences.ragAppleMetalAccelerationEnabled
+            )
+        )
+    }
+
+    private var knowledgeHealthStatus: (text: String, isPositive: Bool) {
+        if appState.retrievalStatus.isIndexing {
+            return ("Syncing", false)
+        }
+        if appState.retrievalStatus.title == "Knowledge needs attention" {
+            return ("Attention", false)
+        }
+        if appState.knowledgeSources.isEmpty {
+            return ("Empty", false)
+        }
+        return ("Ready", true)
+    }
+
+    private var knowledgeScopeOptions: [SettingsMenuOption<KnowledgeCopilotScope>] {
+        KnowledgeCopilotScope.allCases.map {
+            SettingsMenuOption(value: $0, title: $0.displayName, systemImage: $0 == .selectedSource ? "archivebox" : ($0 == .currentMeeting ? "waveform.and.mic" : "square.stack.3d.up"))
+        }
+    }
+
+    private var localEmbeddingTierOptions: [SettingsMenuOption<LocalEmbeddingTier>] {
+        LocalEmbeddingTier.allCases.map {
+            SettingsMenuOption(value: $0, title: $0.displayName, subtitle: "\($0.modelProfile.displayName) - \($0.dimensions)d", systemImage: $0.systemImage)
+        }
+    }
+
+    private var localEmbeddingRuntimeOptions: [SettingsMenuOption<LocalEmbeddingRuntimeKind>] {
+        LocalEmbeddingRuntimeKind.allCases.map {
+            let isMLXRuntime = $0 == .mlx
+            let isMetalEnabled = appState.preferences.ragAppleMetalAccelerationEnabled
+            let isMetalAvailable = LocalEmbeddingModelManager.supportsMetalAcceleration
+            let isMLXUnavailable = isMLXRuntime && (!isMetalEnabled || !isMetalAvailable)
+            let subtitle: String? = if $0 == .automatic {
+                "Benchmarked"
+            } else if $0 == .mlx {
+                if !isMetalEnabled {
+                    "Apple Metal disabled"
+                } else if !isMetalAvailable {
+                    "Apple Metal unavailable"
+                } else {
+                    "Apple Metal"
+                }
+            } else if $0 == .localServer {
+                "localhost only"
+            } else {
+                nil
+            }
+            return SettingsMenuOption(
+                value: $0,
+                title: $0.displayName,
+                subtitle: subtitle,
+                systemImage: $0.systemImage,
+                isUnavailable: isMLXUnavailable
+            )
+        }
+    }
+
+    private func invalidateLocalEmbeddingRuntime(reload: Bool = true) {
+        appState.preferences.ragLocalEmbeddingBenchmark = nil
+        appState.savePreferences()
+        if reload {
+            appState.reloadKnowledgeDocuments()
+        }
     }
 
     private var inputDeviceSelection: Binding<String> {
@@ -523,6 +791,51 @@ struct SettingsView: View {
         }
     }
 
+    private var appleMetalAccelerationRow: some View {
+        HStack(spacing: 14) {
+            appleLogoBadge
+
+            VStack(alignment: .leading, spacing: 3) {
+                Text("Apple Metal")
+                    .font(.system(size: 13.5, weight: .semibold))
+                    .foregroundStyle(MinimalTheme.primary)
+                    .lineLimit(1)
+
+                Text("Accelerates local MLX embeddings on Apple GPUs.")
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundStyle(MinimalTheme.secondary.opacity(0.86))
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.9)
+            }
+
+            Spacer(minLength: 16)
+
+            Toggle("Apple Metal", isOn: appleMetalAccelerationSelection)
+                .labelsHidden()
+                .toggleStyle(NotchlySwitchStyle())
+        }
+        .frame(minHeight: 58)
+        .contentShape(Rectangle())
+        .help("Use Apple Metal acceleration for local MLX embedding models.")
+    }
+
+    private var appleLogoBadge: some View {
+        ZStack {
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .fill(MinimalTheme.settingsControl)
+                .frame(width: 34, height: 34)
+                .overlay(
+                    RoundedRectangle(cornerRadius: 8, style: .continuous)
+                        .stroke(MinimalTheme.divider, lineWidth: 0.7)
+                )
+
+            Image(systemName: "apple.logo")
+                .font(.system(size: 17, weight: .semibold))
+                .foregroundStyle(MinimalTheme.primary)
+        }
+        .accessibilityHidden(true)
+    }
+
     private func settingsMenuRow<Selection: Hashable>(
         _ title: String,
         selection: Binding<Selection>,
@@ -560,6 +873,26 @@ struct SettingsView: View {
         }
     }
 
+    private func settingsTextRow(_ title: String, text: Binding<String>, placeholder: String) -> some View {
+        settingsValueRow(title) {
+            TextField(placeholder, text: text)
+                .textFieldStyle(.plain)
+                .font(.system(size: 12.5, weight: .medium))
+                .foregroundStyle(MinimalTheme.primary)
+                .lineLimit(1)
+                .padding(.horizontal, 10)
+                .frame(width: SettingsLayout.controlWidth, height: 30, alignment: .leading)
+                .background(
+                    RoundedRectangle(cornerRadius: 7, style: .continuous)
+                        .fill(MinimalTheme.settingsControl)
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: 7, style: .continuous)
+                        .stroke(MinimalTheme.divider, lineWidth: 0.7)
+                )
+        }
+    }
+
     private func permissionRow(_ title: String, granted: Bool, action: @escaping () -> Void) -> some View {
         settingsValueRow(title) {
             HStack(spacing: 8) {
@@ -591,6 +924,8 @@ struct SettingsView: View {
         Text(text)
             .font(.system(size: 11.5, weight: .semibold))
             .foregroundStyle(isPositive ? MinimalTheme.primary : MinimalTheme.secondary)
+            .lineLimit(1)
+            .minimumScaleFactor(0.82)
             .padding(.horizontal, 10)
             .frame(height: 24)
             .background(
@@ -617,6 +952,7 @@ private enum SettingsPane: String, CaseIterable, Identifiable {
     case general
     case audio
     case ai
+    case knowledge
     case privacy
     case about
 
@@ -627,6 +963,7 @@ private enum SettingsPane: String, CaseIterable, Identifiable {
         case .general: "General"
         case .audio: "Audio"
         case .ai: "AI"
+        case .knowledge: "Knowledge"
         case .privacy: "Privacy"
         case .about: "About"
         }
@@ -637,6 +974,7 @@ private enum SettingsPane: String, CaseIterable, Identifiable {
         case .general: "gearshape"
         case .audio: "waveform"
         case .ai: "sparkles"
+        case .knowledge: "archivebox"
         case .privacy: "lock.shield"
         case .about: "app.badge"
         }

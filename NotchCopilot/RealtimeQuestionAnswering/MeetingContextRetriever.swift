@@ -12,6 +12,7 @@ protocol ContextRetrievalProvider {
 @MainActor
 struct MeetingContextRetriever: ContextRetrievalProvider {
     var knowledgeStore: LocalKnowledgeStore?
+    var embeddingProvider: (any EmbeddingProvider)?
     var privacyGuard = PrivacyGuard()
     var webBuilder = WebSearchQuestionContextBuilder()
 
@@ -22,9 +23,41 @@ struct MeetingContextRetriever: ContextRetrievalProvider {
     ) async throws -> AnswerContext {
         let preferences = meetingContext.preferences
         let ragQuery = RAGQuestionContextBuilder().query(for: question, classification: classification)
-        let ragResults = preferences.aiConfig.ragEnabled ? ((try? knowledgeStore?.keywordSearch(query: ragQuery, limit: 4, workspaceId: preferences.workspaceId)) ?? []) : []
-        let ragSources = ragResults.map {
-            AnswerSource(type: .rag, title: $0.documentName, snippet: privacyGuard.redact($0.snippet), reference: nil)
+        let ragResults: [KnowledgeSearchResult]
+        let retrievedRAGContext: String
+        let ragGrounding: KnowledgeRetrievalGrounding?
+        if preferences.aiConfig.ragEnabled,
+           preferences.knowledgeSourcesEnabled,
+           let knowledgeStore {
+            let selectedSourceId = preferences.copilotKnowledgeScope == .selectedSource ? preferences.selectedKnowledgeSourceId : nil
+            let allowedKinds: Set<KnowledgeSourceKind> = preferences.copilotKnowledgeScope == .currentMeeting ? [.meeting] : Set(KnowledgeSourceKind.allCases)
+            let retrieval = await KnowledgeRetrievalService(store: knowledgeStore, embeddingProvider: embeddingProvider)
+                .retrieve(
+                    query: ragQuery,
+                    preferences: preferences,
+                    limit: min(max(preferences.ragDefaultResultLimit, 4), 8),
+                    selectedSourceId: selectedSourceId,
+                    allowedKinds: allowedKinds
+                )
+            ragResults = retrieval.results
+            retrievedRAGContext = retrieval.context
+            ragGrounding = retrieval.grounding
+        } else {
+            ragResults = []
+            retrievedRAGContext = ""
+            ragGrounding = nil
+        }
+        var ragSources = ragResults.map { $0.answerSource(redacting: privacyGuard) }
+        if let contextNotice = ragGrounding?.contextNotice {
+            ragSources.insert(
+                AnswerSource(
+                    type: .rag,
+                    title: "Local evidence status",
+                    snippet: contextNotice,
+                    reference: nil
+                ),
+                at: 0
+            )
         }
         let webSources = await webBuilder.webSources(for: question, classification: classification, preferences: preferences)
         let transcriptSources = [
@@ -42,9 +75,8 @@ struct MeetingContextRetriever: ContextRetrievalProvider {
             )
         ].filter { ($0.snippet ?? "").isEmpty == false }
 
-        let ragContext = ragSources.map { "[\($0.title)] \($0.snippet ?? "")" }.joined(separator: "\n")
         let webContext = webSources.map { "[\($0.title)] \($0.snippet ?? "")" }.joined(separator: "\n")
-        let mergedContext = [ragContext, webContext].filter { !$0.isEmpty }.joined(separator: "\n")
+        let mergedContext = [retrievedRAGContext, webContext].filter { !$0.isEmpty }.joined(separator: "\n")
 
         return AnswerContext(
             meetingTitle: meetingContext.meeting.title,

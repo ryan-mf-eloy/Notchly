@@ -701,8 +701,19 @@ final class MeetingSessionManager {
         appState.islandMode = .thinking
         appState.answerStage = .drafting
         appState.statusMessage = refinementStyle?.statusText ?? "Thinking..."
-        let ragContext = (try? knowledgeStore.buildContext(for: question)) ?? ""
         let provider = providerRouter.aiProvider(preferences: appState.preferences)
+        let retrieval = await KnowledgeRetrievalService(
+            store: knowledgeStore,
+            embeddingProvider: LocalEmbeddingProvider(
+                tier: appState.preferences.ragLocalEmbeddingTier,
+                runtime: appState.preferences.resolvedLocalEmbeddingRuntime,
+                allowModelDownloads: appState.preferences.allowLocalModelDownloads,
+                allowMetalAcceleration: appState.preferences.ragAppleMetalAccelerationEnabled,
+                serverConfiguration: appState.preferences.localEmbeddingServerConfiguration
+            )
+        )
+            .retrieve(query: question, preferences: appState.preferences, limit: appState.preferences.ragDefaultResultLimit)
+        let ragContext = retrieval.context
         let engine = SuggestedAnswerEngine(provider: provider)
         let providerQuestion = refinedQuestionPrompt(for: question, style: refinementStyle)
         do {
@@ -843,6 +854,8 @@ final class MeetingSessionManager {
             }
             appState.currentMeeting = meeting
             try? repository.save(meeting)
+            try? knowledgeStore.indexMeeting(meeting, workspaceId: appState.preferences.workspaceId)
+            appState.reloadKnowledgeDocuments()
             reloadHistory()
             return summary
         } catch {
@@ -852,6 +865,8 @@ final class MeetingSessionManager {
                 meeting.endedAt = Date()
                 appState.currentMeeting = meeting
                 try? repository.save(meeting)
+                try? knowledgeStore.indexMeeting(meeting, workspaceId: appState.preferences.workspaceId)
+                appState.reloadKnowledgeDocuments()
                 reloadHistory()
             }
             return nil
@@ -3880,7 +3895,8 @@ struct CopilotToolRouter {
         let contextSources = try await contextSources(
             for: requestedTool,
             candidate: candidate,
-            decision: decision
+            decision: decision,
+            provider: provider
         )
         let webRequested = decision.needsWeb || forceWeb
         let hasWebSources = contextSources.contains { $0.type == .web }
@@ -4005,7 +4021,8 @@ struct CopilotToolRouter {
     private func contextSources(
         for requestedTool: CopilotToolKind,
         candidate: QuestionCandidate,
-        decision: CopilotLLMIntentAndAnswerResponse
+        decision: CopilotLLMIntentAndAnswerResponse,
+        provider: any AIProvider
     ) async throws -> [AnswerSource] {
         var sources: [AnswerSource] = []
         if requestedTool == .localMemory {
@@ -4020,10 +4037,28 @@ struct CopilotToolRouter {
                 sources += webSources
             }
         }
-        let knowledgeLimit = requestedTool == .localMemory ? 5 : 4
-        let knowledge = (try? knowledgeStore.keywordSearch(query: candidate.rawText, limit: knowledgeLimit, workspaceId: preferences.workspaceId)) ?? []
-        sources += knowledge.map {
-            AnswerSource(type: .rag, title: $0.documentName, snippet: privacyGuard.redact($0.snippet), reference: nil)
+        if preferences.aiConfig.ragEnabled, preferences.knowledgeSourcesEnabled {
+            let knowledgeLimit = requestedTool == .localMemory ? 5 : preferences.ragDefaultResultLimit
+            let selectedSourceId = preferences.copilotKnowledgeScope == .selectedSource ? preferences.selectedKnowledgeSourceId : nil
+            let allowedKinds: Set<KnowledgeSourceKind> = preferences.copilotKnowledgeScope == .currentMeeting ? [.meeting] : Set(KnowledgeSourceKind.allCases)
+            let retrieval = await KnowledgeRetrievalService(
+                store: knowledgeStore,
+                embeddingProvider: LocalEmbeddingProvider(
+                    tier: preferences.ragLocalEmbeddingTier,
+                    runtime: preferences.resolvedLocalEmbeddingRuntime,
+                    allowModelDownloads: preferences.allowLocalModelDownloads,
+                    allowMetalAcceleration: preferences.ragAppleMetalAccelerationEnabled,
+                    serverConfiguration: preferences.localEmbeddingServerConfiguration
+                )
+            )
+                .retrieve(
+                    query: candidate.rawText,
+                    preferences: preferences,
+                    limit: knowledgeLimit,
+                    selectedSourceId: selectedSourceId,
+                    allowedKinds: allowedKinds
+                )
+            sources += retrieval.results.map { $0.answerSource(redacting: privacyGuard) }
         }
         return deduplicatedSources(sources)
     }

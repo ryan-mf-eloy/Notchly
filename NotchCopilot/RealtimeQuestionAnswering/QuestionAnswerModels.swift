@@ -1271,10 +1271,37 @@ enum AnswerRiskLevel: String, Codable, CaseIterable, Identifiable, Sendable {
 }
 
 struct AnswerSource: Codable, Hashable, Sendable {
-    let type: AnswerSourceType
-    let title: String
-    let snippet: String?
-    let reference: String?
+    var type: AnswerSourceType
+    var title: String
+    var snippet: String?
+    var reference: String?
+    var sourceId: UUID?
+    var documentId: UUID?
+    var chunkId: UUID?
+    var locationLabel: String?
+    var score: Double?
+
+    init(
+        type: AnswerSourceType,
+        title: String,
+        snippet: String?,
+        reference: String?,
+        sourceId: UUID? = nil,
+        documentId: UUID? = nil,
+        chunkId: UUID? = nil,
+        locationLabel: String? = nil,
+        score: Double? = nil
+    ) {
+        self.type = type
+        self.title = title
+        self.snippet = snippet
+        self.reference = reference
+        self.sourceId = sourceId
+        self.documentId = documentId
+        self.chunkId = chunkId
+        self.locationLabel = locationLabel
+        self.score = score
+    }
 }
 
 enum CopilotRuntimeKind: String, Codable, CaseIterable, Identifiable, Sendable {

@@ -53,6 +53,21 @@ final class MeetingRepository {
         for summary in try context.fetch(FetchDescriptor<StoredSummary>()) {
             try summary.encryptSensitiveFieldsIfNeeded(cryptor: cryptor)
         }
+        for source in try context.fetch(FetchDescriptor<StoredKnowledgeSource>()) {
+            try source.encryptSensitiveFieldsIfNeeded(cryptor: cryptor)
+        }
+        for document in try context.fetch(FetchDescriptor<StoredKnowledgeDocumentRecord>()) {
+            try document.encryptSensitiveFieldsIfNeeded(cryptor: cryptor)
+        }
+        for chunk in try context.fetch(FetchDescriptor<StoredKnowledgeChunk>()) {
+            try chunk.encryptSensitiveFieldsIfNeeded(cryptor: cryptor)
+        }
+        for embedding in try context.fetch(FetchDescriptor<StoredKnowledgeEmbeddingRecord>()) {
+            try embedding.encryptSensitiveFieldsIfNeeded(cryptor: cryptor)
+        }
+        for trace in try context.fetch(FetchDescriptor<StoredRetrievalTrace>()) {
+            try trace.encryptSensitiveFieldsIfNeeded(cryptor: cryptor)
+        }
         for speechTerm in try context.fetch(FetchDescriptor<StoredSpeechVocabularyTerm>()) {
             try speechTerm.encryptSensitiveFieldsIfNeeded(cryptor: cryptor)
         }
@@ -103,6 +118,11 @@ final class MeetingRepository {
         for segment in try context.fetch(FetchDescriptor<StoredTranscriptSegment>()) { context.delete(segment) }
         for summary in try context.fetch(FetchDescriptor<StoredSummary>()) { context.delete(summary) }
         for document in try context.fetch(FetchDescriptor<StoredKnowledgeDocument>()) { context.delete(document) }
+        for source in try context.fetch(FetchDescriptor<StoredKnowledgeSource>()) { context.delete(source) }
+        for document in try context.fetch(FetchDescriptor<StoredKnowledgeDocumentRecord>()) { context.delete(document) }
+        for chunk in try context.fetch(FetchDescriptor<StoredKnowledgeChunk>()) { context.delete(chunk) }
+        for embedding in try context.fetch(FetchDescriptor<StoredKnowledgeEmbeddingRecord>()) { context.delete(embedding) }
+        for trace in try context.fetch(FetchDescriptor<StoredRetrievalTrace>()) { context.delete(trace) }
         for speechTerm in try context.fetch(FetchDescriptor<StoredSpeechVocabularyTerm>()) { context.delete(speechTerm) }
         for record in try context.fetch(FetchDescriptor<StoredQuestionAnswerRecord>()) { context.delete(record) }
         for interaction in try context.fetch(FetchDescriptor<StoredCopilotInteraction>()) { context.delete(interaction) }

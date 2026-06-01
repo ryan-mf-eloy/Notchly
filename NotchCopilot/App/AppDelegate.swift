@@ -294,9 +294,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let fileStorageRoot = usesEphemeralStores
             ? FileManager.default.temporaryDirectory.appending(path: "NotchCopilotTests-\(UUID().uuidString)", directoryHint: .isDirectory)
             : nil
+        let vectorBlobStoreRoot = usesEphemeralStores
+            ? FileManager.default.temporaryDirectory.appending(path: "NotchCopilotVectorTests-\(UUID().uuidString)", directoryHint: .isDirectory)
+            : nil
         let fileStorage = try! FileStorageService(root: fileStorageRoot, cryptor: cryptor)
         let repository = MeetingRepository(container: container, cryptor: cryptor)
-        let knowledgeStore = LocalKnowledgeStore(container: container, cryptor: cryptor)
+        let knowledgeStore = LocalKnowledgeStore(container: container, cryptor: cryptor, vectorBlobStore: try? LocalVectorBlobStore(root: vectorBlobStoreRoot))
         let speechVocabularyStore = SpeechVocabularyStore(container: container, cryptor: cryptor)
         do {
             try repository.migrateEncryptedFields()

@@ -1221,7 +1221,7 @@ struct AIProviderConfig: Codable, Hashable {
         realtimeModel: "gpt-realtime",
         realtimeTranscriptionProvider: .elevenLabs,
         realtimeTranscriptionModel: "scribe_v2_realtime",
-        embeddingModel: "text-embedding-3-small",
+        embeddingModel: nil,
         translationEnabled: false,
         webSearchEnabled: false,
         ragEnabled: true,
@@ -1284,12 +1284,28 @@ struct AIProviderConfig: Codable, Hashable {
         realtimeModel = try container.decodeIfPresent(String.self, forKey: .realtimeModel)
         realtimeTranscriptionProvider = try container.decodeIfPresent(RealtimeTranscriptionProvider.self, forKey: .realtimeTranscriptionProvider) ?? .elevenLabs
         realtimeTranscriptionModel = try container.decodeIfPresent(String.self, forKey: .realtimeTranscriptionModel) ?? "scribe_v2_realtime"
-        embeddingModel = try container.decodeIfPresent(String.self, forKey: .embeddingModel)
+        embeddingModel = nil
         translationEnabled = try container.decodeIfPresent(Bool.self, forKey: .translationEnabled) ?? false
         webSearchEnabled = try container.decodeIfPresent(Bool.self, forKey: .webSearchEnabled) ?? false
         ragEnabled = try container.decodeIfPresent(Bool.self, forKey: .ragEnabled) ?? true
         cloudProcessingEnabled = try container.decodeIfPresent(Bool.self, forKey: .cloudProcessingEnabled) ?? false
         legacyAPIKeyAccessEnabled = try container.decodeIfPresent(Bool.self, forKey: .legacyAPIKeyAccessEnabled) ?? false
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(provider, forKey: .provider)
+        try container.encode(authMode, forKey: .authMode)
+        try container.encode(model, forKey: .model)
+        try container.encodeIfPresent(translationModel, forKey: .translationModel)
+        try container.encodeIfPresent(realtimeModel, forKey: .realtimeModel)
+        try container.encodeIfPresent(realtimeTranscriptionProvider, forKey: .realtimeTranscriptionProvider)
+        try container.encodeIfPresent(realtimeTranscriptionModel, forKey: .realtimeTranscriptionModel)
+        try container.encode(translationEnabled, forKey: .translationEnabled)
+        try container.encode(webSearchEnabled, forKey: .webSearchEnabled)
+        try container.encode(ragEnabled, forKey: .ragEnabled)
+        try container.encode(cloudProcessingEnabled, forKey: .cloudProcessingEnabled)
+        try container.encode(legacyAPIKeyAccessEnabled, forKey: .legacyAPIKeyAccessEnabled)
     }
 
     func model(for capability: AIModelCapability) -> String {
@@ -1301,7 +1317,8 @@ struct AIProviderConfig: Codable, Hashable {
         case .transcription:
             return realtimeTranscriptionModel ?? "apple-speech"
         case .embedding:
-            return embeddingModel ?? model
+            if let embeddingModel { return embeddingModel }
+            return provider == .googleGemini ? "text-embedding-004" : "text-embedding-3-small"
         case .chat, .webSearch:
             return model
         }

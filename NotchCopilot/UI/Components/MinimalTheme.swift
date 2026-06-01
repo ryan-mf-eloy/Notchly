@@ -174,6 +174,7 @@ struct SettingsMenuSelector<Value: Hashable>: View {
             } else {
                 ForEach(options) { option in
                     Button {
+                        guard !option.isUnavailable else { return }
                         withAnimation(reduceMotion ? nil : .spring(response: 0.24, dampingFraction: 0.88)) {
                             selection = option.value
                         }
@@ -187,6 +188,7 @@ struct SettingsMenuSelector<Value: Hashable>: View {
                             }
                         }
                     }
+                    .disabled(option.isUnavailable)
                 }
             }
         } label: {

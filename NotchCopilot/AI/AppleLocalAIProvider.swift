@@ -47,10 +47,6 @@ struct AppleLocalAIProvider: AIProvider {
     func generateInsights(transcriptWindow: [TranscriptSegment]) async throws -> [Insight] {
         throw AIProviderError.providerUnavailable("Apple on-device AI insights are unavailable.")
     }
-
-    func embed(texts: [String]) async throws -> [[Double]] {
-        throw AIProviderError.providerUnavailable("Apple on-device embeddings are unavailable.")
-    }
 }
 
 struct LocalLLMModelDescriptor: Codable, Hashable, Sendable {
@@ -213,10 +209,6 @@ struct LocalLLMAIProvider: AIProvider {
 
     func generateInsights(transcriptWindow: [TranscriptSegment]) async throws -> [Insight] {
         throw AIProviderError.providerUnavailable("Local MLX insights are not available in this build.")
-    }
-
-    func embed(texts: [String]) async throws -> [[Double]] {
-        throw AIProviderError.providerUnavailable("Local MLX embeddings are not available in this build.")
     }
 
     private static func prompt(context: AnswerContext, question: String, options: AnswerOptions) -> String {

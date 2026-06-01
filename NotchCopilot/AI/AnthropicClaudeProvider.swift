@@ -84,10 +84,6 @@ struct AnthropicClaudeProvider: AIProvider {
         []
     }
 
-    func embed(texts: [String]) async throws -> [[Double]] {
-        []
-    }
-
     private func callMessages(model: String, prompt: String, maxTokens: Int) async throws -> String {
         let session = try await authProvider.refreshIfNeeded()
         var request = URLRequest(url: URL(string: "https://api.anthropic.com/v1/messages")!)

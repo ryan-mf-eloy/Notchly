@@ -99,16 +99,6 @@ struct GoogleGeminiProvider: AIProvider {
         []
     }
 
-    func embed(texts: [String]) async throws -> [[Double]] {
-        let prefs = preferences()
-        let model = prefs.aiConfig.model(for: .embedding)
-        var vectors: [[Double]] = []
-        for text in texts {
-            vectors.append(try await embed(text: text, model: model))
-        }
-        return vectors
-    }
-
     private func callGenerateContent(model: String, prompt: String, maxOutputTokens: Int, responseMode: LLMRawResponseMode = .plainText) async throws -> String {
         let session = try await authProvider.refreshIfNeeded()
         var request = URLRequest(url: URL(string: "https://generativelanguage.googleapis.com/v1beta/models/\(Self.normalizedModelPath(model)):generateContent")!)
@@ -141,24 +131,6 @@ struct GoogleGeminiProvider: AIProvider {
             .trimmingCharacters(in: .whitespacesAndNewlines)
         guard let text, !text.isEmpty else { throw AIProviderError.invalidResponse }
         return text
-    }
-
-    private func embed(text: String, model: String) async throws -> [Double] {
-        let session = try await authProvider.refreshIfNeeded()
-        var request = URLRequest(url: URL(string: "https://generativelanguage.googleapis.com/v1beta/models/\(Self.normalizedModelPath(model)):embedContent")!)
-        request.httpMethod = "POST"
-        request.timeoutInterval = 20
-        request.addValue(session.accessToken, forHTTPHeaderField: "x-goog-api-key")
-        request.addValue("application/json", forHTTPHeaderField: "Content-Type")
-        request.httpBody = try JSONSerialization.data(withJSONObject: [
-            "content": [
-                "parts": [["text": privacyGuard.redact(text)]]
-            ]
-        ])
-        let (data, response) = try await urlSession.data(for: request)
-        try validate(response: response)
-        let decoded = try JSONDecoder().decode(GeminiEmbeddingResponse.self, from: data)
-        return decoded.embedding.values
     }
 
     private func validate(response: URLResponse) throws {
@@ -204,13 +176,5 @@ private struct GeminiGenerateContentResponse: Decodable {
 
     struct Part: Decodable {
         var text: String?
-    }
-}
-
-private struct GeminiEmbeddingResponse: Decodable {
-    var embedding: Embedding
-
-    struct Embedding: Decodable {
-        var values: [Double]
     }
 }

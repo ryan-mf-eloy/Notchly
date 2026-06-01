@@ -400,6 +400,22 @@ struct AppPreferences: Codable, Hashable {
     var copilotWebMode: CopilotWebMode = .onDemand
     var copilotActivationPolicy: CopilotActivationPolicy = .clearIntent
     var copilotLaunchAtLoginEnabled: Bool = false
+    var knowledgeSourcesEnabled: Bool = true
+    var ragLocalEmbeddingTier: LocalEmbeddingTier = .fast
+    var ragLocalEmbeddingRuntime: LocalEmbeddingRuntimeKind = .automatic
+    var ragAppleMetalAccelerationEnabled: Bool = true
+    var ragLocalEmbeddingBenchmark: LocalEmbeddingRuntimeBenchmarkResult?
+    var ragLocalEmbeddingServerEnabled: Bool = false
+    var ragLocalEmbeddingServerEndpoint: String = LocalEmbeddingServerConfiguration.defaultEndpoint
+    var ragLocalEmbeddingServerModel: String = LocalEmbeddingServerConfiguration.defaultModel
+    var ragLocalEmbeddingServerDimensions: Int = 0
+    var ragLocalRerankEnabled: Bool = true
+    var ragRealtimeLatencyTargetMs: Int = 250
+    var ragChunkTargetTokens: Int = 700
+    var ragChunkOverlapTokens: Int = 120
+    var ragDefaultResultLimit: Int = 8
+    var copilotKnowledgeScope: KnowledgeCopilotScope = .allSources
+    var selectedKnowledgeSourceId: UUID?
 
     init() {}
 
@@ -462,6 +478,22 @@ struct AppPreferences: Codable, Hashable {
         case copilotWebMode
         case copilotActivationPolicy
         case copilotLaunchAtLoginEnabled
+        case knowledgeSourcesEnabled
+        case ragLocalEmbeddingTier
+        case ragLocalEmbeddingRuntime
+        case ragAppleMetalAccelerationEnabled
+        case ragLocalEmbeddingBenchmark
+        case ragLocalEmbeddingServerEnabled
+        case ragLocalEmbeddingServerEndpoint
+        case ragLocalEmbeddingServerModel
+        case ragLocalEmbeddingServerDimensions
+        case ragLocalRerankEnabled
+        case ragRealtimeLatencyTargetMs
+        case ragChunkTargetTokens
+        case ragChunkOverlapTokens
+        case ragDefaultResultLimit
+        case copilotKnowledgeScope
+        case selectedKnowledgeSourceId
     }
 
     init(from decoder: Decoder) throws {
@@ -526,6 +558,22 @@ struct AppPreferences: Codable, Hashable {
         copilotWebMode = try container.decodeIfPresent(CopilotWebMode.self, forKey: .copilotWebMode) ?? .onDemand
         copilotActivationPolicy = try container.decodeIfPresent(CopilotActivationPolicy.self, forKey: .copilotActivationPolicy) ?? .clearIntent
         copilotLaunchAtLoginEnabled = try container.decodeIfPresent(Bool.self, forKey: .copilotLaunchAtLoginEnabled) ?? launchAtLogin
+        knowledgeSourcesEnabled = try container.decodeIfPresent(Bool.self, forKey: .knowledgeSourcesEnabled) ?? true
+        ragLocalEmbeddingTier = try container.decodeIfPresent(LocalEmbeddingTier.self, forKey: .ragLocalEmbeddingTier) ?? .fast
+        ragLocalEmbeddingRuntime = try container.decodeIfPresent(LocalEmbeddingRuntimeKind.self, forKey: .ragLocalEmbeddingRuntime) ?? .automatic
+        ragAppleMetalAccelerationEnabled = try container.decodeIfPresent(Bool.self, forKey: .ragAppleMetalAccelerationEnabled) ?? true
+        ragLocalEmbeddingBenchmark = try container.decodeIfPresent(LocalEmbeddingRuntimeBenchmarkResult.self, forKey: .ragLocalEmbeddingBenchmark)
+        ragLocalEmbeddingServerEnabled = try container.decodeIfPresent(Bool.self, forKey: .ragLocalEmbeddingServerEnabled) ?? false
+        ragLocalEmbeddingServerEndpoint = try container.decodeIfPresent(String.self, forKey: .ragLocalEmbeddingServerEndpoint) ?? LocalEmbeddingServerConfiguration.defaultEndpoint
+        ragLocalEmbeddingServerModel = try container.decodeIfPresent(String.self, forKey: .ragLocalEmbeddingServerModel) ?? LocalEmbeddingServerConfiguration.defaultModel
+        ragLocalEmbeddingServerDimensions = try container.decodeIfPresent(Int.self, forKey: .ragLocalEmbeddingServerDimensions) ?? 0
+        ragLocalRerankEnabled = try container.decodeIfPresent(Bool.self, forKey: .ragLocalRerankEnabled) ?? true
+        ragRealtimeLatencyTargetMs = try container.decodeIfPresent(Int.self, forKey: .ragRealtimeLatencyTargetMs) ?? 250
+        ragChunkTargetTokens = try container.decodeIfPresent(Int.self, forKey: .ragChunkTargetTokens) ?? 700
+        ragChunkOverlapTokens = try container.decodeIfPresent(Int.self, forKey: .ragChunkOverlapTokens) ?? 120
+        ragDefaultResultLimit = try container.decodeIfPresent(Int.self, forKey: .ragDefaultResultLimit) ?? 8
+        copilotKnowledgeScope = try container.decodeIfPresent(KnowledgeCopilotScope.self, forKey: .copilotKnowledgeScope) ?? .allSources
+        selectedKnowledgeSourceId = try container.decodeIfPresent(UUID.self, forKey: .selectedKnowledgeSourceId)
     }
 
     mutating func normalizeForPersistence() {
@@ -545,6 +593,28 @@ struct AppPreferences: Codable, Hashable {
         copilotRetentionDays = min(max(copilotRetentionDays, 1), 30)
         copilotAlwaysOnEnabled = false
         ambientAudioScope = .microphoneOnly
+        ragChunkTargetTokens = min(max(ragChunkTargetTokens, 300), 1_400)
+        ragChunkOverlapTokens = min(max(ragChunkOverlapTokens, 0), max(0, ragChunkTargetTokens / 2))
+        ragDefaultResultLimit = min(max(ragDefaultResultLimit, 3), 12)
+        ragRealtimeLatencyTargetMs = min(max(ragRealtimeLatencyTargetMs, 120), 500)
+        ragLocalEmbeddingServerEndpoint = ragLocalEmbeddingServerEndpoint.trimmingCharacters(in: .whitespacesAndNewlines)
+        if ragLocalEmbeddingServerEndpoint.isEmpty {
+            ragLocalEmbeddingServerEndpoint = LocalEmbeddingServerConfiguration.defaultEndpoint
+        }
+        ragLocalEmbeddingServerModel = ragLocalEmbeddingServerModel.trimmingCharacters(in: .whitespacesAndNewlines)
+        if ragLocalEmbeddingServerModel.isEmpty {
+            ragLocalEmbeddingServerModel = LocalEmbeddingServerConfiguration.defaultModel
+        }
+        ragLocalEmbeddingServerDimensions = min(max(ragLocalEmbeddingServerDimensions, 0), 8_192)
+        if let benchmark = ragLocalEmbeddingBenchmark,
+           benchmark.tier != ragLocalEmbeddingTier ||
+            benchmark.targetModelId != ragLocalEmbeddingTier.modelProfile.targetModelId ||
+            (!ragAppleMetalAccelerationEnabled && benchmark.selectedRuntime == .mlx) {
+            ragLocalEmbeddingBenchmark = nil
+        }
+        if !ragAppleMetalAccelerationEnabled && ragLocalEmbeddingRuntime == .mlx {
+            ragLocalEmbeddingRuntime = .automatic
+        }
         launchAtLogin = launchAtLogin || copilotLaunchAtLoginEnabled
         audioQuality = transcriptionAccuracyMode.legacyAudioQualityName
         let trimmedLocalRefinerModel = localASRRefinerModel.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -626,6 +696,30 @@ struct AppPreferences: Codable, Hashable {
             localOnlyMode: localOnlyMode,
             diagnosticsEnabled: showTranscriptionDiagnostics
         )
+    }
+
+    var resolvedLocalEmbeddingRuntime: LocalEmbeddingRuntimeKind {
+        if !ragAppleMetalAccelerationEnabled && ragLocalEmbeddingRuntime == .mlx {
+            return .naturalLanguageHybrid
+        }
+        if ragLocalEmbeddingRuntime != .automatic {
+            return ragLocalEmbeddingRuntime
+        }
+        let benchmarkRuntime = ragLocalEmbeddingBenchmark?.selectedRuntime
+        if !ragAppleMetalAccelerationEnabled && benchmarkRuntime == .mlx {
+            return .automatic
+        }
+        return benchmarkRuntime ?? .automatic
+    }
+
+    var localEmbeddingServerConfiguration: LocalEmbeddingServerConfiguration {
+        LocalEmbeddingServerConfiguration(
+            isEnabled: ragLocalEmbeddingServerEnabled,
+            endpoint: ragLocalEmbeddingServerEndpoint,
+            model: ragLocalEmbeddingServerModel,
+            dimensions: ragLocalEmbeddingServerDimensions > 0 ? ragLocalEmbeddingServerDimensions : nil
+        )
+        .normalized(defaultDimensions: ragLocalEmbeddingTier.dimensions)
     }
 
     private mutating func mergeDefaultKnownMeetingApps() {

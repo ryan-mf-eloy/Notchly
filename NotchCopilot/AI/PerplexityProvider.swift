@@ -81,10 +81,6 @@ struct PerplexityProvider: AIProvider {
         []
     }
 
-    func embed(texts: [String]) async throws -> [[Double]] {
-        []
-    }
-
     private func callChatCompletions(model: String, prompt: String, maxTokens: Int) async throws -> String {
         let session = try await authProvider.refreshIfNeeded()
         guard session.provider == .perplexityAPIKey else { throw AuthError.unsupportedAccessMode }

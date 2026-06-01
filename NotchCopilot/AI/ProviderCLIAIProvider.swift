@@ -86,10 +86,6 @@ struct ProviderCLIAIProvider: AIProvider {
         []
     }
 
-    func embed(texts: [String]) async throws -> [[Double]] {
-        []
-    }
-
     private func runPrompt(_ prompt: String, model: String, responseMode: LLMRawResponseMode = .plainText) async throws -> String {
         _ = try await authProvider.refreshIfNeeded()
         let result = try await runner.runProviderCLI(

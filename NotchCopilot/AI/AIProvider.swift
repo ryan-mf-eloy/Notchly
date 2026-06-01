@@ -66,7 +66,6 @@ protocol AIProvider {
     func translateSegment(_ segment: TranscriptSegment, targetLanguage: String) async throws -> String
     func extractActionItems(transcript: [TranscriptSegment]) async throws -> [ActionItem]
     func generateInsights(transcriptWindow: [TranscriptSegment]) async throws -> [Insight]
-    func embed(texts: [String]) async throws -> [[Double]]
 }
 
 extension AIProvider {
@@ -114,10 +113,6 @@ struct UnavailableAIProvider: AIProvider {
     }
 
     func generateInsights(transcriptWindow: [TranscriptSegment]) async throws -> [Insight] {
-        throw AIProviderError.providerUnavailable(reason)
-    }
-
-    func embed(texts: [String]) async throws -> [[Double]] {
         throw AIProviderError.providerUnavailable(reason)
     }
 }
