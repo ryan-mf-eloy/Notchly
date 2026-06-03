@@ -716,9 +716,11 @@ private struct RichActionStrip: View {
     var onRegenerateWithWeb: (() -> Void)?
 
     var body: some View {
-        if !actions.isEmpty {
+        let availableActions = Array(actions.enumerated()).filter { canPerform($0.element) }
+
+        if !availableActions.isEmpty {
             HStack(spacing: 6) {
-                ForEach(Array(actions.enumerated()), id: \.offset) { _, action in
+                ForEach(availableActions, id: \.offset) { _, action in
                     Button {
                         perform(action)
                     } label: {
@@ -739,6 +741,19 @@ private struct RichActionStrip: View {
                 }
             }
             .textSelection(.disabled)
+        }
+    }
+
+    private func canPerform(_ action: RichAnswerActionPayload) -> Bool {
+        switch RichAnswerActionKind(rawValue: action.kind) {
+        case .copy:
+            return onCopy != nil
+        case .openSources:
+            return onOpenSources != nil
+        case .regenerateWithWeb:
+            return onRegenerateWithWeb != nil
+        case .none:
+            return false
         }
     }
 

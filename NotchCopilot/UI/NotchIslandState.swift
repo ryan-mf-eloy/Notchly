@@ -35,6 +35,19 @@ enum NotchIslandChromeMetrics {
     )
 }
 
+enum NotchIslandVisualEnvelope {
+    static let horizontalShadowOutset: CGFloat = 24
+    static let bottomShadowOutset: CGFloat = 22
+    static let chromeSettleDelayMs = 340
+
+    static func windowCanvasSize(for canvasSize: CGSize) -> CGSize {
+        CGSize(
+            width: ceil(canvasSize.width + horizontalShadowOutset * 2),
+            height: ceil(canvasSize.height + bottomShadowOutset)
+        )
+    }
+}
+
 enum NotchIslandMode: String, Codable, CaseIterable, Identifiable {
     case idle
     case meetingDetected

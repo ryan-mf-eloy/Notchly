@@ -146,6 +146,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let isQuestionAnsweringUITestHarness = ProcessInfo.processInfo.isQuestionAnsweringUITestHarness
         NSApp.setActivationPolicy(isQuestionAnsweringUITestHarness ? .regular : .accessory)
         NSApp.appearance = NSAppearance(named: .darkAqua)
+        if ProcessInfo.processInfo.isRunningXCTest, !isQuestionAnsweringUITestHarness {
+            return
+        }
         bootstrap()
         if isQuestionAnsweringUITestHarness {
             runQuestionAnsweringUITestHarness()
@@ -162,10 +165,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         appState.reloadHistory()
         appState.reloadKnowledgeDocuments()
         appState.reloadSpeechVocabulary()
-        if !ProcessInfo.processInfo.isRunningXCTest {
-            meetingAutomationController?.start()
-            ambientCopilotController?.start()
-        }
+        meetingAutomationController?.start()
+        ambientCopilotController?.start()
     }
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {

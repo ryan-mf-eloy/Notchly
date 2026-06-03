@@ -189,7 +189,7 @@ struct RealtimeDeferredPartialDetectionPolicy: Codable, Hashable, Sendable {
         completeMinimumTokenCount: 5,
         completeMinimumCJKCharacterCount: 8,
         allowModelRescuePrefilter: true,
-        modelRescuePrefilterRequiresSurfaceEvidence: true
+        modelRescuePrefilterRequiresSurfaceEvidence: false
     )
 
     init(
@@ -945,7 +945,7 @@ class RealtimeQuestionAnsweringEngine {
             profile: profile
         )
         return detection.rejectedFrames.contains { rejected in
-            guard !rejected.hasHardSuppression else { return false }
+            guard !rejected.hasModelRescueBlockingSuppression(rulePack: intentGate.rulePack) else { return false }
             guard partialPolicy.modelRescuePrefilterRequiresSurfaceEvidence else { return true }
             return !rejected.surfaceSignals.isEmpty
         }
@@ -968,6 +968,12 @@ class RealtimeQuestionAnsweringEngine {
         guard let multiqtRescuer, preferences.qaMultimodalMode != .off else {
             return detection.surfaceCandidates
         }
+        let surfaceCandidates = await multiqtRescuer.refineSurfaceCandidates(
+            detection.surfaceCandidates,
+            context: context,
+            mode: preferences.qaMultimodalMode,
+            profile: profile
+        )
         let rescued = await multiqtRescuer.rescueCandidates(
             from: detection.rejectedFrames,
             context: context,
@@ -975,7 +981,7 @@ class RealtimeQuestionAnsweringEngine {
             profile: profile,
             shadowLogger: shadowLogger
         )
-        return detection.surfaceCandidates + rescued
+        return surfaceCandidates + rescued
     }
 
     private func looksCompleteEnoughForDeferredPartial(_ normalized: String) -> Bool {
@@ -1053,7 +1059,11 @@ class RealtimeQuestionAnsweringEngine {
             eventBus.send(.questionMerged(source: incoming, target: candidate))
         }
 
-        if candidate.discovery.source == .multiqtRescue {
+        let hasEnforcedModelPositiveSurface = preferences.qaMultimodalMode == .enforced
+            && candidate.discovery.source == .surface
+            && candidate.discovery.hasPositiveTrainedQuestionSignal
+
+        if candidate.discovery.source == .multiqtRescue || hasEnforcedModelPositiveSurface {
             if let hardSuppression = intentGate.hardSuppression(candidate: candidate, context: transcriptContext, profile: profile) {
                 let classification = QuestionClassification(ignoredBy: hardSuppression.evaluation, candidate: candidate)
                 candidate.classification = classification
@@ -1101,7 +1111,7 @@ class RealtimeQuestionAnsweringEngine {
                     : realtimePolicy.runtimeLabels.shadowIgnoredClassifier
             )
 
-            guard classification.isQuestion else {
+            guard classification.isQuestion && classification.responseNeeded else {
                 eventBus.send(.questionIgnored(candidate, classification.reason))
                 return
             }

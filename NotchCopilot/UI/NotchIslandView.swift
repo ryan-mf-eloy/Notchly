@@ -10,7 +10,7 @@ struct NotchIslandView: View {
     private var contentFade: Animation {
         reduceMotion ? .easeOut(duration: 0.08) : .easeInOut(duration: 0.14)
     }
-    private let chromeSettleDelayMs = 280
+    private let chromeSettleDelayMs = NotchIslandVisualEnvelope.chromeSettleDelayMs
     private let primaryText = Color.white.opacity(0.92)
     private let secondaryText = Color.white.opacity(0.58)
     private let hairline = Color.white.opacity(0.055)
@@ -31,13 +31,11 @@ struct NotchIslandView: View {
                     .padding(.horizontal, horizontalPadding)
                     .padding(.top, topPadding)
                     .padding(.bottom, bottomPadding)
-                    .opacity(appState.isPanelExpanded ? 1 : 0.98)
-                    .animation(.easeInOut(duration: 0.16), value: appState.isPanelExpanded)
             }
             .frame(width: chromeIslandSize.width, height: chromeIslandSize.height, alignment: .top)
             .clipShape(islandShape, style: FillStyle(eoFill: false, antialiased: true))
             .overlay(
-                islandShape
+                NotchIslandChromeBorder(cornerRadius: appState.notchCornerRadius)
                     .stroke(islandStrokeColor, lineWidth: islandStrokeWidth)
                     .allowsHitTesting(false)
             )
@@ -141,19 +139,20 @@ struct NotchIslandView: View {
     @ViewBuilder
     private var islandChromeBackground: some View {
         if usesFlushCompactCopilotChrome {
-            Color.black
-                .opacity(isLiquidGlassDesign ? 0.88 : 0.98)
+            islandShape
+                .fill(Color.black.opacity(isLiquidGlassDesign ? 0.88 : 0.98))
                 .allowsHitTesting(false)
         } else if isLiquidGlassDesign {
             liquidGlassIslandBackground
         } else {
-            VisualEffectBlur(material: .hudWindow, blendingMode: .behindWindow)
-                .allowsHitTesting(false)
+            islandShape
+                .fill(Color.black.opacity(0.985))
             LinearGradient(
                 colors: [Color.black.opacity(0.98), Color(red: 0.025, green: 0.025, blue: 0.025).opacity(0.94)],
                 startPoint: .top,
                 endPoint: .bottom
             )
+            .clipShape(islandShape, style: FillStyle(eoFill: false, antialiased: true))
             .allowsHitTesting(false)
         }
     }
@@ -178,6 +177,7 @@ struct NotchIslandView: View {
         } else {
             VisualEffectBlur(material: .hudWindow, blendingMode: .behindWindow)
                 .opacity(0.92)
+                .mask(islandShape)
                 .allowsHitTesting(false)
             islandShape
                 .fill(Color.black.opacity(appState.isPanelExpanded ? 0.28 : 0.22))
@@ -192,6 +192,7 @@ struct NotchIslandView: View {
             startPoint: .topLeading,
             endPoint: .bottomTrailing
         )
+        .clipShape(islandShape, style: FillStyle(eoFill: false, antialiased: true))
         .allowsHitTesting(false)
     }
 
@@ -341,15 +342,30 @@ struct NotchIslandView: View {
 
     @ViewBuilder
     private var islandContent: some View {
-        if appState.isPanelExpanded {
-            expandedIslandContent
-        } else {
+        ZStack(alignment: .top) {
             compactContent
+                .opacity(appState.isPanelExpanded ? 0 : 1)
+                .allowsHitTesting(!appState.isPanelExpanded)
+
+            expandedIslandContent
+                .opacity(appState.isPanelExpanded ? 1 : 0)
+                .allowsHitTesting(appState.isPanelExpanded)
         }
+        .animation(contentFade, value: appState.isPanelExpanded)
     }
 
     @ViewBuilder
     private var compactContent: some View {
+        ZStack(alignment: .top) {
+            compactContentBody
+                .id(compactContentIdentity)
+                .transition(.opacity)
+        }
+        .animation(contentFade, value: compactContentIdentity)
+    }
+
+    @ViewBuilder
+    private var compactContentBody: some View {
         if appState.shouldShowCopilotPushToTalkCompactIndicator {
             compactCopilotIndicatorContent(isProcessing: appState.shouldShowCopilotPushToTalkProcessingIndicator)
         } else {
@@ -362,7 +378,7 @@ struct NotchIslandView: View {
                 case .listening:
                     listeningContent
                 case .questionDetected:
-                    questionAnswerRedirectContent
+                    compactQuestionAnswerContent
                 case .thinking:
                     thinkingContent
                 case .summarizing:
@@ -371,13 +387,23 @@ struct NotchIslandView: View {
                     if appState.currentMeeting != nil {
                         listeningContent
                     } else {
-                        questionAnswerRedirectContent
+                        compactQuestionAnswerContent
                     }
                 case .summaryReady:
                     summaryReadyContent
                 }
             }
         }
+    }
+
+    private var compactContentIdentity: String {
+        if appState.shouldShowCopilotPushToTalkCompactIndicator {
+            return appState.shouldShowCopilotPushToTalkProcessingIndicator ? "copilot-processing" : "copilot-listening"
+        }
+        if appState.islandMode == .suggestedAnswer, appState.currentMeeting != nil {
+            return "suggested-answer-listening"
+        }
+        return appState.islandMode.rawValue
     }
 
     private var expandedIslandContent: some View {
@@ -403,13 +429,16 @@ struct NotchIslandView: View {
                 headerControlButton(systemName: "stop.fill", help: "Stop", role: .destructive, isDisabled: !expandedHasActiveMeeting) {
                     appState.stopMeeting()
                 }
-                IconButton(
-                    systemName: "translate",
-                    help: appState.preferences.liveTranslationEnabled ? "Disable translation" : "Enable translation",
-                    isActive: appState.preferences.liveTranslationEnabled,
-                    size: .header
-                ) {
-                    appState.toggleLiveTranslation()
+                if appState.shouldShowLiveTranslationControl {
+                    IconButton(
+                        systemName: "translate",
+                        help: appState.preferences.liveTranslationEnabled ? "Disable translation" : "Enable translation",
+                        isActive: appState.preferences.liveTranslationEnabled,
+                        size: .header
+                    ) {
+                        appState.toggleLiveTranslation()
+                    }
+                    .transition(.opacity)
                 }
                 if appState.currentMeeting != nil {
                     Text(DateFormatting.duration(appState.elapsed))
@@ -432,6 +461,7 @@ struct NotchIslandView: View {
         }
         .frame(height: NotchIslandChromeMetrics.expandedHeaderHeight, alignment: .top)
         .animation(contentFade, value: expandedHasActiveMeeting)
+        .animation(contentFade, value: appState.shouldShowLiveTranslationControl)
     }
 
     private var expandedHasActiveMeeting: Bool {
@@ -471,6 +501,7 @@ struct NotchIslandView: View {
         if showsHoverActions && showsCompactRecordSideActions {
             HStack(spacing: NotchIslandChromeMetrics.compactRecordHoverActionTrailingGap) {
                 compactRecordHoverControls
+                    .zIndex(2)
                 recordPillButton(
                     iconResolution: iconResolution,
                     remainingSeconds: remainingSeconds,
@@ -478,9 +509,10 @@ struct NotchIslandView: View {
                     width: compactRecordPrimaryButtonWidth,
                     action: action
                 )
+                .zIndex(1)
             }
             .frame(width: recordButtonWidth, height: NotchIslandChromeMetrics.compactRecordButtonHeight, alignment: .leading)
-            .transition(.opacity.combined(with: .move(edge: .leading)))
+            .transition(.opacity)
             .animation(contentFade, value: showsCompactRecordSideActions)
         } else {
             recordPillButton(
@@ -597,7 +629,7 @@ struct NotchIslandView: View {
         .padding(.leading, 9)
         .padding(.trailing, 86)
         .protectedContentRegion(appState.preferences.stealthModeEnabled)
-        .transition(.opacity.combined(with: .move(edge: .trailing)))
+        .transition(.opacity)
     }
 
     private func compactCopilotIndicatorContent(isProcessing: Bool) -> some View {
@@ -826,26 +858,90 @@ struct NotchIslandView: View {
         .frame(maxWidth: .infinity, alignment: .center)
     }
 
-    private var questionAnswerRedirectContent: some View {
-        Color.clear
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .onAppear {
-                redirectCollapsedQuestionToAnswerPanel()
+    private var compactQuestionAnswerContent: some View {
+        HStack(spacing: 0) {
+            HStack(spacing: 9) {
+                Group {
+                    if appState.answerStage.isInProgress {
+                        ProgressView()
+                            .controlSize(.small)
+                            .scaleEffect(0.56)
+                            .tint(Color.white.opacity(0.68))
+                    } else {
+                        Image(systemName: "text.bubble")
+                            .font(.system(size: 13, weight: .semibold))
+                            .foregroundStyle(Color.white.opacity(0.62))
+                    }
+                }
+                .frame(width: 22, height: 22)
+
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(compactQuestionTitleText)
+                        .font(.system(size: 12.2, weight: .semibold))
+                        .foregroundStyle(primaryText)
+                        .lineLimit(1)
+                    Text(compactQuestionDetailText)
+                        .font(.system(size: 9.8, weight: .medium))
+                        .foregroundStyle(secondaryText)
+                        .lineLimit(1)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
             }
+
+            Color.clear
+                .frame(width: notchKeepoutWidth)
+                .accessibilityHidden(true)
+
+            HStack(spacing: 5) {
+                if appState.questionAnswerQueue.count > 1 {
+                    compactQuestionQueueControls
+                }
+                IconButton(systemName: "arrow.up.forward", help: "Open answer", size: .compact) {
+                    openCollapsedQuestionAnswer()
+                }
+            }
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
+        .contentShape(Rectangle())
+        .onTapGesture {
+            openCollapsedQuestionAnswer()
+        }
+        .protectedContentRegion(appState.preferences.stealthModeEnabled)
     }
 
-    private func redirectCollapsedQuestionToAnswerPanel() {
-        guard !appState.isPanelExpanded else { return }
-        guard appState.hasQuestionAnswerContext else {
-            appState.islandMode = appState.currentMeeting == nil ? .idle : .listening
-            return
+    private var compactQuestionTitleText: String {
+        let title = appState.questionClassification?.extractedQuestion ??
+            appState.detectedQuestion ??
+            appState.activeQuestion?.rawText ??
+            appState.activeCopilotInteraction?.prompt ??
+            "Notchly"
+        return title.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private var compactQuestionDetailText: String {
+        if appState.answerStage.isInProgress {
+            return appState.answerStage.displayName
         }
 
-        DispatchQueue.main.async {
-            guard !appState.isPanelExpanded else { return }
-            withAnimation(islandSpring) {
-                appState.showQuestionAnswerPanel(mode: .answer)
-            }
+        let visibleAnswer = appState.visibleAnswerText.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !visibleAnswer.isEmpty {
+            return visibleAnswer
+        }
+
+        if appState.isShowingCopilotAnswerDetail,
+           let response = appState.activeCopilotInteraction?.response.trimmingCharacters(in: .whitespacesAndNewlines),
+           !response.isEmpty {
+            return response
+        }
+
+        return appState.selectedQuestionPositionText ?? "Ready"
+    }
+
+    private func openCollapsedQuestionAnswer() {
+        guard !appState.isPanelExpanded else { return }
+        withAnimation(islandSpring) {
+            appState.questionAnswerPresentationMode = .answer
+            appState.expandPanelPreservingContext()
         }
     }
 
@@ -867,6 +963,33 @@ struct NotchIslandView: View {
         }
     }
 
+}
+
+private struct NotchIslandChromeBorder: Shape {
+    var cornerRadius: CGFloat
+
+    var animatableData: CGFloat {
+        get { cornerRadius }
+        set { cornerRadius = newValue }
+    }
+
+    func path(in rect: CGRect) -> Path {
+        let radius = min(cornerRadius, rect.width / 2, rect.height / 2)
+        var path = Path()
+        path.move(to: CGPoint(x: rect.minX, y: rect.minY))
+        path.addLine(to: CGPoint(x: rect.minX, y: rect.maxY - radius))
+        path.addQuadCurve(
+            to: CGPoint(x: rect.minX + radius, y: rect.maxY),
+            control: CGPoint(x: rect.minX, y: rect.maxY)
+        )
+        path.addLine(to: CGPoint(x: rect.maxX - radius, y: rect.maxY))
+        path.addQuadCurve(
+            to: CGPoint(x: rect.maxX, y: rect.maxY - radius),
+            control: CGPoint(x: rect.maxX, y: rect.maxY)
+        )
+        path.addLine(to: CGPoint(x: rect.maxX, y: rect.minY))
+        return path
+    }
 }
 
 struct MeetingAppIconResolution {

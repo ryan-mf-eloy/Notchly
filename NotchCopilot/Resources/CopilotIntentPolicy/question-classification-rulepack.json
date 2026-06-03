@@ -307,6 +307,7 @@
   "reasons": {
     "multimodalRejectedTemplate": "Rejected by multimodal stability gate: {suppressionSignals}",
     "localGateRejectedTemplate": "Rejected by high-precision local decision gate: {understandingReason}",
-    "multiQTRescued": "MultiQT rescued a model-positive question that the surface detector rejected."
+    "multiQTRescued": "MultiQT rescued a model-positive question that the surface detector rejected.",
+    "multiQTModelAccepted": "MultiQT accepted a model-positive question without relying on fixed lexical rules."
   }
 }

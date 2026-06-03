@@ -408,6 +408,22 @@ final class AppState: ObservableObject {
             (isShowingCopilotAnswerDetail && activeCopilotInteraction != nil)
     }
 
+    var hasOpenQuestionAnswerSurface: Bool {
+        activeQuestion != nil ||
+            suggestedAnswer != nil ||
+            !streamingAnswerText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ||
+            answerStage.isInProgress ||
+            (isShowingCopilotAnswerDetail && activeCopilotInteraction != nil)
+    }
+
+    var shouldShowLiveTranslationControl: Bool {
+        guard currentMeeting != nil, isPanelExpanded, !isShowingCopilotHistory else { return false }
+        if questionAnswerPresentationMode == .transcript {
+            return true
+        }
+        return !hasOpenQuestionAnswerSurface
+    }
+
     var shouldPreserveTranscriptForIncomingQuestion: Bool {
         currentMeeting != nil && isPanelExpanded && (questionAnswerPresentationMode == .transcript || !hasQuestionAnswerContext)
     }
@@ -1137,10 +1153,13 @@ final class AppState: ObservableObject {
     }
 
     func collapsePanelPreservingContext() {
+        isNotchHovered = false
         isShowingCopilotHistory = false
         if currentMeeting != nil {
             islandMode = .listening
-        } else if activeQuestion != nil || suggestedAnswer != nil || !streamingAnswerText.isEmpty {
+        } else if hasOpenQuestionAnswerSurface {
+            islandMode = answerStage.isInProgress && suggestedAnswer == nil && streamingAnswerText.isEmpty ? .thinking : .questionDetected
+        } else {
             islandMode = .idle
         }
         isPanelExpanded = false
@@ -1158,7 +1177,14 @@ final class AppState: ObservableObject {
 
         if isPanelExpanded {
             collapsePanelPreservingContext()
-            islandMode = .idle
+            if !hasOpenQuestionAnswerSurface {
+                islandMode = .idle
+            }
+            return
+        }
+
+        if hasOpenQuestionAnswerSurface {
+            expandPanelPreservingContext()
             return
         }
 
@@ -1170,7 +1196,7 @@ final class AppState: ObservableObject {
         isNotchHovered = false
         isShowingCopilotHistory = false
         isPanelExpanded = true
-        if activeQuestion != nil || suggestedAnswer != nil || !streamingAnswerText.isEmpty {
+        if hasOpenQuestionAnswerSurface {
             islandMode = currentMeeting == nil ? .questionDetected : .listening
         }
     }
@@ -3107,6 +3133,11 @@ final class AppState: ObservableObject {
             isPanelExpanded = false
         case .idle, .listening, .questionDetected, .thinking, .suggestedAnswer:
             sessionManager?.hydrateActiveTranscriptForPresentation()
+            if hasOpenQuestionAnswerSurface {
+                isShowingCopilotHistory = false
+                questionAnswerPresentationMode = .answer
+                islandMode = currentMeeting == nil ? .questionDetected : .listening
+            }
             isPanelExpanded = true
         }
     }

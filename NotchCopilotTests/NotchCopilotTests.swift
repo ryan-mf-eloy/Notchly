@@ -2883,8 +2883,8 @@ final class NotchCopilotTests: XCTestCase {
 
         appState.collapsePanelPreservingContext()
         XCTAssertFalse(appState.isPanelExpanded)
-        XCTAssertEqual(appState.islandMode, .idle)
-        XCTAssertTrue(appState.isIdleHiddenBehindNotch)
+        XCTAssertEqual(appState.islandMode, .questionDetected)
+        XCTAssertFalse(appState.isIdleHiddenBehindNotch)
     }
 
     func testAmbientCopilotLoadingWindowExpandsDownFromNotch() {
@@ -3259,29 +3259,51 @@ final class NotchCopilotTests: XCTestCase {
         }
     }
 
-    func testCopilotActionBarsHideUnavailableControlsInsteadOfRenderingDisabledButtons() throws {
+    func testCopilotAnswerSurfaceDoesNotRenderNonInteractiveActionButtons() throws {
         let source = try String(
             contentsOf: sourceRootURL().appendingPathComponent("NotchCopilot/UI/MeetingPanelView.swift"),
             encoding: .utf8
         )
 
-        let quickActionsStart = try XCTUnwrap(source.range(of: "private var copilotQuickActions: some View")?.lowerBound)
-        let quickActionsEnd = try XCTUnwrap(source.range(of: "\n    private var canCopySelectedAnswer", range: quickActionsStart..<source.endIndex)?.lowerBound)
-        let quickActions = String(source[quickActionsStart..<quickActionsEnd])
-        XCTAssertTrue(quickActions.contains("if hasSourceLink"))
-        XCTAssertTrue(quickActions.contains("if canRegenerateSelectedAnswerWithWeb"))
-        XCTAssertFalse(quickActions.contains("hand.thumbsup"))
-        XCTAssertFalse(quickActions.contains("hand.thumbsdown"))
-        XCTAssertFalse(quickActions.contains("isDisabled: !hasSourceLink"))
-        XCTAssertFalse(quickActions.contains("isDisabled: appState.currentMeeting != nil"))
+        XCTAssertFalse(source.contains("private var copilotQuickActions: some View"))
+        XCTAssertFalse(source.contains("qa-action-copy"))
+        XCTAssertFalse(source.contains("qa-action-save"))
+        XCTAssertFalse(source.contains("qa-action-dismiss"))
+        XCTAssertFalse(source.contains("IconButton(systemName: \"link\""))
+        XCTAssertFalse(source.contains("IconButton(systemName: \"globe\""))
+        XCTAssertFalse(source.contains("IconButton(systemName: \"hand.thumbsup\""))
+        XCTAssertFalse(source.contains("IconButton(systemName: \"hand.thumbsdown\""))
+        XCTAssertFalse(source.contains("isDisabled: !hasSourceLink"))
+        XCTAssertFalse(source.contains("isDisabled: appState.currentMeeting != nil"))
+        XCTAssertFalse(source.contains("private var selectedAnswerCopyText: String?"))
+        XCTAssertFalse(source.contains("selectedAnswerCopyAction"))
+        XCTAssertFalse(source.contains("isolatedCopyAction"))
+        XCTAssertFalse(source.contains("openSelectedAnswerSourcesAction"))
+        XCTAssertFalse(source.contains("regenerateSelectedAnswerWithWebAction"))
+        XCTAssertFalse(source.contains("isolatedOpenSourcesAction"))
+        XCTAssertFalse(source.contains("isolatedRegenerateWithWebAction"))
+        XCTAssertFalse(source.contains("onOpenSources: { appState.openSelectedAnswerSources() }"))
+        XCTAssertFalse(source.contains("onRegenerateWithWeb: { appState.regenerateSelectedCopilotAnswerWithWeb() }"))
 
         let actionStripStart = try XCTUnwrap(source.range(of: "private var actionStrip: some View")?.lowerBound)
         let actionStripEnd = try XCTUnwrap(source.range(of: "\nprivate struct WebSourcePreviewView", range: actionStripStart..<source.endIndex)?.lowerBound)
         let actionStrip = String(source[actionStripStart..<actionStripEnd])
-        XCTAssertTrue(actionStrip.contains("if entry.hasSourceLink"))
-        XCTAssertTrue(actionStrip.contains("if entry.interaction != nil"))
-        XCTAssertTrue(actionStrip.contains("if hasPrompt"))
+        XCTAssertTrue(actionStrip.contains("arrow.up.forward.square"))
+        XCTAssertTrue(actionStrip.contains("doc.on.doc"))
+        XCTAssertFalse(actionStrip.contains("systemName: \"link\""))
+        XCTAssertFalse(actionStrip.contains("arrow.clockwise"))
+        XCTAssertFalse(actionStrip.contains("systemName: \"globe\""))
+        XCTAssertFalse(actionStrip.contains("hand.thumbsup"))
+        XCTAssertFalse(actionStrip.contains("hand.thumbsdown"))
         XCTAssertFalse(actionStrip.contains("isDisabled:"))
+
+        let rendererSource = try String(
+            contentsOf: sourceRootURL().appendingPathComponent("NotchCopilot/UI/Components/RichAnswerRenderer.swift"),
+            encoding: .utf8
+        )
+        XCTAssertTrue(rendererSource.contains("let availableActions = Array(actions.enumerated()).filter { canPerform($0.element) }"))
+        XCTAssertTrue(rendererSource.contains("return onOpenSources != nil"))
+        XCTAssertTrue(rendererSource.contains("return onRegenerateWithWeb != nil"))
     }
 
     func testIslandWindowPlacementStaysPinnedToScreenTop() {
@@ -7382,6 +7404,7 @@ final class NotchCopilotTests: XCTestCase {
         XCTAssertEqual(realtimePolicy.partialStabilityPolicy.stableMinimumTokens, 4)
         XCTAssertEqual(realtimePolicy.deferredPartialDetectionPolicy.deferredDetectionDelayMilliseconds, 950)
         XCTAssertEqual(realtimePolicy.deferredPartialDetectionPolicy.minimumConfidence, 0.45)
+        XCTAssertFalse(realtimePolicy.deferredPartialDetectionPolicy.modelRescuePrefilterRequiresSurfaceEvidence)
         XCTAssertEqual(realtimePolicy.multiqtRescuePolicy.minimumCandidateScore, 0.55)
         XCTAssertEqual(realtimePolicy.multiqtRescuePolicy.partialMinimumStability, 0.82)
         XCTAssertEqual(realtimePolicy.answerGenerationGatePolicy.allowedPriorities, Set([QuestionPriority.medium, .high, .urgent]))
@@ -10331,6 +10354,79 @@ final class NotchCopilotTests: XCTestCase {
         XCTAssertEqual(appState.currentMeeting?.status, .listening)
     }
 
+    func testExpandedHeaderTranslationFallbackOnlyHandlesTranscriptSurface() {
+        var preferences = AppPreferences()
+        preferences.liveTranslationEnabled = false
+        let appState = AppState(preferences: preferences)
+        let meetingId = UUID()
+        appState.currentMeeting = MeetingSession(id: meetingId, title: "Daily", status: .listening)
+        appState.islandMode = .listening
+        appState.isPanelExpanded = true
+
+        let size = appState.notchIslandCanvasSize
+        let panel = NotchPanel(
+            contentRect: CGRect(origin: .zero, size: size),
+            styleMask: [.borderless, .nonactivatingPanel],
+            backing: .buffered,
+            defer: false
+        )
+        panel.isReleasedWhenClosed = false
+        panel.appState = appState
+        panel.contentView = NSView(frame: CGRect(origin: .zero, size: size))
+        defer {
+            panel.orderOut(nil)
+            panel.close()
+        }
+
+        func syncPanelBounds() {
+            let size = appState.notchIslandCanvasSize
+            panel.contentView?.frame = CGRect(origin: .zero, size: size)
+        }
+
+        func expandedTranslatePoint() -> NSPoint {
+            syncPanelBounds()
+            let canvasSize = appState.notchIslandCanvasSize
+            let islandSize = appState.notchIslandSize
+            let islandRect = CGRect(
+                x: canvasSize.width / 2 - islandSize.width / 2,
+                y: canvasSize.height - islandSize.height,
+                width: islandSize.width,
+                height: islandSize.height
+            )
+            let hit = IslandButtonFallbackGeometry.expandedHeaderHit
+            let y = islandRect.maxY - NotchIslandChromeMetrics.expandedTopPadding - hit
+            let leftX = islandRect.minX + appState.expandedHorizontalContentInset
+            let rects = IslandButtonFallbackGeometry.expandedHeaderButtonRects(startX: leftX, y: y, count: 3)
+            return NSPoint(x: rects[2].midX, y: rects[2].midY)
+        }
+
+        XCTAssertTrue(appState.shouldShowLiveTranslationControl)
+        XCTAssertTrue(panel.handleIslandButtonFallbackForTesting(at: expandedTranslatePoint()))
+        XCTAssertTrue(appState.preferences.liveTranslationEnabled)
+
+        appState.preferences.liveTranslationEnabled = false
+        let question = makeQuestion("What is the main risk here?", meetingId: meetingId)
+        appState.upsertQuestionInQueue(candidate: question, classification: nil, stage: .ready, select: true)
+        appState.questionAnswerPresentationMode = .answer
+
+        XCTAssertFalse(appState.shouldShowLiveTranslationControl)
+        XCTAssertFalse(panel.handleIslandButtonFallbackForTesting(at: expandedTranslatePoint()))
+        XCTAssertFalse(appState.preferences.liveTranslationEnabled)
+
+        appState.questionAnswerPresentationMode = .transcript
+
+        XCTAssertTrue(appState.shouldShowLiveTranslationControl)
+        XCTAssertTrue(panel.handleIslandButtonFallbackForTesting(at: expandedTranslatePoint()))
+        XCTAssertTrue(appState.preferences.liveTranslationEnabled)
+
+        appState.preferences.liveTranslationEnabled = false
+        appState.showCopilotHistoryPanel()
+
+        XCTAssertFalse(appState.shouldShowLiveTranslationControl)
+        XCTAssertFalse(panel.handleIslandButtonFallbackForTesting(at: expandedTranslatePoint()))
+        XCTAssertFalse(appState.preferences.liveTranslationEnabled)
+    }
+
     func testIslandButtonFallbackGeometryMatchesCompactQuestionQueueLayout() {
         let hit = IconButtonSize.standard.hitDiameter
         let expectedQueueWidth = hit * 2
@@ -10939,9 +11035,57 @@ final class NotchCopilotTests: XCTestCase {
         appState.togglePanelExpansionPreservingContext()
 
         XCTAssertFalse(appState.isPanelExpanded)
-        XCTAssertEqual(appState.islandMode, .idle)
-        XCTAssertTrue(appState.isIdleHiddenBehindNotch)
+        XCTAssertEqual(appState.islandMode, .questionDetected)
+        XCTAssertFalse(appState.isIdleHiddenBehindNotch)
         XCTAssertEqual(appState.suggestedAnswer?.shortAnswer, answer.shortAnswer)
+    }
+
+    func testCollapseFromCopilotAnswerDetailKeepsCompactAnswerState() {
+        let appState = AppState()
+        let interaction = CopilotInteraction(
+            contextKind: .ambient,
+            source: .typed,
+            prompt: "Como inverter uma árvore binária em Python?",
+            response: "Troque left e right em cada nó, recursivamente.",
+            tool: .answerSynthesis,
+            intent: .answerableQuestion,
+            confidence: 0.90,
+            latencyMs: 42,
+            expiresAt: Date().addingTimeInterval(7 * 24 * 60 * 60)
+        )
+
+        appState.applyCopilotInteraction(interaction)
+        appState.openCopilotInteractionAnswer(interaction)
+
+        XCTAssertTrue(appState.isPanelExpanded)
+        XCTAssertTrue(appState.isShowingCopilotAnswerDetail)
+
+        appState.collapsePanelPreservingContext()
+
+        XCTAssertFalse(appState.isPanelExpanded)
+        XCTAssertEqual(appState.islandMode, .questionDetected)
+        XCTAssertFalse(appState.isIdleHiddenBehindNotch)
+        XCTAssertTrue(appState.isShowingCopilotAnswerDetail)
+        XCTAssertEqual(appState.activeCopilotInteraction?.id, interaction.id)
+
+        appState.expandPanelPreservingContext()
+
+        XCTAssertTrue(appState.isPanelExpanded)
+        XCTAssertEqual(appState.islandMode, .questionDetected)
+        XCTAssertTrue(appState.isShowingCopilotAnswerDetail)
+        XCTAssertEqual(appState.visibleAnswerText, interaction.response)
+
+        appState.openCopilotFromHotkey()
+
+        XCTAssertFalse(appState.isPanelExpanded)
+        XCTAssertEqual(appState.islandMode, .questionDetected)
+        XCTAssertTrue(appState.isShowingCopilotAnswerDetail)
+
+        appState.openCopilotFromHotkey()
+
+        XCTAssertTrue(appState.isPanelExpanded)
+        XCTAssertEqual(appState.islandMode, .questionDetected)
+        XCTAssertTrue(appState.isShowingCopilotAnswerDetail)
     }
 
     func testRealtimeQAAnswerActionsUpdateVisibleState() {
@@ -11198,6 +11342,63 @@ final class NotchCopilotTests: XCTestCase {
         }
     }
 
+    func testRealtimeQAIgnoresScreenshotMetaQuestionStatements() async throws {
+        let cases: [(text: String, language: String, expectsDeclarativeSignal: Bool)] = [
+            (
+                "Ele só identificou que era uma pergunta justamente por conta do termo específico que eu usei no final da pergunta",
+                "pt-BR",
+                true
+            ),
+            (
+                "Aparentemente o termo pergunta faz com que ele entenda que é uma pergunta mesmo não sendo",
+                "pt-BR",
+                true
+            ),
+            (
+                "O sistema de Copilot ainda precisa de muitos ajustes",
+                "pt-BR",
+                false
+            )
+        ]
+
+        let detector = QuestionDetectionService(precisionMode: .highPrecision)
+        let classifier = QuestionClassifier(precisionMode: .highPrecision)
+        for sample in cases {
+            let meetingId = UUID()
+            let segment = TranscriptSegment(
+                meetingId: meetingId,
+                speakerLabel: "Speaker",
+                text: sample.text,
+                originalLanguage: sample.language
+            )
+            let context = TranscriptContext(
+                recentTranscript: sample.text,
+                mediumTranscript: sample.text,
+                completeTranscript: sample.text,
+                dominantLanguage: sample.language,
+                currentSegment: segment
+            )
+            let detection = detector.detect(from: segment, context: context)
+            XCTAssertTrue(detection.surfaceCandidates.isEmpty, sample.text)
+            if sample.expectsDeclarativeSignal {
+                XCTAssertTrue(
+                    detection.rejectedFrames.contains {
+                        $0.suppressionSignals.contains("declarative_without_interrogative_syntax")
+                    },
+                    sample.text
+                )
+            }
+
+            let classification = try await classifier.classifyQuestion(
+                candidate: makeQuestion(sample.text),
+                context: context,
+                userProfile: makeProfile()
+            )
+            XCTAssertFalse(classification.isQuestion, sample.text)
+            XCTAssertFalse(classification.responseNeeded, sample.text)
+        }
+    }
+
     func testQuestionMultimodalSignalCodableAndClampsUnsafeAudioValues() throws {
         let audioLogMel = QuestionAudioLogMelFeature(
             frames: 2,
@@ -11223,7 +11424,13 @@ final class NotchCopilotTests: XCTestCase {
             gapCount: -1,
             noiseFloor: 0.004,
             audioEnergy: 0.03,
-            audioLogMel: audioLogMel
+            audioLogMel: audioLogMel,
+            pitchMeanHz: 900,
+            terminalPitchSlope: 1.8,
+            voicingRatio: 1.7,
+            terminalPauseDuration: 9,
+            speechRate: 22,
+            prosodySource: "unit_prosody"
         )
 
         let data = try JSONEncoder().encode(signal)
@@ -11237,6 +11444,92 @@ final class NotchCopilotTests: XCTestCase {
         XCTAssertEqual(decoded.audioLogMel?.frames, 2)
         XCTAssertEqual(decoded.audioLogMel?.bands, 40)
         XCTAssertEqual(decoded.audioLogMel?.values.first, 8)
+        XCTAssertEqual(decoded.pitchMeanHz ?? -1, 600, accuracy: 0.0001)
+        XCTAssertEqual(decoded.terminalPitchSlope ?? -1, 1, accuracy: 0.0001)
+        XCTAssertEqual(decoded.voicingRatio ?? -1, 1, accuracy: 0.0001)
+        XCTAssertEqual(decoded.terminalPauseDuration ?? -1, 5, accuracy: 0.0001)
+        XCTAssertEqual(decoded.speechRate ?? -1, 12, accuracy: 0.0001)
+        XCTAssertEqual(decoded.prosodySource, "unit_prosody")
+    }
+
+    func testQuestionMultimodalSignalScalarsKeepLegacyPrefixAndAppendProsody() {
+        let signal = QuestionMultimodalSignal(
+            language: "pt",
+            asrConfidence: 0.88,
+            isFinal: true,
+            isPartial: false,
+            speakerLabel: "Speaker",
+            audioSource: .microphone,
+            duration: 2.0,
+            hasTerminalPause: true,
+            partialStability: 0.92,
+            partialRevisionCount: 2,
+            rms: 0.03,
+            peak: 0.09,
+            isClipping: false,
+            isSilence: false,
+            isTooQuiet: false,
+            gapCount: 1,
+            noiseFloor: 0.002,
+            audioEnergy: 0.031,
+            pitchMeanHz: 240,
+            terminalPitchSlope: 0.16,
+            voicingRatio: 0.74,
+            terminalPauseDuration: 0.34,
+            speechRate: 4.2,
+            prosodySource: "unit_prosody"
+        )
+
+        let scalars = signal.modelScalarFeatures(fallbackLanguage: "en-US")
+
+        XCTAssertGreaterThanOrEqual(scalars.count, 27)
+        XCTAssertEqual(scalars[0], 0.88, accuracy: 0.0001)
+        XCTAssertEqual(scalars[1], 0, accuracy: 0.0001)
+        XCTAssertEqual(scalars[2], 0.1, accuracy: 0.0001)
+        XCTAssertEqual(scalars[3], 1, accuracy: 0.0001)
+        XCTAssertEqual(scalars[4], 0, accuracy: 0.0001)
+        XCTAssertEqual(scalars[5], 0, accuracy: 0.0001)
+        XCTAssertEqual(scalars[6], 0, accuracy: 0.0001)
+        XCTAssertGreaterThan(scalars[18], 0.45)
+        XCTAssertEqual(scalars[19], 0.16, accuracy: 0.0001)
+        XCTAssertEqual(scalars[20], 1, accuracy: 0.0001)
+        XCTAssertEqual(scalars[21], 0.74, accuracy: 0.0001)
+        XCTAssertEqual(scalars[22], 0.17, accuracy: 0.0001)
+        XCTAssertEqual(scalars[23], 0.525, accuracy: 0.0001)
+        XCTAssertEqual(scalars[24], 1, accuracy: 0.0001)
+    }
+
+    func testQuestionAudioProsodyExtractorDetectsFinalRiseAndTerminalPause() throws {
+        let sampleRate = 16_000.0
+        let totalSeconds = 1.22
+        let voicedSeconds = 0.94
+        let sampleCount = Int(sampleRate * totalSeconds)
+        var phase = 0.0
+        var samples: [Float] = []
+        samples.reserveCapacity(sampleCount)
+        for frame in 0..<sampleCount {
+            let time = Double(frame) / sampleRate
+            guard time < voicedSeconds else {
+                samples.append(0)
+                continue
+            }
+            let frequency = time < voicedSeconds * 0.56 ? 180.0 : 270.0
+            samples.append(Float(0.18 * sin(phase)))
+            phase += 2 * Double.pi * frequency / sampleRate
+        }
+
+        let feature = try XCTUnwrap(QuestionAudioProsodyExtractor.feature(
+            from: samples,
+            transcriptText: "Como inverter uma arvore binaria",
+            source: "unit_prosody"
+        ))
+
+        XCTAssertEqual(feature.source, "unit_prosody")
+        XCTAssertGreaterThan(feature.pitchMeanHz ?? 0, 190)
+        XCTAssertGreaterThan(feature.terminalPitchSlope ?? 0, 0.16)
+        XCTAssertGreaterThan(feature.voicingRatio ?? 0, 0.45)
+        XCTAssertGreaterThan(feature.terminalPauseDuration ?? 0, 0.18)
+        XCTAssertGreaterThan(feature.speechRate ?? 0, 2.0)
     }
 
     func testQuestionAudioLogMelProxyCarriesAcousticSignalWithoutRawAudio() throws {
@@ -11327,6 +11620,11 @@ final class NotchCopilotTests: XCTestCase {
         let mean = feature.values.reduce(0, +) / Double(feature.values.count)
         XCTAssertEqual(mean, 0, accuracy: 0.1)
         XCTAssertLessThan(elapsedMs, 100)
+
+        let prosody = try XCTUnwrap(ringBuffer.prosody(for: segment))
+        XCTAssertEqual(prosody.source, "captured_prosody")
+        XCTAssertEqual(prosody.pitchMeanHz ?? 0, 440, accuracy: 35)
+        XCTAssertGreaterThan(prosody.voicingRatio ?? 0, 0.60)
     }
 
     func testRealtimeQAMultimodalScorerBlocksUnstablePartialWhenEnforced() async throws {
@@ -11509,6 +11807,40 @@ final class NotchCopilotTests: XCTestCase {
         XCTAssertTrue(prediction?.decisionSignals.contains("trained_multiqt_coreml") == true)
     }
 
+    func testRealtimeQABundledTrainedMultiQTHandlesJapaneseASRSpacing() async throws {
+        let text = "金曜日までに認証 エンドポイントを出せますか"
+        let signal = QuestionMultimodalSignal(
+            language: "ja-JP",
+            asrConfidence: 0.95,
+            isFinal: true,
+            isPartial: false,
+            speakerLabel: "Speaker",
+            audioSource: .microphone,
+            duration: 2.1,
+            hasTerminalPause: true,
+            partialStability: 1,
+            rms: 0.026,
+            peak: 0.14,
+            isClipping: false,
+            isSilence: false,
+            isTooQuiet: false,
+            gapCount: 0,
+            noiseFloor: 0.002,
+            audioEnergy: 0.024
+        )
+        let candidate = makeQuestion(text, multimodalSignal: signal)
+
+        let prediction = await CoreMLQuestionMultiQTModelRunner().prediction(
+            for: candidate,
+            signal: signal
+        )
+
+        XCTAssertNotNil(prediction)
+        XCTAssertGreaterThanOrEqual(prediction?.responseScore ?? 0, prediction?.threshold ?? 1)
+        XCTAssertTrue(prediction?.shouldAllow ?? false)
+        XCTAssertTrue(prediction?.isPositiveLabel ?? false)
+    }
+
     func testRealtimeQABundledTrainedMultiQTMetadataCarriesCriticalLabelPolicy() throws {
         let metadataURL = try XCTUnwrap(
             Bundle.main.url(forResource: "notchly-multiqt-v1.metadata", withExtension: "json", subdirectory: "Models")
@@ -11561,6 +11893,225 @@ final class NotchCopilotTests: XCTestCase {
                     || signal == "trained_below_threshold"
             } == true
         )
+    }
+
+    func testRealtimeQAMultiQTRefinesSurfaceCandidatesBeforeClassification() async throws {
+        let text = "Como funciona uma linked list"
+        let meetingId = UUID()
+        let segment = TranscriptSegment(
+            meetingId: meetingId,
+            speakerLabel: "Speaker",
+            text: text,
+            originalLanguage: "pt-BR",
+            startTime: 0,
+            endTime: 2.2,
+            confidence: 0.96,
+            isFinal: true
+        )
+        let signal = QuestionMultimodalSignal(segment: segment)
+        let context = TranscriptContext(
+            recentTranscript: text,
+            mediumTranscript: text,
+            completeTranscript: text,
+            dominantLanguage: "pt-BR",
+            currentSegment: segment
+        )
+        let detection = QuestionDetectionService(precisionMode: .highPrecision)
+            .detect(from: segment, context: context, signal: signal)
+        let surface = try XCTUnwrap(detection.surfaceCandidates.first)
+        XCTAssertEqual(surface.discovery.source, .surface)
+        XCTAssertNil(surface.discovery.modelScore)
+
+        let prediction = positiveCandidateDetectionPrediction(label: "technical_explanation")
+        let refined = await QuestionMultiQTCandidateRescuer(
+            trainedModelRunner: StubTrainedMultiQTModelRunner(prediction: prediction),
+            intentGate: QuestionIntentGate()
+        ).refineSurfaceCandidates(
+            detection.surfaceCandidates,
+            context: context,
+            mode: .enforced,
+            profile: makeProfile()
+        )
+
+        let candidate = try XCTUnwrap(refined.first)
+        XCTAssertEqual(candidate.discovery.source, .surface)
+        XCTAssertEqual(candidate.discovery.modelLabel, "technical_explanation")
+        XCTAssertEqual(candidate.discovery.modelScore ?? 0, prediction.responseScore, accuracy: 0.0001)
+        XCTAssertTrue(candidate.discovery.hasPositiveTrainedQuestionSignal)
+    }
+
+    func testRealtimeQAClassifierUsesAttachedMultiQTPredictionWithoutRunner() async throws {
+        var candidate = makeQuestion("What is the API cache strategy?")
+        candidate.discovery = QuestionCandidateDiscovery(
+            source: .surface,
+            surfaceSignals: [
+                QuestionUnderstandingSignal.interrogativeStarter.rawValue,
+                QuestionUnderstandingSignal.concreteObject.rawValue,
+                QuestionUnderstandingSignal.finalUtterance.rawValue
+            ],
+            surfaceConfidence: 0.91
+        )
+        .withTrainedPrediction(positiveCandidateDetectionPrediction(label: "technical_explanation", responseScore: 0.94))
+
+        let classification = try await QuestionClassifier(
+            precisionMode: .highPrecision,
+            multimodalMode: .enforced,
+            trainedModelRunner: nil
+        ).classifyQuestion(
+            candidate: candidate,
+            context: makeContext(candidate.rawText),
+            userProfile: makeProfile()
+        )
+
+        XCTAssertTrue(classification.responseNeeded, classification.reason)
+        XCTAssertEqual(classification.decisionScore ?? 0, 0.94, accuracy: 0.0001)
+        XCTAssertTrue(classification.decisionSignals?.contains("candidate_detection_head") == true)
+    }
+
+    func testRealtimeQAClassifierLetsPositiveMultiQTBypassLexicalSurfaceRules() async throws {
+        var candidate = makeQuestion("Seria melhor isolar o worker de audio em outro processo")
+        candidate.discovery = QuestionCandidateDiscovery(
+            source: .surface,
+            surfaceSignals: [],
+            surfaceConfidence: 0.31
+        )
+        .withTrainedPrediction(positiveCandidateDetectionPrediction(label: "technical_decision", responseScore: 0.95))
+
+        let classification = try await QuestionClassifier(
+            precisionMode: .highPrecision,
+            multimodalMode: .enforced,
+            trainedModelRunner: nil
+        ).classifyQuestion(
+            candidate: candidate,
+            context: makeContext(candidate.rawText),
+            userProfile: makeProfile()
+        )
+
+        XCTAssertTrue(classification.isQuestion, classification.reason)
+        XCTAssertTrue(classification.responseNeeded, classification.reason)
+        XCTAssertEqual(classification.decisionScore ?? 0, 0.95, accuracy: 0.0001)
+        XCTAssertTrue(classification.reason.contains("MultiQT accepted"))
+    }
+
+    func testRealtimeQAClassifierKeepsHardSuppressionWhenMultiQTIsPositive() async throws {
+        var candidate = makeQuestion("Eles perguntaram se o cache funciona hoje")
+        candidate.discovery = QuestionCandidateDiscovery(
+            source: .surface,
+            surfaceSignals: [],
+            surfaceConfidence: 0.29
+        )
+        .withTrainedPrediction(positiveCandidateDetectionPrediction(label: "technical_explanation", responseScore: 0.97))
+
+        let classification = try await QuestionClassifier(
+            precisionMode: .highPrecision,
+            multimodalMode: .enforced,
+            trainedModelRunner: nil
+        ).classifyQuestion(
+            candidate: candidate,
+            context: makeContext(candidate.rawText),
+            userProfile: makeProfile()
+        )
+
+        XCTAssertFalse(classification.responseNeeded)
+        XCTAssertFalse(classification.isQuestion)
+        XCTAssertTrue(classification.reason.localizedCaseInsensitiveContains("reported"))
+    }
+
+    func testRealtimeQAClassifierRejectsAttachedNegativeMultiQTPrediction() async throws {
+        let prediction = QuestionTrainedMultimodalPrediction(
+            responseScore: 0.18,
+            label: "statement",
+            completeScore: 0.97,
+            rhetoricalScore: 0.01,
+            threshold: 0.55,
+            decisionLatencyMs: 3.8,
+            decisionSignals: ["trained_multiqt_coreml", "trained_label:statement"],
+            suppressionSignals: ["trained_below_threshold"]
+        )
+        var candidate = makeQuestion("What is the API cache strategy?")
+        candidate.discovery = QuestionCandidateDiscovery(
+            source: .surface,
+            surfaceSignals: [
+                QuestionUnderstandingSignal.interrogativeStarter.rawValue,
+                QuestionUnderstandingSignal.concreteObject.rawValue,
+                QuestionUnderstandingSignal.finalUtterance.rawValue
+            ],
+            surfaceConfidence: 0.92
+        )
+        .withTrainedPrediction(prediction)
+
+        let classification = try await QuestionClassifier(
+            precisionMode: .highPrecision,
+            multimodalMode: .enforced,
+            trainedModelRunner: nil
+        ).classifyQuestion(
+            candidate: candidate,
+            context: makeContext(candidate.rawText),
+            userProfile: makeProfile()
+        )
+
+        XCTAssertFalse(classification.responseNeeded)
+        XCTAssertFalse(classification.isQuestion)
+        XCTAssertEqual(classification.decisionScore ?? 0, 0.18, accuracy: 0.0001)
+        XCTAssertTrue(classification.suppressionSignals?.contains("trained_below_threshold") == true)
+    }
+
+    func testRealtimeQAEngineAttachesMultiQTPredictionToSurfaceCandidate() async throws {
+        let prediction = positiveCandidateDetectionPrediction(label: "technical_explanation")
+        let runner = StubTrainedMultiQTModelRunner(prediction: prediction)
+        let engine = RealtimeQuestionAnsweringEngine(
+            classifierProvider: QuestionClassifier(
+                precisionMode: .highPrecision,
+                multimodalMode: .enforced,
+                trainedModelRunner: runner
+            ),
+            contextRetriever: MeetingContextRetriever(knowledgeStore: nil),
+            answerProvider: TestMeetingAnswerProvider(),
+            multiqtRescuer: QuestionMultiQTCandidateRescuer(
+                trainedModelRunner: runner,
+                intentGate: QuestionIntentGate()
+            )
+        )
+        var preferences = AppPreferences()
+        preferences.qaMultimodalMode = .enforced
+        preferences.qaPrecisionMode = .highPrecision
+        let meetingId = UUID()
+        let meeting = MeetingSession(id: meetingId, title: "Surface model", status: .listening)
+        let segment = TranscriptSegment(
+            meetingId: meetingId,
+            speakerLabel: "Speaker",
+            text: "Como funciona uma linked list",
+            originalLanguage: "pt-BR",
+            startTime: 0,
+            endTime: 2.2,
+            confidence: 0.96,
+            isFinal: true
+        )
+
+        let eventTask = Task { () -> [RealtimeQuestionEvent] in
+            var events: [RealtimeQuestionEvent] = []
+            for await event in engine.eventBus.events {
+                events.append(event)
+                if case .questionDetected = event { break }
+            }
+            return events
+        }
+
+        await engine.ingest(segment: segment, meeting: meeting, preferences: preferences)
+        try await Task.sleep(for: .milliseconds(100))
+        engine.stop()
+
+        let events = await eventTask.value
+        let detected = events.compactMap { event -> (QuestionCandidate, QuestionClassification)? in
+            if case let .questionDetected(candidate, classification) = event { return (candidate, classification) }
+            return nil
+        }
+        let event = try XCTUnwrap(detected.first)
+        XCTAssertEqual(event.0.discovery.source, .surface)
+        XCTAssertEqual(event.0.discovery.modelLabel, "technical_explanation")
+        XCTAssertEqual(event.0.discovery.modelScore ?? 0, prediction.responseScore, accuracy: 0.0001)
+        XCTAssertTrue(event.1.responseNeeded, event.1.reason)
+        XCTAssertEqual(event.1.decisionScore ?? 0, prediction.responseScore, accuracy: 0.0001)
     }
 
     func testRealtimeQAMultiQTRescuesSurfaceRejectedPositiveCandidate() async throws {
@@ -11663,6 +12214,54 @@ final class NotchCopilotTests: XCTestCase {
         )
 
         XCTAssertTrue(rescued.isEmpty)
+    }
+
+    func testRealtimeQAMultiQTRescuesSoftDeclarativeSuppressedFrame() async throws {
+        let text = "During the code review how invert a binary tree in JavaScript"
+        let meetingId = UUID()
+        let segment = TranscriptSegment(
+            meetingId: meetingId,
+            speakerLabel: "Speaker",
+            text: text,
+            originalLanguage: "en-US",
+            startTime: 0,
+            endTime: 2.2,
+            confidence: 0.95,
+            isFinal: true
+        )
+        let signal = QuestionMultimodalSignal(segment: segment)
+        let context = TranscriptContext(
+            recentTranscript: text,
+            mediumTranscript: text,
+            completeTranscript: text,
+            dominantLanguage: "en-US",
+            currentSegment: segment
+        )
+        let detection = QuestionDetectionService(precisionMode: .highPrecision)
+            .detect(from: segment, context: context, signal: signal)
+
+        XCTAssertTrue(detection.surfaceCandidates.isEmpty)
+        let rejected = try XCTUnwrap(detection.rejectedFrames.first)
+        XCTAssertTrue(rejected.hasHardSuppression, rejected.reason)
+        XCTAssertTrue(
+            rejected.suppressionSignals.contains(QuestionIntentRulePack.default.signalLabels.declarativeWithoutInterrogativeSyntax),
+            rejected.reason
+        )
+        XCTAssertFalse(rejected.hasModelRescueBlockingSuppression(rulePack: .default), rejected.reason)
+
+        let prediction = positiveCandidateDetectionPrediction(label: "technical_explanation")
+        let rescued = await QuestionMultiQTCandidateRescuer(
+            trainedModelRunner: StubTrainedMultiQTModelRunner(prediction: prediction),
+            intentGate: QuestionIntentGate()
+        ).rescueCandidates(
+            from: detection.rejectedFrames,
+            context: context,
+            mode: .enforced
+        )
+
+        let candidate = try XCTUnwrap(rescued.first)
+        XCTAssertEqual(candidate.discovery.source, .multiqtRescue)
+        XCTAssertEqual(candidate.discovery.modelLabel, "technical_explanation")
     }
 
     func testRealtimeQAMultiQTRescueRequiresStablePartialOrFinal() async throws {
@@ -11904,6 +12503,98 @@ final class NotchCopilotTests: XCTestCase {
         }.first)
         XCTAssertEqual(candidate.discovery.source, .multiqtRescue)
         XCTAssertEqual(candidate.discovery.modelLabel, "deadline")
+    }
+
+    func testRealtimeQAEngineCanDeferPartialForMultiQTWithoutSurfaceSignals() async throws {
+        let prediction = positiveCandidateDetectionPrediction(label: "answerable_question")
+        let runner = StubTrainedMultiQTModelRunner(prediction: prediction)
+        let realtimePolicy = RealtimeQuestionAnsweringPolicy(
+            answerResolutionMarkers: [],
+            incompleteActionFrames: [],
+            danglingPartialTokens: [],
+            selfAnswerWindowSeconds: 20,
+            partialStability: .fallback,
+            deferredPartialDetection: RealtimeDeferredPartialDetectionPolicy(
+                stableCandidateDelayMilliseconds: 0,
+                deferredDetectionDelayMilliseconds: 0,
+                forcedPartialStability: 0.84,
+                forcedRevisionCount: 1,
+                minimumTokenCount: 4,
+                minimumCJKCharacterCount: 4,
+                minimumConfidence: 0.45,
+                completeMinimumTokenCount: 5,
+                completeMinimumCJKCharacterCount: 8,
+                allowModelRescuePrefilter: true,
+                modelRescuePrefilterRequiresSurfaceEvidence: false
+            ),
+            multiqtRescue: .fallback,
+            runtimeLabels: .empty
+        )
+        let engine = RealtimeQuestionAnsweringEngine(
+            classifierProvider: QuestionClassifier(
+                precisionMode: .highPrecision,
+                multimodalMode: .enforced,
+                trainedModelRunner: runner
+            ),
+            contextRetriever: MeetingContextRetriever(knowledgeStore: nil),
+            answerProvider: TestMeetingAnswerProvider(),
+            multiqtRescuer: QuestionMultiQTCandidateRescuer(
+                trainedModelRunner: runner,
+                intentGate: QuestionIntentGate()
+            ),
+            realtimePolicy: realtimePolicy
+        )
+        var preferences = AppPreferences()
+        preferences.qaMultimodalMode = .enforced
+        preferences.qaPrecisionMode = .highPrecision
+        let meetingId = UUID()
+        let meeting = MeetingSession(id: meetingId, title: "Partial no surface", status: .listening)
+        let segment = TranscriptSegment(
+            meetingId: meetingId,
+            speakerLabel: "Speaker",
+            text: "a an the to of in",
+            originalLanguage: "en-US",
+            startTime: 0,
+            endTime: 1.2,
+            confidence: 0.95,
+            isFinal: false
+        )
+        let context = TranscriptContext(
+            recentTranscript: segment.text,
+            mediumTranscript: segment.text,
+            completeTranscript: segment.text,
+            dominantLanguage: "en-US",
+            currentSegment: segment
+        )
+        let signal = QuestionMultimodalSignal(segment: segment)
+            .withPartialStability(0.84, revisionCount: 1)
+        let detection = QuestionDetectionService(precisionMode: .highPrecision)
+            .detect(from: segment, context: context, signal: signal)
+        let rejected = try XCTUnwrap(detection.rejectedFrames.first)
+        XCTAssertTrue(detection.surfaceCandidates.isEmpty)
+        XCTAssertTrue(rejected.surfaceSignals.isEmpty, rejected.surfaceSignals.joined(separator: ","))
+        XCTAssertFalse(rejected.hasModelRescueBlockingSuppression(rulePack: .default), rejected.reason)
+
+        let eventTask = Task { () -> [RealtimeQuestionEvent] in
+            var events: [RealtimeQuestionEvent] = []
+            for await event in engine.eventBus.events {
+                events.append(event)
+                if case .questionDetected = event { break }
+            }
+            return events
+        }
+
+        await engine.ingest(segment: segment, meeting: meeting, preferences: preferences)
+        try await Task.sleep(for: .milliseconds(200))
+        engine.stop()
+
+        let events = await eventTask.value
+        let candidate = try XCTUnwrap(events.compactMap { event -> QuestionCandidate? in
+            if case let .questionDetected(candidate, _) = event { return candidate }
+            return nil
+        }.first)
+        XCTAssertEqual(candidate.discovery.source, .multiqtRescue)
+        XCTAssertEqual(candidate.discovery.modelLabel, "answerable_question")
     }
 
     func testQuestionCandidateDecodesLegacyPayloadWithSurfaceDiscovery() throws {
@@ -12383,6 +13074,59 @@ final class NotchCopilotTests: XCTestCase {
         let events = await eventTask.value
         XCTAssertTrue(events.contains { if case .suggestedAnswerReady = $0 { return true }; return false })
         XCTAssertEqual(answerProvider.capturedOptions.count, 1)
+    }
+
+    func testRealtimeQAEngineDoesNotSurfaceQuestionLikeClassificationWithoutNeededResponse() async throws {
+        let classification = QuestionClassification(
+            isQuestion: true,
+            rhetorical: false,
+            complete: true,
+            actionable: false,
+            responseNeeded: false,
+            userAttentionNeeded: false,
+            directedToUser: false,
+            directedToGroup: false,
+            questionType: .generalQuestion,
+            priority: .low,
+            confidence: 0.72,
+            reason: "question-like statement does not need a Copilot response",
+            extractedQuestion: "Qual a capital da França",
+            expectedAnswerStyle: .concise
+        )
+        let engine = RealtimeQuestionAnsweringEngine(
+            classifierProvider: FixedQuestionClassifierProvider(classification: classification),
+            contextRetriever: MeetingContextRetriever(knowledgeStore: nil),
+            answerProvider: TestMeetingAnswerProvider()
+        )
+        let meetingId = UUID()
+        let meeting = MeetingSession(id: meetingId, title: "No answer needed", status: .listening)
+        let segment = TranscriptSegment(
+            meetingId: meetingId,
+            speakerLabel: "Speaker",
+            text: "Qual a capital da França",
+            originalLanguage: "pt-BR",
+            startTime: 0,
+            endTime: 1.8,
+            confidence: 0.96,
+            isFinal: true
+        )
+        let eventTask = Task { () -> [RealtimeQuestionEvent] in
+            var events: [RealtimeQuestionEvent] = []
+            for await event in engine.eventBus.events {
+                events.append(event)
+                if case .questionIgnored = event { break }
+                if case .questionDetected = event { break }
+            }
+            return events
+        }
+
+        await engine.ingest(segment: segment, meeting: meeting, preferences: AppPreferences())
+        try await Task.sleep(for: .milliseconds(120))
+        engine.stop()
+
+        let events = await eventTask.value
+        XCTAssertFalse(events.contains { if case .questionDetected = $0 { return true }; return false })
+        XCTAssertTrue(events.contains { if case .questionIgnored = $0 { return true }; return false })
     }
 
     func testRealtimeQAEngineUsesPolicyDrivenDismissMessage() async throws {

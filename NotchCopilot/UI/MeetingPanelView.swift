@@ -290,14 +290,9 @@ struct MeetingPanelView: View {
                     caveats: appState.suggestedAnswer?.caveats ?? [],
                     allowRemoteLinkPreview: allowRemoteLinkPreview,
                     leadStyle: .plain,
-                    showsEvidenceBlocks: showsAnswerEvidenceBlocks,
-                    onCopy: { appState.copySelectedAnswerToPasteboard() },
-                    onOpenSources: { appState.openSelectedAnswerSources() },
-                    onRegenerateWithWeb: { appState.regenerateSelectedCopilotAnswerWithWeb() }
+                    showsEvidenceBlocks: showsAnswerEvidenceBlocks
                 )
                     .frame(maxWidth: .infinity, alignment: .leading)
-
-                copilotQuickActions
             }
             .frame(maxWidth: .infinity, alignment: .topLeading)
             .padding(.bottom, 10)
@@ -361,64 +356,6 @@ struct MeetingPanelView: View {
             return appState.copilotFailureMessage ?? "Nao consegui concluir esta acao agora."
         }
         return ""
-    }
-
-    private var copilotQuickActions: some View {
-        HStack(spacing: 8) {
-            if canCopySelectedAnswer {
-                IconButton(systemName: "doc.on.doc", help: "Copy", size: .compact) {
-                    appState.copySelectedAnswerToPasteboard()
-                }
-                .accessibilityIdentifier("qa-action-copy")
-            }
-            if appState.selectedQuestionId != nil {
-                IconButton(systemName: appState.isSelectedQuestionSaved ? "bookmark.fill" : "bookmark", help: "Save", size: .compact) {
-                    appState.saveSelectedQuestionAnswer()
-                }
-                .accessibilityIdentifier("qa-action-save")
-            }
-            IconButton(systemName: "xmark", help: "Dismiss", role: .destructive, size: .compact) {
-                appState.dismissActiveQuestion()
-            }
-            .accessibilityIdentifier("qa-action-dismiss")
-            if hasSourceLink {
-                IconButton(systemName: "link", help: "Open sources", size: .compact) {
-                    appState.openSelectedAnswerSources()
-                }
-            }
-            if canRegenerateSelectedAnswerWithWeb {
-                IconButton(systemName: "globe", help: "Regenerate with web", size: .compact) {
-                    appState.regenerateSelectedCopilotAnswerWithWeb()
-                }
-            }
-            Spacer(minLength: 0)
-            if appState.currentMeeting == nil {
-                IconButton(systemName: "pause", help: "Pause Notchly", size: .compact) {
-                    appState.pauseCopilot()
-                }
-                IconButton(systemName: "trash", help: "Clear Notchly history", role: .destructive, size: .compact) {
-                    appState.clearCopilotHistory()
-                }
-            }
-        }
-        .padding(.top, 2)
-        .opacity(appState.answerStage.isInProgress ? 0.54 : 1)
-    }
-
-    private var canCopySelectedAnswer: Bool {
-        !answerTextForDisplay.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-    }
-
-    private var canRegenerateSelectedAnswerWithWeb: Bool {
-        appState.currentMeeting == nil &&
-            !questionTitleText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-    }
-
-    private var hasSourceLink: Bool {
-        selectedSources.contains { source in
-            guard let reference = source.reference?.trimmingCharacters(in: .whitespacesAndNewlines) else { return false }
-            return URL(string: reference) != nil
-        }
     }
 
     private var selectedSources: [AnswerSource] {
@@ -632,6 +569,9 @@ private struct CopilotIsolatedAnswerPanelView: View {
     private var dividerColor: Color { Color.white.opacity(islandDesignMode == .liquidGlass ? 0.085 : 0.052) }
     private var questionRowMaxWidth: CGFloat { max(220, min(width - 72, 660)) }
     private var questionTextMaxWidth: CGFloat { max(160, questionRowMaxWidth) }
+    private var answerSources: [AnswerSource] {
+        appState.suggestedAnswer?.usedSources ?? appState.activeCopilotInteraction?.sources ?? []
+    }
 
     private var questionText: String {
         let candidates = [
@@ -711,22 +651,19 @@ private struct CopilotIsolatedAnswerPanelView: View {
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(.top, 2)
         } else {
-            RichAnswerRenderer(
-                text: answerText,
-                richAnswer: appState.suggestedAnswer?.richAnswer ?? appState.activeCopilotInteraction?.richAnswer,
-                format: appState.suggestedAnswer?.answerFormat ?? inferredFormat(tool: appState.activeCopilotInteraction?.tool, intent: appState.activeCopilotInteraction?.intent),
-                sources: appState.suggestedAnswer?.usedSources ?? appState.activeCopilotInteraction?.sources ?? [],
-                confidence: appState.suggestedAnswer?.confidence ?? appState.activeCopilotInteraction?.confidence,
-                riskLevel: appState.suggestedAnswer?.riskLevel,
-                tone: appState.suggestedAnswer?.suggestedTone,
-                caveats: appState.suggestedAnswer?.caveats ?? [],
-                allowRemoteLinkPreview: !appState.preferences.localOnlyMode,
-                leadStyle: .plain,
-                showsEvidenceBlocks: showsAnswerEvidenceBlocks,
-                onCopy: { appState.copySelectedAnswerToPasteboard() },
-                onOpenSources: { appState.openSelectedAnswerSources() },
-                onRegenerateWithWeb: { appState.regenerateSelectedCopilotAnswerWithWeb() }
-            )
+                RichAnswerRenderer(
+                    text: answerText,
+                    richAnswer: appState.suggestedAnswer?.richAnswer ?? appState.activeCopilotInteraction?.richAnswer,
+                    format: appState.suggestedAnswer?.answerFormat ?? inferredFormat(tool: appState.activeCopilotInteraction?.tool, intent: appState.activeCopilotInteraction?.intent),
+                    sources: answerSources,
+                    confidence: appState.suggestedAnswer?.confidence ?? appState.activeCopilotInteraction?.confidence,
+                    riskLevel: appState.suggestedAnswer?.riskLevel,
+                    tone: appState.suggestedAnswer?.suggestedTone,
+                    caveats: appState.suggestedAnswer?.caveats ?? [],
+                    allowRemoteLinkPreview: !appState.preferences.localOnlyMode,
+                    leadStyle: .plain,
+                    showsEvidenceBlocks: showsAnswerEvidenceBlocks
+                )
                 .frame(maxWidth: .infinity, alignment: .leading)
         }
     }
@@ -814,7 +751,6 @@ private struct CopilotTimelinePanelView: View {
 
                     CopilotTimelineRow(
                         entry: entry,
-                        isExpanded: isExpanded(entry, at: index),
                         primaryColor: primaryColor,
                         secondaryColor: secondaryColor,
                         tertiaryColor: tertiaryColor,
@@ -831,15 +767,6 @@ private struct CopilotTimelinePanelView: View {
                         },
                         onOpenAnswer: {
                             openAnswer(entry)
-                        },
-                        onUseful: {
-                            feedback(.markedUseful, for: entry)
-                        },
-                        onWrong: {
-                            feedback(.markedWrong, for: entry)
-                        },
-                        onRegenerateLocal: {
-                            regenerate(entry, forceWeb: false)
                         },
                         onRegenerateWeb: {
                             regenerate(entry, forceWeb: true)
@@ -892,10 +819,6 @@ private struct CopilotTimelinePanelView: View {
         }
     }
 
-    private func isExpanded(_ entry: CopilotTimelineEntry, at index: Int) -> Bool {
-        selectedEntryID == entry.id || (selectedEntryID == nil && index == 0)
-    }
-
     private func shouldShowDayDivider(for entry: CopilotTimelineEntry, previous: CopilotTimelineEntry?) -> Bool {
         guard let previous else { return true }
         return !Calendar.current.isDate(entry.createdAt, inSameDayAs: previous.createdAt)
@@ -933,14 +856,6 @@ private struct CopilotTimelinePanelView: View {
         }
     }
 
-    private func feedback(_ kind: QuestionAnswerFeedbackKind, for entry: CopilotTimelineEntry) {
-        guard let interaction = entry.interaction else {
-            appState.recordCopilotFeedback(kind, note: kind == .markedUseful ? "Marked useful" : "Marked incorrect")
-            return
-        }
-        appState.recordCopilotFeedback(kind, note: kind == .markedUseful ? "Marked useful" : "Marked incorrect", for: interaction)
-    }
-
     private func regenerate(_ entry: CopilotTimelineEntry, forceWeb: Bool) {
         if let interaction = entry.interaction {
             appState.regenerateCopilotInteraction(interaction, forceWeb: forceWeb)
@@ -952,7 +867,6 @@ private struct CopilotTimelinePanelView: View {
 
 private struct CopilotTimelineRow: View {
     var entry: CopilotTimelineEntry
-    var isExpanded: Bool
     var primaryColor: Color
     var secondaryColor: Color
     var tertiaryColor: Color
@@ -962,9 +876,6 @@ private struct CopilotTimelineRow: View {
     var onCopy: () -> Void
     var onOpenSources: () -> Void
     var onOpenAnswer: () -> Void
-    var onUseful: () -> Void
-    var onWrong: () -> Void
-    var onRegenerateLocal: () -> Void
     var onRegenerateWeb: () -> Void
     @State private var isHovering = false
 
@@ -976,45 +887,42 @@ private struct CopilotTimelineRow: View {
         .padding(.horizontal, 10)
         .padding(.vertical, 8)
         .frame(maxWidth: .infinity, alignment: .topLeading)
-        .background(
-            IslandGlassFill(
-                shape: RoundedRectangle(cornerRadius: 8, style: .continuous),
-                mode: designMode,
-                solidOpacity: isExpanded || isHovering ? 0.036 : 0.018,
-                glassTintOpacity: isExpanded || isHovering ? 0.052 : 0.030,
-                glassFallbackOpacity: isExpanded || isHovering ? 0.036 : 0.020
-            )
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: 8, style: .continuous)
-                .stroke(Color.white.opacity(isExpanded || isHovering ? 0.068 : 0.030), lineWidth: 0.5)
-        )
+        .background(timelineHoverBackground)
         .contentShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
         .onHover { isHovering = $0 }
         .onTapGesture(perform: handleTap)
         .contextMenu {
             Button("Open answer", action: onOpenAnswer)
             Button("Copy", action: onCopy)
-            Button("Open sources", action: onOpenSources)
-                .disabled(!entry.hasSourceLink)
-            Button("Mark useful", action: onUseful)
-            Button("Mark incorrect", action: onWrong)
-            Divider()
-            Button("Analyze again", action: onRegenerateLocal)
-                .disabled(entry.prompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-            Button("Analyze with web", action: onRegenerateWeb)
-                .disabled(entry.prompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+            if entry.hasSourceLink {
+                Button("Open sources", action: onOpenSources)
+            }
         }
         .accessibilityElement(children: .combine)
         .accessibilityLabel("\(entry.prompt). \(entry.responsePreview)")
+        .animation(.easeOut(duration: 0.12), value: isHovering)
+    }
+
+    @ViewBuilder
+    private var timelineHoverBackground: some View {
+        if isHovering {
+            IslandGlassFill(
+                shape: RoundedRectangle(cornerRadius: 8, style: .continuous),
+                mode: designMode,
+                solidOpacity: 0.036,
+                glassTintOpacity: 0.052,
+                glassFallbackOpacity: 0.036
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    .stroke(Color.white.opacity(0.068), lineWidth: 0.5)
+            )
+            .transition(.opacity)
+        }
     }
 
     private var header: some View {
         HStack(spacing: 7) {
-            Circle()
-                .fill(entry.statusColor(primary: primaryColor, secondary: secondaryColor))
-                .frame(width: 5, height: 5)
-
             Text(entry.timeLabel)
                 .font(.system(size: 9.8, weight: .medium, design: .monospaced))
                 .foregroundStyle(tertiaryColor)
@@ -1178,18 +1086,7 @@ private struct CopilotTimelineRow: View {
             if hasResponse {
                 IconButton(systemName: "doc.on.doc", help: "Copy", size: .compact, action: onCopy)
             }
-            if entry.hasSourceLink {
-                IconButton(systemName: "link", help: "Open sources", size: .compact, action: onOpenSources)
-            }
-            if entry.interaction != nil {
-                IconButton(systemName: "hand.thumbsup", help: "Useful", size: .compact, action: onUseful)
-                IconButton(systemName: "hand.thumbsdown", help: "Incorrect", size: .compact, action: onWrong)
-            }
             Spacer(minLength: 0)
-            if hasPrompt {
-                IconButton(systemName: "arrow.clockwise", help: "Analyze again", size: .compact, action: onRegenerateLocal)
-                IconButton(systemName: "globe", help: "Analyze with web", size: .compact, action: onRegenerateWeb)
-            }
         }
         .opacity(entry.isLive ? 0.45 : 1)
     }
@@ -1486,17 +1383,6 @@ private struct CopilotTimelineEntry: Identifiable, Hashable {
         )
     }
 
-    func statusColor(primary: Color, secondary: Color) -> Color {
-        switch status {
-        case .preparing:
-            return secondary
-        case .failed:
-            return Color(red: 1.0, green: 0.56, blue: 0.46).opacity(0.84)
-        case .ready:
-            return primary.opacity(0.62)
-        }
-    }
-
     private static let dayFormatter: DateFormatter = {
         let formatter = DateFormatter()
         formatter.dateStyle = .medium
@@ -1632,6 +1518,23 @@ private extension CopilotToolKind {
         case .unavailable:
             return "exclamationmark.triangle"
         }
+    }
+}
+
+private extension AnswerSource {
+    var canOpenFromAnswerSurface: Bool {
+        if webURL != nil {
+            return true
+        }
+
+        guard let reference = reference?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !reference.isEmpty,
+              let url = URL(string: reference),
+              let scheme = url.scheme?.lowercased() else {
+            return false
+        }
+
+        return scheme == "file" || scheme == "notchly"
     }
 }
 

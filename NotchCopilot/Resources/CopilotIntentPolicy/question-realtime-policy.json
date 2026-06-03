@@ -111,7 +111,7 @@
     "completeMinimumTokenCount": 5,
     "completeMinimumCJKCharacterCount": 8,
     "allowModelRescuePrefilter": true,
-    "modelRescuePrefilterRequiresSurfaceEvidence": true
+    "modelRescuePrefilterRequiresSurfaceEvidence": false
   },
   "multiqtRescue": {
     "minimumResponseMargin": 0.05,

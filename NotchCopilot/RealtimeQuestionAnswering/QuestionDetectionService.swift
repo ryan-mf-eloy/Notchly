@@ -362,6 +362,15 @@ struct QuestionRejectedFrame: Hashable, Sendable {
             hardSuppressionSignals.contains(signal)
         }
     }
+
+    func hasModelRescueBlockingSuppression(rulePack: QuestionIntentRulePack = .default) -> Bool {
+        var blockingSignals = hardSuppressionSignals
+        blockingSignals.remove(rulePack.signalLabels.nounPhraseOrTitle)
+        blockingSignals.remove(rulePack.signalLabels.declarativeWithoutInterrogativeSyntax)
+        return suppressionSignals.contains { signal in
+            blockingSignals.contains(signal)
+        }
+    }
 }
 
 struct QuestionDetectionResult: Hashable, Sendable {
@@ -386,11 +395,74 @@ private struct StructuralQuestionProfile: Hashable, Sendable {
     }
 }
 
+private struct QuestionNamedEntitySignalCacheKey: Hashable, Sendable {
+    var text: String
+    var strategy: QuestionNamedEntityRecognitionStrategy
+    var minimumTokenLength: Int
+    var minimumLetterCount: Int
+    var uppercaseMinimum: Int
+    var separatorCharacters: String
+}
+
+private enum QuestionNamedEntitySignalCache {
+    private static let lock = NSLock()
+    nonisolated(unsafe) private static var values: [QuestionNamedEntitySignalCacheKey: Bool] = [:]
+    private static let maximumEntryCount = 4_096
+
+    static func value(for key: QuestionNamedEntitySignalCacheKey) -> Bool? {
+        lock.lock()
+        defer { lock.unlock() }
+        return values[key]
+    }
+
+    static func store(_ value: Bool, for key: QuestionNamedEntitySignalCacheKey) {
+        lock.lock()
+        defer { lock.unlock() }
+        if values.count >= maximumEntryCount {
+            values.removeAll(keepingCapacity: true)
+        }
+        values[key] = value
+    }
+}
+
+private struct QuestionCueTokenSequenceCacheKey: Hashable, Sendable {
+    var markers: [String]
+    var textPolicy: QuestionTextSegmentationPolicy
+}
+
+private struct QuestionCueTokenSequenceIndex: Sendable {
+    var byLeadingToken: [String: [[String]]]
+}
+
+private enum QuestionCueTokenSequenceCache {
+    private static let lock = NSLock()
+    nonisolated(unsafe) private static var values: [QuestionCueTokenSequenceCacheKey: QuestionCueTokenSequenceIndex] = [:]
+    private static let maximumEntryCount = 64
+
+    static func value(for key: QuestionCueTokenSequenceCacheKey) -> QuestionCueTokenSequenceIndex? {
+        lock.lock()
+        defer { lock.unlock() }
+        return values[key]
+    }
+
+    static func store(_ value: QuestionCueTokenSequenceIndex, for key: QuestionCueTokenSequenceCacheKey) {
+        lock.lock()
+        defer { lock.unlock() }
+        if values.count >= maximumEntryCount {
+            values.removeAll(keepingCapacity: true)
+        }
+        values[key] = value
+    }
+}
+
 private struct ContextualQuestionCueMatcher {
     var rulePack: QuestionIntentRulePack
 
     func matches(plain currentPlain: String, context: TranscriptContext?) -> Bool {
         guard let context else { return false }
+        if contextContainsOnlyCurrentSegment(context) {
+            return false
+        }
         let plain = QuestionIntentGate.plainQuestionText(
             QuestionDetectionService.normalize(currentPlain),
             textPolicy: rulePack.textSegmentationPolicy
@@ -410,6 +482,17 @@ private struct ContextualQuestionCueMatcher {
         guard rulePack.textSegmentationPolicy.containsCompactScript(in: plain) else { return false }
         return compactSuffixes(from: plain).contains {
             learned.compactSuffixes[$0, default: 0] >= rulePack.contextualCuePolicy.compactSuffixMinimumObservations
+        }
+    }
+
+    private func contextContainsOnlyCurrentSegment(_ context: TranscriptContext) -> Bool {
+        guard let currentText = context.currentSegment?.text.trimmingCharacters(in: .whitespacesAndNewlines),
+              !currentText.isEmpty else {
+            return false
+        }
+        return [context.recentTranscript, context.mediumTranscript, context.completeTranscript].allSatisfy { source in
+            let text = source.trimmingCharacters(in: .whitespacesAndNewlines)
+            return text.isEmpty || text == currentText
         }
     }
 
@@ -749,7 +832,6 @@ struct QuestionSurfaceAnalyzer {
         let meaningfulCount = analysis.meaningfulTokens.count
         let tokenBase = max(tokenCount, 1)
         let objectDensity = Double(meaningfulCount) / Double(tokenBase)
-        let hasNamedEntity = hasNamedEntitySignal(in: rawText)
         let hasContextOverlap = hasMeaningfulContextOverlap(plain: plain, context: context)
         let hasCueNearLead = hasQuestionCueNearLead(plain)
         let scoring = rulePack.surfaceScoringPolicy
@@ -761,25 +843,50 @@ struct QuestionSurfaceAnalyzer {
         if hasNumericQuestionPayload(plain) { objectScore += scoring.objectNumericPayloadBonus }
         if containsAny(plain, rulePack.domainHintMarkers) { objectScore += scoring.objectDomainBonus }
         if hasContextOverlap { objectScore += scoring.objectContextOverlapBonus }
-        if hasNamedEntity { objectScore += scoring.objectNamedEntityBonus }
         if longEnoughCJK { objectScore += scoring.objectCJKBonus }
         objectScore = min(objectScore, 1.0)
 
-        var questionScore = 0.0
-        if analysis.hasQuestionPunctuation { questionScore += scoring.questionPunctuationScore }
-        if analysis.strongSignals.contains(.interrogativeStarter) { questionScore += scoring.questionInterrogativeScore }
-        if analysis.strongSignals.contains(.modalQuestionFrame) { questionScore += scoring.questionModalScore }
-        if analysis.strongSignals.contains(.indirectQuestionFrame) { questionScore += scoring.questionIndirectScore }
-        if analysis.strongSignals.contains(.actionRequestFrame) { questionScore += scoring.questionActionScore }
-        if analysis.strongSignals.contains(.contextualQuestionLead) {
-            questionScore += scoring.questionInterrogativeScore + scoring.questionCueNearLeadScore
+        func questionScore(hasNamedEntity: Bool, objectScore: Double) -> Double {
+            var score = 0.0
+            if analysis.hasQuestionPunctuation { score += scoring.questionPunctuationScore }
+            if analysis.strongSignals.contains(.interrogativeStarter) { score += scoring.questionInterrogativeScore }
+            if analysis.strongSignals.contains(.modalQuestionFrame) { score += scoring.questionModalScore }
+            if analysis.strongSignals.contains(.indirectQuestionFrame) { score += scoring.questionIndirectScore }
+            if analysis.strongSignals.contains(.actionRequestFrame) { score += scoring.questionActionScore }
+            if analysis.strongSignals.contains(.contextualQuestionLead) {
+                score += scoring.questionInterrogativeScore + scoring.questionCueNearLeadScore
+            }
+            if hasCueNearLead { score += scoring.questionCueNearLeadScore }
+            if compactUtterance && objectScore >= scoring.questionCompactObjectThreshold { score += scoring.questionCompactUtteranceScore }
+            if hasContextOverlap { score += scoring.questionContextOverlapScore }
+            if hasNamedEntity { score += scoring.questionNamedEntityScore }
+            if longEnoughCJK && objectScore >= scoring.questionCJKObjectThreshold { score += scoring.questionCJKScore }
+            if analysis.strongSignals.contains(.finalUtterance) { score += scoring.questionFinalUtteranceScore }
+            return score
         }
-        if hasCueNearLead { questionScore += scoring.questionCueNearLeadScore }
-        if compactUtterance && objectScore >= scoring.questionCompactObjectThreshold { questionScore += scoring.questionCompactUtteranceScore }
-        if hasContextOverlap { questionScore += scoring.questionContextOverlapScore }
-        if hasNamedEntity { questionScore += scoring.questionNamedEntityScore }
-        if longEnoughCJK && objectScore >= scoring.questionCJKObjectThreshold { questionScore += scoring.questionCJKScore }
-        if analysis.strongSignals.contains(.finalUtterance) { questionScore += scoring.questionFinalUtteranceScore }
+
+        let questionScoreWithoutNamedEntity = questionScore(hasNamedEntity: false, objectScore: objectScore)
+        let potentialNamedEntityObjectScore = min(objectScore + scoring.objectNamedEntityBonus, 1.0)
+        let namedEntityCanPromoteObject = objectScore < scoring.answerableObjectFocusThreshold
+            && potentialNamedEntityObjectScore >= scoring.answerableObjectFocusThreshold
+        let namedEntityCanPromoteCompactQuestion = compactUtterance
+            && objectScore < scoring.questionCompactObjectThreshold
+            && potentialNamedEntityObjectScore >= scoring.questionCompactObjectThreshold
+        let potentialNamedEntityQuestionScore = questionScoreWithoutNamedEntity
+            + scoring.questionNamedEntityScore
+            + (namedEntityCanPromoteCompactQuestion ? scoring.questionCompactUtteranceScore : 0)
+        let namedEntityCanPromoteQuestion = questionScoreWithoutNamedEntity < scoring.questionLikeThreshold
+            && potentialNamedEntityQuestionScore >= scoring.questionLikeThreshold
+        let shouldEvaluateNamedEntity = namedEntityCanPromoteObject
+            || namedEntityCanPromoteCompactQuestion
+            || namedEntityCanPromoteQuestion
+        let hasNamedEntity = shouldEvaluateNamedEntity && hasNamedEntitySignal(in: rawText)
+
+        if hasNamedEntity {
+            objectScore = potentialNamedEntityObjectScore
+        }
+
+        let questionScore = questionScore(hasNamedEntity: hasNamedEntity, objectScore: objectScore)
 
         return StructuralQuestionProfile(
             questionScore: min(questionScore, 1.0),
@@ -793,9 +900,10 @@ struct QuestionSurfaceAnalyzer {
         if isRejectedQuestionLead(plain) || hasUnsatisfiedConditionalQuestionLead(plain) {
             return false
         }
-        let words = rulePack.textSegmentationPolicy
+        let policy = rulePack.textSegmentationPolicy
+        let words = policy
             .lexicalTokens(in: plain)
-            .prefix(rulePack.textSegmentationPolicy.questionCueLeadTokenLimit)
+            .prefix(policy.questionCueLeadTokenLimit)
         guard !words.isEmpty else { return false }
         let lead = words.joined(separator: " ")
         let markers = rulePack.directQuestionMarkers
@@ -803,20 +911,40 @@ struct QuestionSurfaceAnalyzer {
             + rulePack.indirectQuestionMarkers
             + rulePack.actionRequestMarkers
         return markers.contains { marker in
-            rulePack.textSegmentationPolicy.matchesLeadOrCompactMarker(marker, in: lead)
-                || rulePack.textSegmentationPolicy.matchesLeadOrCompactMarker(marker, in: plain)
+            let normalizedMarker = QuestionDetectionService.normalize(marker)
+            if policy.matchesNormalizedLeadOrCompactMarker(normalizedMarker, inNormalizedText: lead) {
+                return true
+            }
+            return policy.containsCompactScript(in: normalizedMarker)
+                && policy.matchesNormalizedLeadOrCompactMarker(normalizedMarker, inNormalizedText: plain)
         }
     }
 
     private func hasNamedEntitySignal(in rawText: String) -> Bool {
-        switch rulePack.textSegmentationPolicy.namedEntityRecognitionStrategy {
-        case .naturalLanguage:
-            return hasNaturalLanguageNamedEntitySignal(in: rawText)
-        case .heuristic:
-            return hasHeuristicNamedEntitySignal(in: rawText)
-        case .automatic:
-            return hasHeuristicNamedEntitySignal(in: rawText) || hasNaturalLanguageNamedEntitySignal(in: rawText)
+        let policy = rulePack.textSegmentationPolicy
+        let key = QuestionNamedEntitySignalCacheKey(
+            text: rawText.trimmingCharacters(in: .whitespacesAndNewlines),
+            strategy: policy.namedEntityRecognitionStrategy,
+            minimumTokenLength: policy.minimumNamedEntityTokenLength,
+            minimumLetterCount: policy.minimumNamedEntityLetterCount,
+            uppercaseMinimum: policy.namedEntityUppercaseMinimum,
+            separatorCharacters: policy.namedEntitySeparatorCharacters
+        )
+        if let cached = QuestionNamedEntitySignalCache.value(for: key) {
+            return cached
         }
+
+        let result: Bool
+        switch policy.namedEntityRecognitionStrategy {
+        case .naturalLanguage:
+            result = hasNaturalLanguageNamedEntitySignal(in: rawText)
+        case .heuristic:
+            result = hasHeuristicNamedEntitySignal(in: rawText)
+        case .automatic:
+            result = hasHeuristicNamedEntitySignal(in: rawText) || hasNaturalLanguageNamedEntitySignal(in: rawText)
+        }
+        QuestionNamedEntitySignalCache.store(result, for: key)
+        return result
     }
 
     private func hasNaturalLanguageNamedEntitySignal(in rawText: String) -> Bool {
@@ -864,15 +992,27 @@ struct QuestionSurfaceAnalyzer {
 
     private func hasMeaningfulContextOverlap(plain: String, context: TranscriptContext?) -> Bool {
         guard let context else { return false }
-        let current = Set(meaningfulTokens(in: plain))
-        guard !current.isEmpty else { return false }
-
-        var contextPool = QuestionDetectionService.normalize(context.mediumTranscript + " " + context.completeTranscript)
+        if contextContainsOnlyCurrentSegment(context, sources: [context.mediumTranscript, context.completeTranscript]) {
+            return false
+        }
+        let mediumTranscript = QuestionDetectionService.normalize(context.mediumTranscript)
+        let completeTranscript = QuestionDetectionService.normalize(context.completeTranscript)
         let currentSegment = QuestionDetectionService.normalize(context.currentSegment?.text ?? "")
+        if !currentSegment.isEmpty,
+           (mediumTranscript.isEmpty || mediumTranscript == currentSegment),
+           (completeTranscript.isEmpty || completeTranscript == currentSegment) {
+            return false
+        }
+
+        var contextPool = mediumTranscript + " " + completeTranscript
         if !currentSegment.isEmpty {
             contextPool = contextPool.replacingOccurrences(of: currentSegment, with: " ")
         }
         guard !contextPool.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return false }
+
+        let current = Set(meaningfulTokens(in: plain))
+        guard !current.isEmpty else { return false }
+
         let contextTerms = Set(meaningfulTokens(in: contextPool))
         guard !contextTerms.isEmpty else { return false }
         return current.intersection(contextTerms).count >= min(rulePack.surfaceScoringPolicy.contextOverlapMaximumRequiredMatches, current.count)
@@ -883,7 +1023,7 @@ struct QuestionSurfaceAnalyzer {
         let aliases = ([profile?.userName].compactMap { $0 } + (profile?.userAliases ?? []))
             .map(QuestionDetectionService.normalize)
             .filter { !$0.isEmpty }
-        for alias in aliases where rulePack.textSegmentationPolicy.matchesLeadMarker(alias, in: text) {
+        for alias in aliases where rulePack.textSegmentationPolicy.matchesNormalizedLeadMarker(alias, inNormalizedText: text) {
             text = text.removingPrefix(alias)
                 .trimmingCharacters(in: .whitespacesAndNewlines.union(CharacterSet(charactersIn: rulePack.textSegmentationPolicy.addressSeparatorTrimCharacters)))
             break
@@ -907,7 +1047,7 @@ struct QuestionSurfaceAnalyzer {
 
     private func removeLeadingDiscourse(from plain: String) -> String {
         for normalized in rulePack.discourseLeadPhrases {
-            guard rulePack.textSegmentationPolicy.matchesLeadMarker(normalized, in: plain) else { continue }
+            guard rulePack.textSegmentationPolicy.matchesNormalizedLeadMarker(normalized, inNormalizedText: plain) else { continue }
             guard !isConfiguredQuestionIntentLead(normalized) else { continue }
             let remainder = plain.removingPrefix(normalized)
                 .trimmingCharacters(in: .whitespacesAndNewlines.union(CharacterSet(charactersIn: rulePack.textSegmentationPolicy.addressSeparatorTrimCharacters)))
@@ -935,7 +1075,7 @@ struct QuestionSurfaceAnalyzer {
         return markers.contains { marker in
             let normalizedMarker = QuestionDetectionService.normalize(marker)
             return normalizedMarker == normalizedPrefix
-                || rulePack.textSegmentationPolicy.matchesLeadMarker(normalizedPrefix, in: normalizedMarker)
+                || rulePack.textSegmentationPolicy.matchesNormalizedLeadMarker(normalizedPrefix, inNormalizedText: normalizedMarker)
         }
     }
 
@@ -943,7 +1083,7 @@ struct QuestionSurfaceAnalyzer {
         if isRejectedQuestionLead(text) || hasUnsatisfiedConditionalQuestionLead(text) {
             return false
         }
-        guard rulePack.directQuestionMarkers.contains(where: { marker in questionCueMatchesLeadOrCJKBoundary(text, marker: marker) }) else {
+            guard rulePack.directQuestionMarkers.contains(where: { marker in questionCueMatchesLeadOrCJKBoundary(text, marker: marker) }) else {
             return false
         }
         guard requireObject else { return true }
@@ -961,20 +1101,20 @@ struct QuestionSurfaceAnalyzer {
             return false
         }
         guard rulePack.modalQuestionStarters.contains(where: { marker in
-            rulePack.textSegmentationPolicy.matchesLeadMarker(marker, in: text)
+            rulePack.textSegmentationPolicy.matchesNormalizedLeadMarker(marker, inNormalizedText: text)
         }) else { return false }
         return meaningfulTokens(in: text).count >= 1 || containsAny(text, rulePack.domainHintMarkers)
     }
 
     private func isRejectedQuestionLead(_ text: String) -> Bool {
         rulePack.modalQuestionRejectPrefixes.contains {
-            rulePack.textSegmentationPolicy.matchesLeadMarker($0, in: text)
+            rulePack.textSegmentationPolicy.matchesNormalizedLeadMarker($0, inNormalizedText: text)
         }
     }
 
     private func hasUnsatisfiedConditionalQuestionLead(_ text: String) -> Bool {
         guard rulePack.modalQuestionConditionalPrefixes.contains(where: {
-            rulePack.textSegmentationPolicy.matchesLeadMarker($0, in: text)
+            rulePack.textSegmentationPolicy.matchesNormalizedLeadMarker($0, inNormalizedText: text)
         }) else { return false }
         return !containsAny(text, rulePack.modalQuestionConditionalObjectMarkers)
     }
@@ -985,7 +1125,7 @@ struct QuestionSurfaceAnalyzer {
 
     private func hasActionRequestFrame(_ text: String) -> Bool {
         rulePack.actionRequestMarkers.contains { marker in
-            rulePack.textSegmentationPolicy.matchesLeadMarker(marker, in: text)
+            rulePack.textSegmentationPolicy.matchesNormalizedLeadMarker(marker, inNormalizedText: text)
         }
     }
 
@@ -994,7 +1134,7 @@ struct QuestionSurfaceAnalyzer {
             .map(QuestionDetectionService.normalize)
             .filter { !$0.isEmpty }
         return aliases.contains { alias in
-            rulePack.textSegmentationPolicy.containsMarker(alias, in: plain)
+            rulePack.textSegmentationPolicy.containsNormalizedMarker(alias, inNormalizedText: plain)
         }
     }
 
@@ -1004,7 +1144,10 @@ struct QuestionSurfaceAnalyzer {
 
     private func isOperationalNoAnswerCheck(_ plain: String) -> Bool {
         rulePack.operationalNoAnswerPhrases.contains { phrase in
-            rulePack.textSegmentationPolicy.containsBoundedMarker(phrase, in: plain)
+            rulePack.textSegmentationPolicy.containsBoundedNormalizedMarker(
+                QuestionDetectionService.normalize(phrase),
+                inNormalizedText: plain
+            )
         }
     }
 
@@ -1013,7 +1156,10 @@ struct QuestionSurfaceAnalyzer {
         for prefix in rulePack.fragmentPrefixes where text == prefix {
             return true
         }
-        for prefix in rulePack.fragmentPhrases where rulePack.textSegmentationPolicy.matchesLeadMarker(prefix, in: text) {
+        for prefix in rulePack.fragmentPhrases where rulePack.textSegmentationPolicy.matchesNormalizedLeadMarker(
+            QuestionDetectionService.normalize(prefix),
+            inNormalizedText: text
+        ) {
             let remainder = text.removingPrefix(prefix).trimmingCharacters(in: .whitespacesAndNewlines)
             if meaningfulTokens(in: remainder).isEmpty
                 && !hasNumericQuestionPayload(remainder)
@@ -1036,7 +1182,10 @@ struct QuestionSurfaceAnalyzer {
         return containsAny(text, rulePack.nonQuestionTitleMarkers)
     }
 
-    private func isDeclarativeWithoutInterrogativeSyntax(_ text: String, analysis: QuestionSurfaceAnalysis) -> Bool {
+    private func isDeclarativeWithoutInterrogativeSyntax(
+        _ text: String,
+        analysis: QuestionSurfaceAnalysis
+    ) -> Bool {
         if analysis.hasQuestionPunctuation { return false }
         if analysis.strongSignals.contains(.modalQuestionFrame)
             || analysis.strongSignals.contains(.indirectQuestionFrame)
@@ -1044,12 +1193,117 @@ struct QuestionSurfaceAnalyzer {
             return false
         }
         if startsWithInterrogative(text, requireObject: true) { return false }
+        if hasDeclarativePreambleBeforeEmbeddedQuestionCue(in: text) {
+            return true
+        }
         return rulePack.textSegmentationPolicy.lexicalTokenCount(in: text) >= rulePack.textSegmentationPolicy.declarativeMinimumTokens
             && containsAny(text, rulePack.declarativeBridgeMarkers)
     }
 
+    private func hasDeclarativePreambleBeforeEmbeddedQuestionCue(in text: String) -> Bool {
+        let tokens = rulePack.textSegmentationPolicy.lexicalTokens(in: text)
+        guard let cueIndex = firstQuestionCueIndex(in: tokens), cueIndex > 0 else { return false }
+
+        let preambleTokens = Array(tokens[..<cueIndex])
+        guard !preambleTokens.isEmpty,
+              !isAllowedQuestionPreamble(preambleTokens),
+              !isShortTopicalPreamble(preambleTokens) else {
+            return false
+        }
+
+        if hasVerbMorphology(in: preambleTokens) {
+            return true
+        }
+        return preambleTokens.count >= 4
+    }
+
+    private func firstQuestionCueIndex(in tokens: [String]) -> Int? {
+        let cueSequenceIndex = questionCueTokenSequenceIndex()
+        guard !tokens.isEmpty, !cueSequenceIndex.byLeadingToken.isEmpty else { return nil }
+        for (index, token) in tokens.enumerated() {
+            guard let cueSequences = cueSequenceIndex.byLeadingToken[token] else { continue }
+            if cueSequences.contains(where: { matchesCue($0, at: index, tokens: tokens) }) {
+                return index
+            }
+        }
+        return nil
+    }
+
+    private func questionCueTokenSequenceIndex() -> QuestionCueTokenSequenceIndex {
+        var seen: Set<[String]> = []
+        let markers = rulePack.directQuestionMarkers
+            + rulePack.modalQuestionStarters
+            + rulePack.indirectQuestionMarkers
+            + rulePack.actionRequestMarkers
+        let key = QuestionCueTokenSequenceCacheKey(
+            markers: markers,
+            textPolicy: rulePack.textSegmentationPolicy
+        )
+        if let cached = QuestionCueTokenSequenceCache.value(for: key) {
+            return cached
+        }
+        let sequences = markers
+            .map { rulePack.textSegmentationPolicy.lexicalTokens(in: $0) }
+            .filter { !$0.isEmpty }
+            .filter { seen.insert($0).inserted }
+        let sortedSequences = sequences.sorted {
+            if $0.count != $1.count { return $0.count > $1.count }
+            return $0.joined(separator: " ").count > $1.joined(separator: " ").count
+        }
+        let index = QuestionCueTokenSequenceIndex(
+            byLeadingToken: Dictionary(grouping: sortedSequences, by: { $0[0] })
+        )
+        QuestionCueTokenSequenceCache.store(index, for: key)
+        return index
+    }
+
+    private func matchesCue(_ cue: [String], at index: Int, tokens: [String]) -> Bool {
+        guard index + cue.count <= tokens.count else { return false }
+        for offset in cue.indices where tokens[index + offset] != cue[offset] {
+            return false
+        }
+        return true
+    }
+
+    private func isAllowedQuestionPreamble(_ tokens: [String]) -> Bool {
+        let preamble = tokens.joined(separator: " ")
+        return rulePack.discourseLeadPhrases.contains { phrase in
+            let normalized = QuestionDetectionService.normalize(phrase)
+            return normalized == preamble
+                || rulePack.textSegmentationPolicy.matchesNormalizedLeadMarker(normalized, inNormalizedText: preamble)
+        }
+    }
+
+    private func isShortTopicalPreamble(_ tokens: [String]) -> Bool {
+        tokens.count <= 2 && !hasVerbMorphology(in: tokens)
+    }
+
+    private func hasVerbMorphology(in tokens: [String]) -> Bool {
+        tokens.contains { token in
+            guard token.count >= 3 else { return false }
+            if token.hasSuffix("ou")
+                || token.hasSuffix("aram")
+                || token.hasSuffix("eram")
+                || token.hasSuffix("avam")
+                || token.hasSuffix("iam")
+                || token.hasSuffix("ado")
+                || token.hasSuffix("ido")
+                || token.hasSuffix("ed")
+                || token.hasSuffix("ing") {
+                return true
+            }
+            return [
+                "is", "are", "was", "were", "said", "asked", "means",
+                "faz", "foi", "era", "disse", "dijo"
+            ].contains(token)
+        }
+    }
+
     private func hasContextualCarryover(plain: String, context: TranscriptContext?) -> Bool {
         guard let context else { return false }
+        if contextContainsOnlyCurrentSegment(context, sources: [context.recentTranscript, context.mediumTranscript]) {
+            return false
+        }
         let hasPronoun = rulePack.textSegmentationPolicy.lexicalTokens(in: plain).contains { rulePack.contextualPronouns.contains($0) }
         guard hasPronoun else { return false }
         let recent = QuestionDetectionService.normalize(context.recentTranscript + " " + context.mediumTranscript)
@@ -1072,18 +1326,35 @@ struct QuestionSurfaceAnalyzer {
             }
     }
 
+    private func contextContainsOnlyCurrentSegment(_ context: TranscriptContext, sources: [String]) -> Bool {
+        guard let currentText = context.currentSegment?.text.trimmingCharacters(in: .whitespacesAndNewlines),
+              !currentText.isEmpty else {
+            return false
+        }
+        return sources.allSatisfy { source in
+            let text = source.trimmingCharacters(in: .whitespacesAndNewlines)
+            return text.isEmpty || text == currentText
+        }
+    }
+
     private func hasNumericQuestionPayload(_ text: String) -> Bool {
         QuestionDetectionService.hasNumericQuestionPayload(text, rulePack: rulePack)
     }
 
     private func containsAny(_ text: String, _ patterns: [String]) -> Bool {
         patterns.contains { pattern in
-            rulePack.textSegmentationPolicy.containsBoundedMarker(pattern, in: text)
+            rulePack.textSegmentationPolicy.containsBoundedNormalizedMarker(
+                QuestionDetectionService.normalize(pattern),
+                inNormalizedText: text
+            )
         }
     }
 
     private func questionCueMatchesLeadOrCJKBoundary(_ text: String, marker: String) -> Bool {
-        rulePack.textSegmentationPolicy.matchesLeadOrCompactMarker(marker, in: text)
+        rulePack.textSegmentationPolicy.matchesNormalizedLeadOrCompactMarker(
+            QuestionDetectionService.normalize(marker),
+            inNormalizedText: text
+        )
     }
 
     private func containsCompactScript(_ text: String) -> Bool {
@@ -1152,7 +1423,12 @@ struct QuestionCandidateExtractor {
                     discovery: QuestionCandidateDiscovery(
                         source: .surface,
                         surfaceSignals: surfaceSignals,
-                        surfaceSuppressionSignals: suppressionSignals
+                        surfaceSuppressionSignals: suppressionSignals,
+                        surfaceConfidence: analyzer.confidence(
+                            for: analysis,
+                            isPartial: frame.isPartial,
+                            precisionMode: precisionMode
+                        )
                     )
                 )
             )

@@ -233,7 +233,8 @@
     "self_answered",
     "fragment",
     "noun_phrase_or_title",
-    "adaptive_suppressed"
+    "adaptive_suppressed",
+    "declarative_without_interrogative_syntax"
   ],
   "signalLabels": {
     "empty": "empty",

@@ -9,12 +9,12 @@ final class NotchIslandWindowController {
     private var cancellables = Set<AnyCancellable>()
     private var lastFrame: CGRect?
     private var frameSettleTask: Task<Void, Never>?
-    private let chromeFrameSettleDelayMs = 300
+    private let chromeFrameSettleDelayMs = NotchIslandVisualEnvelope.chromeSettleDelayMs
 
     init(appState: AppState) {
         self.appState = appState
         self.panel = NotchPanel(
-            contentRect: CGRect(origin: .zero, size: appState.notchIslandCanvasSize),
+            contentRect: CGRect(origin: .zero, size: NotchIslandVisualEnvelope.windowCanvasSize(for: appState.notchIslandCanvasSize)),
             styleMask: [.borderless, .nonactivatingPanel],
             backing: .buffered,
             defer: false
@@ -125,7 +125,8 @@ final class NotchIslandWindowController {
 
     private func position(animated: Bool) {
         guard let screen = targetScreen() else { return }
-        let size = appState.notchIslandCanvasSize
+        let logicalCanvasSize = appState.notchIslandCanvasSize
+        let size = NotchIslandVisualEnvelope.windowCanvasSize(for: logicalCanvasSize)
         let frame = panelFrame(for: size, on: screen)
 
         if animated,
@@ -137,7 +138,7 @@ final class NotchIslandWindowController {
             )
             let envelopeFrame = panelFrame(for: envelopeSize, on: screen)
             applyPanelFrame(envelopeFrame)
-            scheduleFrameSettle(to: frame, targetSize: size)
+            scheduleFrameSettle(to: frame, targetLogicalCanvasSize: logicalCanvasSize)
             return
         }
 
@@ -183,13 +184,13 @@ final class NotchIslandWindowController {
         panel.collectionBehavior = NotchIslandWindowZOrder.collectionBehavior
     }
 
-    private func scheduleFrameSettle(to targetFrame: CGRect, targetSize: CGSize) {
+    private func scheduleFrameSettle(to targetFrame: CGRect, targetLogicalCanvasSize: CGSize) {
         frameSettleTask?.cancel()
         let delayMs = chromeFrameSettleDelayMs
         frameSettleTask = Task { @MainActor [weak self] in
             try? await Task.sleep(for: .milliseconds(delayMs))
             guard let self, !Task.isCancelled else { return }
-            guard self.appState.notchIslandCanvasSize == targetSize else { return }
+            guard self.appState.notchIslandCanvasSize == targetLogicalCanvasSize else { return }
             self.applyPanelFrame(targetFrame)
         }
     }
@@ -380,7 +381,8 @@ final class NotchPanel: NSPanel {
         guard row.contains(point) else { return false }
 
         let leftX = islandRect.minX + inset
-        let leftRects = buttonRects(startX: leftX, y: y, count: 3, hit: hit, spacing: spacing)
+        let showsTranslationControl = appState.shouldShowLiveTranslationControl
+        let leftRects = buttonRects(startX: leftX, y: y, count: showsTranslationControl ? 3 : 2, hit: hit, spacing: spacing)
         if leftRects.indices.contains(0), IslandButtonFallbackGeometry.expandedHitRect(leftRects[0]).contains(point) {
             if expandedHasActiveMeeting(appState) {
                 appState.pauseOrResume()
@@ -395,7 +397,9 @@ final class NotchPanel: NSPanel {
             }
             return true
         }
-        if leftRects.indices.contains(2), IslandButtonFallbackGeometry.expandedHitRect(leftRects[2]).contains(point) {
+        if showsTranslationControl,
+           leftRects.indices.contains(2),
+           IslandButtonFallbackGeometry.expandedHitRect(leftRects[2]).contains(point) {
             appState.toggleLiveTranslation()
             return true
         }
@@ -1083,9 +1087,19 @@ final class NotchInteractionContainerView<Content: View>: NSView {
     private func shouldRouteToHostedContent(at point: NSPoint, appState: AppState) -> Bool {
         guard !appState.isIdleHiddenBehindNotch else { return false }
         if appState.isPanelExpanded {
-            return bounds.contains(point)
+            return logicalCanvasRect(appState: appState).contains(point)
         }
         return isVisibleIslandPoint(point, appState: appState)
+    }
+
+    private func logicalCanvasRect(appState: AppState) -> CGRect {
+        let size = appState.notchIslandCanvasSize
+        return CGRect(
+            x: bounds.midX - size.width / 2,
+            y: bounds.maxY - size.height,
+            width: size.width,
+            height: size.height
+        )
     }
 
     private func visibleIslandRect(appState: AppState) -> CGRect {
@@ -1102,7 +1116,7 @@ final class NotchInteractionContainerView<Content: View>: NSView {
         if appState.islandMode == .idle &&
             !appState.isPanelExpanded &&
             appState.currentMeeting == nil {
-            return bounds
+            return logicalCanvasRect(appState: appState)
         }
 
         let footprint = NotchIslandChromeMetrics.collapsedNotchFootprintSize

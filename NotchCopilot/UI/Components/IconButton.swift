@@ -61,6 +61,17 @@ final class MouseDownActionNSView: NSView {
         trackingAreaRef = trackingArea
         addTrackingArea(trackingArea)
         super.updateTrackingAreas()
+        refreshHoverStateFromCurrentMouseLocation()
+    }
+
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        refreshHoverStateFromCurrentMouseLocation()
+    }
+
+    override func setFrameSize(_ newSize: NSSize) {
+        super.setFrameSize(newSize)
+        refreshHoverStateFromCurrentMouseLocation()
     }
 
     override func mouseDown(with event: NSEvent) {
@@ -109,6 +120,15 @@ final class MouseDownActionNSView: NSView {
         guard isHovering != hovering else { return }
         isHovering = hovering
         onHover?(hovering)
+    }
+
+    private func refreshHoverStateFromCurrentMouseLocation() {
+        guard let window else {
+            setHovering(false)
+            return
+        }
+        let localPoint = convert(window.mouseLocationOutsideOfEventStream, from: nil)
+        setHovering(bounds.contains(localPoint))
     }
 }
 

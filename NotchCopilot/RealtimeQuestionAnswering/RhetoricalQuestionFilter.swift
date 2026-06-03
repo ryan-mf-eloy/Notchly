@@ -695,13 +695,23 @@ struct QuestionTextSegmentationPolicy: Codable, Hashable, Sendable {
 
     func lexicalTokens(in text: String) -> [String] {
         let normalized = QuestionDetectionService.normalize(text)
+        let cacheKey = QuestionLexicalTokensCacheKey(
+            normalizedText: normalized,
+            policy: self
+        )
+        if let cached = QuestionLexicalTokensCache.value(for: cacheKey) {
+            return cached
+        }
+        let tokens: [String]
         switch effectiveTokenizationStrategy(for: normalized) {
         case .naturalLanguage:
-            let tokens = naturalLanguageTokens(in: normalized)
-            return tokens.isEmpty ? scalarTokens(in: normalized) : tokens
+            let naturalTokens = naturalLanguageTokens(in: normalized)
+            tokens = naturalTokens.isEmpty ? scalarTokens(in: normalized) : naturalTokens
         case .scalarSplit, .automatic:
-            return scalarTokens(in: normalized)
+            tokens = scalarTokens(in: normalized)
         }
+        QuestionLexicalTokensCache.store(tokens, for: cacheKey)
+        return tokens
     }
 
     func lexicalTokenCount(in text: String) -> Int {
@@ -734,6 +744,10 @@ struct QuestionTextSegmentationPolicy: Codable, Hashable, Sendable {
     func containsMarker(_ marker: String, in normalizedText: String) -> Bool {
         let normalized = QuestionDetectionService.normalize(marker)
         let text = QuestionDetectionService.normalize(normalizedText)
+        return containsNormalizedMarker(normalized, inNormalizedText: text)
+    }
+
+    func containsNormalizedMarker(_ normalized: String, inNormalizedText text: String) -> Bool {
         guard !normalized.isEmpty else { return false }
         if !containsTokenCharacter(in: normalized) {
             return text.contains(normalized)
@@ -747,6 +761,10 @@ struct QuestionTextSegmentationPolicy: Codable, Hashable, Sendable {
     func containsBoundedMarker(_ marker: String, in normalizedText: String) -> Bool {
         let normalized = QuestionDetectionService.normalize(marker)
         let text = QuestionDetectionService.normalize(normalizedText)
+        return containsBoundedNormalizedMarker(normalized, inNormalizedText: text)
+    }
+
+    func containsBoundedNormalizedMarker(_ normalized: String, inNormalizedText text: String) -> Bool {
         guard !normalized.isEmpty else { return false }
         if !containsTokenCharacter(in: normalized) || containsCompactScript(in: normalized) {
             return text.contains(normalized)
@@ -756,8 +774,12 @@ struct QuestionTextSegmentationPolicy: Codable, Hashable, Sendable {
 
     func matchesLeadMarker(_ marker: String, in normalizedText: String) -> Bool {
         let normalized = QuestionDetectionService.normalize(marker)
-        guard !normalized.isEmpty else { return false }
         let text = QuestionDetectionService.normalize(normalizedText)
+        return matchesNormalizedLeadMarker(normalized, inNormalizedText: text)
+    }
+
+    func matchesNormalizedLeadMarker(_ normalized: String, inNormalizedText text: String) -> Bool {
+        guard !normalized.isEmpty else { return false }
         guard text.hasPrefix(normalized) else { return false }
         guard let end = text.index(text.startIndex, offsetBy: normalized.count, limitedBy: text.endIndex) else {
             return false
@@ -771,11 +793,16 @@ struct QuestionTextSegmentationPolicy: Codable, Hashable, Sendable {
 
     func matchesLeadOrCompactMarker(_ marker: String, in normalizedText: String) -> Bool {
         let normalized = QuestionDetectionService.normalize(marker)
+        let text = QuestionDetectionService.normalize(normalizedText)
+        return matchesNormalizedLeadOrCompactMarker(normalized, inNormalizedText: text)
+    }
+
+    func matchesNormalizedLeadOrCompactMarker(_ normalized: String, inNormalizedText text: String) -> Bool {
         guard !normalized.isEmpty else { return false }
         if containsCompactScript(in: normalized) {
-            return containsMarker(normalized, in: normalizedText)
+            return containsNormalizedMarker(normalized, inNormalizedText: text)
         }
-        return matchesLeadMarker(normalized, in: normalizedText)
+        return matchesNormalizedLeadMarker(normalized, inNormalizedText: text)
     }
 
     private func containsToken(_ token: String, in text: String) -> Bool {
@@ -847,6 +874,32 @@ struct QuestionTextSegmentationPolicy: Codable, Hashable, Sendable {
                         CharacterSet.letters.contains($0) || CharacterSet.decimalDigits.contains($0)
                     }
             }
+    }
+}
+
+private struct QuestionLexicalTokensCacheKey: Hashable, Sendable {
+    var normalizedText: String
+    var policy: QuestionTextSegmentationPolicy
+}
+
+private enum QuestionLexicalTokensCache {
+    private static let lock = NSLock()
+    nonisolated(unsafe) private static var values: [QuestionLexicalTokensCacheKey: [String]] = [:]
+    private static let maximumEntryCount = 4_096
+
+    static func value(for key: QuestionLexicalTokensCacheKey) -> [String]? {
+        lock.lock()
+        defer { lock.unlock() }
+        return values[key]
+    }
+
+    static func store(_ value: [String], for key: QuestionLexicalTokensCacheKey) {
+        lock.lock()
+        defer { lock.unlock() }
+        if values.count >= maximumEntryCount {
+            values.removeAll(keepingCapacity: true)
+        }
+        values[key] = value
     }
 }
 
@@ -1530,7 +1583,8 @@ private extension QuestionIntentSignalLabels {
             selfAnswered,
             fragment,
             nounPhraseOrTitle,
-            adaptiveSuppressed
+            adaptiveSuppressed,
+            declarativeWithoutInterrogativeSyntax
         ]
     }
 
@@ -1617,7 +1671,13 @@ struct RhetoricalQuestionFilter {
     }
 
     func isRhetorical(_ text: String) -> Bool {
-        rulePack.rhetoricalMarkers.contains { rulePack.textSegmentationPolicy.containsBoundedMarker($0, in: text) }
+        let normalizedText = QuestionDetectionService.normalize(text)
+        return rulePack.rhetoricalMarkers.contains {
+            rulePack.textSegmentationPolicy.containsBoundedNormalizedMarker(
+                QuestionDetectionService.normalize($0),
+                inNormalizedText: normalizedText
+            )
+        }
             || rulePack.rhetoricalSuffixes.contains { hasRhetoricalSuffix($0, in: text) }
     }
 
@@ -1663,8 +1723,12 @@ struct RhetoricalQuestionFilter {
     }
 
     func isQuotedPastQuestion(_ text: String) -> Bool {
-        rulePack.quotedOrExplainingMarkers.contains {
-            rulePack.textSegmentationPolicy.containsBoundedMarker($0, in: text)
+        let normalizedText = QuestionDetectionService.normalize(text)
+        return rulePack.quotedOrExplainingMarkers.contains {
+            rulePack.textSegmentationPolicy.containsBoundedNormalizedMarker(
+                QuestionDetectionService.normalize($0),
+                inNormalizedText: normalizedText
+            )
         }
     }
 }
@@ -1889,7 +1953,10 @@ struct QuestionIntentGate {
 
     func isFragment(_ plain: String, context: TranscriptContext?) -> Bool {
         if rulePack.fragmentPhrases.contains(plain) { return true }
-        for prefix in rulePack.fragmentPhrases where rulePack.textSegmentationPolicy.matchesLeadMarker(prefix, in: plain) {
+        for prefix in rulePack.fragmentPhrases where rulePack.textSegmentationPolicy.matchesNormalizedLeadMarker(
+            QuestionDetectionService.normalize(prefix),
+            inNormalizedText: plain
+        ) {
             let remainder = plain.removingPrefix(prefix).trimmingCharacters(in: .whitespacesAndNewlines)
             if meaningfulTokens(in: remainder).isEmpty
                 && !hasNumericQuestionPayload(remainder)
@@ -1897,7 +1964,10 @@ struct QuestionIntentGate {
                 return true
             }
         }
-        for prefix in rulePack.fragmentPrefixes where rulePack.textSegmentationPolicy.matchesLeadMarker(prefix, in: plain) {
+        for prefix in rulePack.fragmentPrefixes where rulePack.textSegmentationPolicy.matchesNormalizedLeadMarker(
+            QuestionDetectionService.normalize(prefix),
+            inNormalizedText: plain
+        ) {
             let remainder = plain.removingPrefix(prefix).trimmingCharacters(in: .whitespacesAndNewlines)
             if remainder.isEmpty { return true }
             if wordCount(remainder) <= 1 && !hasConcreteObject(remainder, context: context) {
@@ -1910,7 +1980,10 @@ struct QuestionIntentGate {
     func isSmallTalk(_ plain: String) -> Bool {
         if rulePack.exactSmallTalkPhrases.contains(plain) { return true }
         if isOperationalNoAnswerCheck(plain) { return true }
-        for phrase in rulePack.exactSmallTalkPhrases where rulePack.textSegmentationPolicy.matchesLeadMarker(phrase, in: plain) {
+        for phrase in rulePack.exactSmallTalkPhrases where rulePack.textSegmentationPolicy.matchesNormalizedLeadMarker(
+            QuestionDetectionService.normalize(phrase),
+            inNormalizedText: plain
+        ) {
             let remainder = plain.removingPrefix(phrase).trimmingCharacters(in: .whitespacesAndNewlines)
             let words = rulePack.textSegmentationPolicy.lexicalTokens(in: remainder)
             if !words.isEmpty && words.allSatisfy({ isSmallTalkContinuationToken($0) }) {
@@ -1934,7 +2007,10 @@ struct QuestionIntentGate {
 
     private func isOperationalNoAnswerCheck(_ plain: String) -> Bool {
         guard rulePack.operationalNoAnswerPhrases.contains(where: { phrase in
-            rulePack.textSegmentationPolicy.containsBoundedMarker(phrase, in: plain)
+            rulePack.textSegmentationPolicy.containsBoundedNormalizedMarker(
+                QuestionDetectionService.normalize(phrase),
+                inNormalizedText: plain
+            )
         }) else {
             return false
         }
@@ -1943,7 +2019,10 @@ struct QuestionIntentGate {
 
     func isQuotedOrExplaining(_ plain: String) -> Bool {
         rulePack.quotedOrExplainingMarkers.contains {
-            rulePack.textSegmentationPolicy.containsBoundedMarker($0, in: plain)
+            rulePack.textSegmentationPolicy.containsBoundedNormalizedMarker(
+                QuestionDetectionService.normalize($0),
+                inNormalizedText: plain
+            )
         }
     }
 
@@ -2093,7 +2172,10 @@ struct QuestionIntentGate {
 
     private func startsWithAnyToken(_ text: String, _ patterns: [String]) -> Bool {
         patterns.contains { pattern in
-            rulePack.textSegmentationPolicy.matchesLeadOrCompactMarker(pattern, in: text)
+            rulePack.textSegmentationPolicy.matchesNormalizedLeadOrCompactMarker(
+                QuestionDetectionService.normalize(pattern),
+                inNormalizedText: text
+            )
         }
     }
 
@@ -2111,7 +2193,7 @@ struct QuestionIntentGate {
     }
 
     private func patternMatches(_ text: String, _ pattern: String) -> Bool {
-        rulePack.textSegmentationPolicy.containsBoundedMarker(pattern, in: text)
+        rulePack.textSegmentationPolicy.containsBoundedNormalizedMarker(pattern, inNormalizedText: text)
     }
 
     private func wordCount(_ value: String) -> Int {

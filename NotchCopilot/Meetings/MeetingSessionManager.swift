@@ -1066,6 +1066,9 @@ final class MeetingSessionManager {
             for: segment,
             targetFrames: QuestionAudioLogMelFeature.trainedModelFrameCount
         )
+        if let prosody = questionAudioLogMelBuffer.prosody(for: segment) {
+            signal = signal.withAudioProsody(prosody)
+        }
         return signal
     }
 

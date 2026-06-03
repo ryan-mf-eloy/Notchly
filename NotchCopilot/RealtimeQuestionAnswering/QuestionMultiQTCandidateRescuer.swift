@@ -6,6 +6,35 @@ struct QuestionMultiQTCandidateRescuer {
     var intentGate: QuestionIntentGate = QuestionIntentGate()
     var rescuePolicy: RealtimeMultiQTRescuePolicy = .fallback
 
+    func refineSurfaceCandidates(
+        _ candidates: [QuestionCandidate],
+        context: TranscriptContext,
+        mode: QAMultimodalMode,
+        profile: UserMeetingProfile? = nil
+    ) async -> [QuestionCandidate] {
+        guard mode != .off, !candidates.isEmpty else { return candidates }
+
+        var refined: [QuestionCandidate] = []
+        refined.reserveCapacity(candidates.count)
+
+        for candidate in candidates {
+            guard shouldScoreSurfaceCandidate(candidate, context: context, profile: profile) else {
+                refined.append(candidate)
+                continue
+            }
+
+            let prediction = await trainedModelRunner.prediction(
+                for: candidate,
+                signal: candidate.multimodalSignal
+            )
+            var copy = candidate
+            copy.discovery = candidate.discovery.withTrainedPrediction(prediction)
+            refined.append(copy)
+        }
+
+        return refined
+    }
+
     func rescueCandidates(
         from rejectedFrames: [QuestionRejectedFrame],
         context: TranscriptContext,
@@ -51,7 +80,7 @@ struct QuestionMultiQTCandidateRescuer {
         context: TranscriptContext,
         profile: UserMeetingProfile?
     ) -> Bool {
-        guard !rejectedFrame.hasHardSuppression else { return false }
+        guard !rejectedFrame.hasModelRescueBlockingSuppression(rulePack: intentGate.rulePack) else { return false }
         let frame = rejectedFrame.frame
         if frame.isPartial {
             guard let signal = frame.multimodalSignal,
@@ -64,6 +93,23 @@ struct QuestionMultiQTCandidateRescuer {
         }
         let hardSuppressionCandidate = candidate(from: rejectedFrame, source: .shadowRescue)
         return intentGate.hardSuppression(candidate: hardSuppressionCandidate, context: context, profile: profile) == nil
+    }
+
+    private func shouldScoreSurfaceCandidate(
+        _ candidate: QuestionCandidate,
+        context: TranscriptContext,
+        profile: UserMeetingProfile?
+    ) -> Bool {
+        if candidate.isPartial {
+            guard let signal = candidate.multimodalSignal,
+                  signal.partialStability >= rescuePolicy.partialMinimumStability,
+                  signal.partialRevisionCount >= rescuePolicy.partialMinimumRevisionCount
+            else { return false }
+        }
+        if candidate.rawText.trimmingCharacters(in: .whitespacesAndNewlines).count < rescuePolicy.minimumFrameCharacters {
+            return false
+        }
+        return intentGate.hardSuppression(candidate: candidate, context: context, profile: profile) == nil
     }
 
     private func shouldPromote(prediction: QuestionTrainedMultimodalPrediction) -> Bool {

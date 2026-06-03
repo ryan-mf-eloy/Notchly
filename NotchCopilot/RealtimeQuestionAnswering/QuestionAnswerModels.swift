@@ -15,6 +15,7 @@ struct QuestionCandidateDiscovery: Codable, Hashable, Sendable {
     var source: QuestionCandidateDiscoverySource
     var surfaceSignals: [String]
     var surfaceSuppressionSignals: [String]
+    var surfaceConfidence: Double?
     var modelScore: Double?
     var modelThreshold: Double?
     var modelLabel: String?
@@ -27,6 +28,7 @@ struct QuestionCandidateDiscovery: Codable, Hashable, Sendable {
         source: QuestionCandidateDiscoverySource,
         surfaceSignals: [String] = [],
         surfaceSuppressionSignals: [String] = [],
+        surfaceConfidence: Double? = nil,
         modelScore: Double? = nil,
         modelThreshold: Double? = nil,
         modelLabel: String? = nil,
@@ -36,6 +38,7 @@ struct QuestionCandidateDiscovery: Codable, Hashable, Sendable {
         self.source = source
         self.surfaceSignals = surfaceSignals
         self.surfaceSuppressionSignals = surfaceSuppressionSignals
+        self.surfaceConfidence = surfaceConfidence
         self.modelScore = modelScore
         self.modelThreshold = modelThreshold
         self.modelLabel = modelLabel
@@ -52,6 +55,33 @@ struct QuestionCandidateDiscovery: Codable, Hashable, Sendable {
         copy.modelDecisionSignals = prediction.decisionSignals
         copy.modelSuppressionSignals = prediction.suppressionSignals
         return copy
+    }
+
+    var trainedPrediction: QuestionTrainedMultimodalPrediction? {
+        guard let modelScore, let modelThreshold else { return nil }
+        return QuestionTrainedMultimodalPrediction(
+            responseScore: modelScore,
+            label: modelLabel,
+            completeScore: nil,
+            rhetoricalScore: nil,
+            threshold: modelThreshold,
+            decisionLatencyMs: nil,
+            decisionSignals: modelDecisionSignals ?? [],
+            suppressionSignals: modelSuppressionSignals ?? []
+        )
+    }
+
+    var hasTrainedPredictionSignal: Bool {
+        modelScore != nil
+            || modelThreshold != nil
+            || modelLabel != nil
+            || modelDecisionSignals?.isEmpty == false
+            || modelSuppressionSignals?.isEmpty == false
+    }
+
+    var hasPositiveTrainedQuestionSignal: Bool {
+        guard let trainedPrediction else { return false }
+        return trainedPrediction.shouldAllow && trainedPrediction.isPositiveLabel
     }
 }
 
@@ -189,6 +219,12 @@ struct QuestionMultimodalSignal: Codable, Hashable, Sendable {
     var noiseFloor: Double?
     var audioEnergy: Double?
     var audioLogMel: QuestionAudioLogMelFeature?
+    var pitchMeanHz: Double?
+    var terminalPitchSlope: Double?
+    var voicingRatio: Double?
+    var terminalPauseDuration: TimeInterval?
+    var speechRate: Double?
+    var prosodySource: String?
     var createdAt: Date
 
     init(
@@ -211,6 +247,12 @@ struct QuestionMultimodalSignal: Codable, Hashable, Sendable {
         noiseFloor: Double? = nil,
         audioEnergy: Double? = nil,
         audioLogMel: QuestionAudioLogMelFeature? = nil,
+        pitchMeanHz: Double? = nil,
+        terminalPitchSlope: Double? = nil,
+        voicingRatio: Double? = nil,
+        terminalPauseDuration: TimeInterval? = nil,
+        speechRate: Double? = nil,
+        prosodySource: String? = nil,
         createdAt: Date = Date()
     ) {
         self.language = language
@@ -232,6 +274,12 @@ struct QuestionMultimodalSignal: Codable, Hashable, Sendable {
         self.noiseFloor = noiseFloor.map { min(max($0, 0), 1) }
         self.audioEnergy = audioEnergy.map { min(max($0, 0), 1) }
         self.audioLogMel = audioLogMel
+        self.pitchMeanHz = pitchMeanHz.map { min(max($0, 40), 600) }
+        self.terminalPitchSlope = terminalPitchSlope.map { min(max($0, -1), 1) }
+        self.voicingRatio = voicingRatio.map { min(max($0, 0), 1) }
+        self.terminalPauseDuration = terminalPauseDuration.map { min(max($0, 0), 5) }
+        self.speechRate = speechRate.map { min(max($0, 0), 12) }
+        self.prosodySource = prosodySource
         self.createdAt = createdAt
     }
 
@@ -266,6 +314,87 @@ struct QuestionMultimodalSignal: Codable, Hashable, Sendable {
         copy.partialStability = min(max(stability, 0), 1)
         copy.partialRevisionCount = max(0, revisionCount)
         return copy
+    }
+
+    func withAudioProsody(_ prosody: QuestionAudioProsodyFeature) -> QuestionMultimodalSignal {
+        var copy = self
+        copy.pitchMeanHz = prosody.pitchMeanHz
+        copy.terminalPitchSlope = prosody.terminalPitchSlope
+        copy.voicingRatio = prosody.voicingRatio
+        copy.terminalPauseDuration = prosody.terminalPauseDuration
+        copy.speechRate = prosody.speechRate
+        copy.prosodySource = prosody.source
+        if prosody.terminalPauseDuration.map({ $0 >= 0.18 }) == true {
+            copy.hasTerminalPause = true
+        }
+        return copy
+    }
+
+    func modelScalarFeatures(fallbackLanguage: String?) -> [Double] {
+        let resolvedLanguage = language ?? fallbackLanguage
+        let normalizedPitch = pitchMeanHz.map { min(max(($0 - 60) / 360, 0), 1) } ?? 0
+        let resolvedTerminalPause = terminalPauseDuration ?? (hasTerminalPause ? 0.25 : 0)
+        let resolvedSpeechRate = speechRate ?? 0
+
+        return [
+            asrConfidence ?? 1,
+            isPartial ? 1 : 0,
+            min(max(duration / 20, 0), 1),
+            matchesLanguage(resolvedLanguage, prefixes: ["pt"]) ? 1 : 0,
+            matchesLanguage(resolvedLanguage, prefixes: ["en"]) ? 1 : 0,
+            matchesLanguage(resolvedLanguage, prefixes: ["es"]) ? 1 : 0,
+            matchesLanguage(resolvedLanguage, prefixes: ["ja"]) ? 1 : 0,
+            hasTerminalPause ? 1 : 0,
+            min(max(partialStability, 0), 1),
+            min(Double(max(0, partialRevisionCount)) / 6, 1),
+            rms ?? 0,
+            peak ?? 0,
+            audioEnergy ?? rms ?? 0,
+            noiseFloor ?? 0,
+            isSilence ? 1 : 0,
+            isTooQuiet ? 1 : 0,
+            isClipping ? 1 : 0,
+            min(Double(max(0, gapCount)) / 6, 1),
+            normalizedPitch,
+            terminalPitchSlope ?? 0,
+            (terminalPitchSlope ?? 0) > 0.08 ? 1 : 0,
+            voicingRatio ?? 0,
+            min(max(resolvedTerminalPause / 2, 0), 1),
+            min(max(resolvedSpeechRate / 8, 0), 1),
+            audioSource == .microphone ? 1 : 0,
+            audioSource == .system ? 1 : 0,
+            audioSource == .mixed ? 1 : 0
+        ]
+    }
+
+    private func matchesLanguage(_ language: String?, prefixes: [String]) -> Bool {
+        guard let language = language?.lowercased(), !language.isEmpty else { return false }
+        return prefixes.contains { language == $0 || language.hasPrefix("\($0)-") || language.hasPrefix("\($0)_") }
+    }
+}
+
+struct QuestionAudioProsodyFeature: Codable, Hashable, Sendable {
+    var pitchMeanHz: Double?
+    var terminalPitchSlope: Double?
+    var voicingRatio: Double?
+    var terminalPauseDuration: TimeInterval?
+    var speechRate: Double?
+    var source: String
+
+    init(
+        pitchMeanHz: Double? = nil,
+        terminalPitchSlope: Double? = nil,
+        voicingRatio: Double? = nil,
+        terminalPauseDuration: TimeInterval? = nil,
+        speechRate: Double? = nil,
+        source: String = "prosody"
+    ) {
+        self.pitchMeanHz = pitchMeanHz.map { min(max($0, 40), 600) }
+        self.terminalPitchSlope = terminalPitchSlope.map { min(max($0, -1), 1) }
+        self.voicingRatio = voicingRatio.map { min(max($0, 0), 1) }
+        self.terminalPauseDuration = terminalPauseDuration.map { min(max($0, 0), 5) }
+        self.speechRate = speechRate.map { min(max($0, 0), 12) }
+        self.source = source
     }
 }
 
@@ -410,6 +539,21 @@ final class QuestionAudioLogMelRingBuffer: @unchecked Sendable {
         )
     }
 
+    func prosody(for segment: TranscriptSegment) -> QuestionAudioProsodyFeature? {
+        let source = normalizedSource(segment.audioSource)
+        let fallbackSources = fallbackOrder(for: source)
+        lock.lock()
+        let candidateChunks = fallbackSources.compactMap { chunksBySource[$0] }.first { !$0.isEmpty } ?? []
+        lock.unlock()
+        let samples = samples(for: segment, in: candidateChunks)
+        guard let samples, !samples.isEmpty else { return nil }
+        return QuestionAudioProsodyExtractor.feature(
+            from: samples,
+            transcriptText: segment.text,
+            source: "captured_prosody"
+        )
+    }
+
     private func samples(for segment: TranscriptSegment, in chunks: [Chunk]) -> [Float]? {
         guard !chunks.isEmpty else { return nil }
         if let range = segment.sourceFrameRange {
@@ -481,6 +625,166 @@ final class QuestionAudioLogMelRingBuffer: @unchecked Sendable {
         case .unknown:
             [.mixed, .microphone, .system, .cloud, .unknown]
         }
+    }
+}
+
+enum QuestionAudioProsodyExtractor {
+    static let sampleRate: TimeInterval = 16_000
+    private static let frameLength = 480
+    private static let hopLength = 160
+    private static let minimumUsableSamples = 2_560
+    private static let minimumPitchHz = 60.0
+    private static let maximumPitchHz = 450.0
+
+    static func feature(
+        from samples: [Float],
+        transcriptText: String?,
+        source: String = "captured_prosody"
+    ) -> QuestionAudioProsodyFeature? {
+        guard samples.count >= minimumUsableSamples else { return nil }
+
+        let globalRMS = rms(samples)
+        let speechThreshold = max(0.0025, globalRMS * 0.28)
+        let frames = framedRMS(samples)
+        let terminalPause = terminalPauseDuration(frameRMS: frames, threshold: speechThreshold)
+        let pitchTrack = pitchTrack(samples, frameRMS: frames, speechThreshold: speechThreshold)
+        let voicedPitches = pitchTrack.compactMap { $0.pitchHz }
+        let pitchMean = voicedPitches.isEmpty ? nil : mean(voicedPitches)
+        let voicingRatio = frames.isEmpty ? nil : Double(voicedPitches.count) / Double(frames.count)
+        let slope = terminalPitchSlope(from: pitchTrack)
+        let speechRate = speechRate(from: transcriptText, duration: Double(samples.count) / sampleRate)
+
+        guard pitchMean != nil || voicingRatio != nil || terminalPause > 0 || speechRate != nil else {
+            return nil
+        }
+
+        return QuestionAudioProsodyFeature(
+            pitchMeanHz: pitchMean,
+            terminalPitchSlope: slope,
+            voicingRatio: voicingRatio,
+            terminalPauseDuration: terminalPause,
+            speechRate: speechRate,
+            source: source
+        )
+    }
+
+    private static func framedRMS(_ samples: [Float]) -> [Double] {
+        guard samples.count >= frameLength else { return [] }
+        var output: [Double] = []
+        var start = 0
+        while start < samples.count {
+            let end = min(start + frameLength, samples.count)
+            output.append(rms(samples[start..<end]))
+            if end == samples.count { break }
+            start += hopLength
+        }
+        return output
+    }
+
+    private static func pitchTrack(
+        _ samples: [Float],
+        frameRMS: [Double],
+        speechThreshold: Double
+    ) -> [(index: Int, pitchHz: Double?)] {
+        guard samples.count >= frameLength else { return [] }
+        var output: [(index: Int, pitchHz: Double?)] = []
+        for frameIndex in frameRMS.indices {
+            let start = frameIndex * hopLength
+            guard start < samples.count else { break }
+            let end = min(start + frameLength, samples.count)
+            let frame = samples[start..<end]
+            let pitch = frameRMS[frameIndex] > speechThreshold * 1.15 ? pitchHz(frame) : nil
+            output.append((index: frameIndex, pitchHz: pitch))
+            if end == samples.count { break }
+        }
+        return output
+    }
+
+    private static func pitchHz(_ frame: ArraySlice<Float>) -> Double? {
+        let count = frame.count
+        let minLag = max(1, Int((sampleRate / maximumPitchHz).rounded(.down)))
+        let maxLag = min(count - 2, Int((sampleRate / minimumPitchHz).rounded(.up)))
+        guard maxLag > minLag else { return nil }
+
+        var scores: [(lag: Int, score: Double)] = []
+        scores.reserveCapacity(max(0, maxLag - minLag + 1))
+        for lag in minLag...maxLag {
+            var correlation = 0.0
+            var energyA = 0.0
+            var energyB = 0.0
+            let limit = count - lag
+            for localIndex in 0..<limit {
+                let a = Double(frame[frame.startIndex + localIndex])
+                let b = Double(frame[frame.startIndex + localIndex + lag])
+                correlation += a * b
+                energyA += a * a
+                energyB += b * b
+            }
+            let denominator = sqrt(max(energyA * energyB, 0.00000001))
+            let score = correlation / denominator
+            scores.append((lag: lag, score: score))
+        }
+
+        guard let best = scores.max(by: { $0.score < $1.score }) else { return nil }
+        let acceptableScore = max(0.42, best.score * 0.90)
+        let selected = scores.first { $0.score >= acceptableScore } ?? best
+        let bestLag = selected.lag
+        let bestScore = selected.score
+        guard bestLag > 0, bestScore >= 0.42 else { return nil }
+        return sampleRate / Double(bestLag)
+    }
+
+    private static func terminalPitchSlope(from track: [(index: Int, pitchHz: Double?)]) -> Double? {
+        let voiced = track.compactMap { item -> (Int, Double)? in
+            guard let pitch = item.pitchHz else { return nil }
+            return (item.index, pitch)
+        }
+        guard voiced.count >= 4 else { return nil }
+        let split = max(1, Int(Double(voiced.count) * 0.66))
+        let early = mean(voiced.prefix(split).map { $0.1 })
+        let late = mean(voiced.suffix(max(1, voiced.count - split)).map { $0.1 })
+        return min(max((late - early) / max(early, 1), -1), 1)
+    }
+
+    private static func terminalPauseDuration(frameRMS: [Double], threshold: Double) -> TimeInterval {
+        guard !frameRMS.isEmpty else { return 0 }
+        var quietFrames = 0
+        for rms in frameRMS.reversed() {
+            guard rms <= threshold else { break }
+            quietFrames += 1
+        }
+        return min(Double(quietFrames * hopLength) / sampleRate, 5)
+    }
+
+    private static func speechRate(from transcriptText: String?, duration: TimeInterval) -> Double? {
+        guard duration > 0.05,
+              let transcriptText,
+              !transcriptText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            return nil
+        }
+        let normalized = QuestionDetectionService.normalize(transcriptText)
+        let policy = QuestionIntentRulePack.default.textSegmentationPolicy
+        let tokenCount: Int
+        if policy.containsCompactScript(in: normalized) {
+            tokenCount = max(1, normalized.filter { !$0.isWhitespace }.count / 2)
+        } else {
+            tokenCount = policy.lexicalTokens(in: normalized).count
+        }
+        guard tokenCount > 0 else { return nil }
+        return min(max(Double(tokenCount) / duration, 0), 12)
+    }
+
+    private static func rms<S: Collection>(_ samples: S) -> Double where S.Element == Float {
+        guard !samples.isEmpty else { return 0 }
+        let sum = samples.reduce(0.0) { partial, sample in
+            partial + Double(sample * sample)
+        }
+        return sqrt(sum / Double(samples.count))
+    }
+
+    private static func mean<S: Collection>(_ values: S) -> Double where S.Element == Double {
+        guard !values.isEmpty else { return 0 }
+        return values.reduce(0, +) / Double(values.count)
     }
 }
 
@@ -1026,17 +1330,15 @@ private struct QuestionMultiQTFeatureEncoder {
             shape: [NSNumber(value: 1), NSNumber(value: scalarCount)],
             dataType: .float32
         )
-        let resolvedLanguage = signal?.language ?? language
-        let duration = min(max((signal?.duration ?? 0) / 20, 0), 1)
-        let values = [
-            signal?.asrConfidence ?? 1,
-            signal?.isPartial == true ? 1 : 0,
-            duration,
-            resolvedLanguage == "pt-BR" ? 1 : 0,
-            resolvedLanguage == "en-US" ? 1 : 0,
-            resolvedLanguage == "es-ES" ? 1 : 0,
-            resolvedLanguage == "ja-JP" ? 1 : 0
-        ]
+        let values = signal?.modelScalarFeatures(fallbackLanguage: language) ??
+            QuestionMultimodalSignal(
+                language: language,
+                asrConfidence: 1,
+                isFinal: true,
+                isPartial: false,
+                duration: 0,
+                hasTerminalPause: false
+            ).modelScalarFeatures(fallbackLanguage: language)
         for index in 0..<scalarCount {
             output[[NSNumber(value: 0), NSNumber(value: index)]] = NSNumber(value: index < values.count ? values[index] : 0)
         }
@@ -1044,15 +1346,95 @@ private struct QuestionMultiQTFeatureEncoder {
     }
 
     private func tokenize(_ text: String) -> [String] {
-        let lowercased = text.lowercased()
-        let parts = lowercased
-            .components(separatedBy: CharacterSet.alphanumerics.inverted)
-            .filter { !$0.isEmpty }
-        if !parts.isEmpty {
-            return parts
+        let normalized = QuestionDetectionService.normalize(text)
+        guard !normalized.isEmpty else { return [] }
+
+        let maxTokens = max(1, metadata.config.maxTokens)
+        let textPolicy = QuestionIntentRulePack.default.textSegmentationPolicy
+        let hasCompactScript = textPolicy.containsCompactScript(in: normalized)
+        let lexicalTokens = textPolicy.lexicalTokens(in: normalized)
+        var tokens: [String] = []
+        var seen: Set<String> = []
+
+        if hasCompactScript {
+            appendToken(
+                normalized.filter { !$0.isWhitespace },
+                to: &tokens,
+                seen: &seen,
+                maxTokens: maxTokens,
+                requireKnownVocabulary: true
+            )
         }
-        let compact = lowercased.trimmingCharacters(in: .whitespacesAndNewlines)
-        return compact.isEmpty ? [] : [compact]
+
+        for token in lexicalTokens {
+            appendToken(token, to: &tokens, seen: &seen, maxTokens: maxTokens)
+        }
+
+        if hasCompactScript {
+            appendCompactVocabularyMatches(
+                from: lexicalTokens,
+                to: &tokens,
+                seen: &seen,
+                maxTokens: maxTokens
+            )
+        }
+
+        if tokens.isEmpty {
+            let scalarTokens = normalized
+                .components(separatedBy: CharacterSet.alphanumerics.inverted)
+                .filter { !$0.isEmpty }
+            for token in scalarTokens {
+                appendToken(token, to: &tokens, seen: &seen, maxTokens: maxTokens)
+            }
+        }
+
+        return tokens.isEmpty ? [normalized] : tokens
+    }
+
+    private func appendCompactVocabularyMatches(
+        from lexicalTokens: [String],
+        to output: inout [String],
+        seen: inout Set<String>,
+        maxTokens: Int
+    ) {
+        guard lexicalTokens.count >= 2, output.count < maxTokens else { return }
+        let maxWidth = min(8, lexicalTokens.count)
+        for width in stride(from: maxWidth, through: 2, by: -1) {
+            for start in 0...(lexicalTokens.count - width) {
+                guard output.count < maxTokens else { return }
+                let slice = lexicalTokens[start..<(start + width)]
+                appendToken(
+                    slice.joined(),
+                    to: &output,
+                    seen: &seen,
+                    maxTokens: maxTokens,
+                    requireKnownVocabulary: true
+                )
+                appendToken(
+                    slice.joined(separator: " "),
+                    to: &output,
+                    seen: &seen,
+                    maxTokens: maxTokens,
+                    requireKnownVocabulary: true
+                )
+            }
+        }
+    }
+
+    private func appendToken(
+        _ token: String,
+        to output: inout [String],
+        seen: inout Set<String>,
+        maxTokens: Int,
+        requireKnownVocabulary: Bool = false
+    ) {
+        guard output.count < maxTokens else { return }
+        let normalized = QuestionDetectionService.normalize(token)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !normalized.isEmpty else { return }
+        guard !requireKnownVocabulary || metadata.vocab[normalized] != nil else { return }
+        guard seen.insert(normalized).inserted else { return }
+        output.append(normalized)
     }
 }
 

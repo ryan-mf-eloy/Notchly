@@ -339,21 +339,25 @@ struct QuestionClassificationReasonPolicy: Codable, Hashable, Sendable {
     var multimodalRejectedTemplate: String
     var localGateRejectedTemplate: String
     var multiQTRescued: String
+    var multiQTModelAccepted: String
 
     static let fallback = QuestionClassificationReasonPolicy(
         multimodalRejectedTemplate: "Rejected by multimodal stability gate: {suppressionSignals}",
         localGateRejectedTemplate: "Rejected by high-precision local decision gate: {understandingReason}",
-        multiQTRescued: "MultiQT rescued a model-positive question that the surface detector rejected."
+        multiQTRescued: "MultiQT rescued a model-positive question that the surface detector rejected.",
+        multiQTModelAccepted: "MultiQT accepted a model-positive question without relying on fixed lexical rules."
     )
 
     init(
         multimodalRejectedTemplate: String,
         localGateRejectedTemplate: String,
-        multiQTRescued: String
+        multiQTRescued: String,
+        multiQTModelAccepted: String
     ) {
         self.multimodalRejectedTemplate = multimodalRejectedTemplate
         self.localGateRejectedTemplate = localGateRejectedTemplate
         self.multiQTRescued = multiQTRescued
+        self.multiQTModelAccepted = multiQTModelAccepted
     }
 }
 
@@ -837,6 +841,29 @@ struct QuestionTechnicalInferencePolicy: Codable, Hashable, Sendable {
     }
 }
 
+private enum QuestionClassificationRegexCache {
+    private static let lock = NSLock()
+    nonisolated(unsafe) private static var values: [String: NSRegularExpression] = [:]
+
+    static func regex(for pattern: String) -> NSRegularExpression? {
+        lock.lock()
+        if let cached = values[pattern] {
+            lock.unlock()
+            return cached
+        }
+        lock.unlock()
+
+        guard let regex = try? NSRegularExpression(pattern: pattern) else {
+            return nil
+        }
+
+        lock.lock()
+        values[pattern] = regex
+        lock.unlock()
+        return regex
+    }
+}
+
 struct QuestionClassificationRulePack: Codable, Hashable, Sendable {
     var typeRules: [QuestionTypeRule]
     var selfSpeakerLabels: [String]
@@ -1207,7 +1234,8 @@ extension QuestionClassificationReasonPolicy {
         self.init(
             multimodalRejectedTemplate: try container.decodePolicyValue(String.self, "multimodalRejectedTemplate", default: fallback.multimodalRejectedTemplate),
             localGateRejectedTemplate: try container.decodePolicyValue(String.self, "localGateRejectedTemplate", default: fallback.localGateRejectedTemplate),
-            multiQTRescued: try container.decodePolicyValue(String.self, "multiQTRescued", default: fallback.multiQTRescued)
+            multiQTRescued: try container.decodePolicyValue(String.self, "multiQTRescued", default: fallback.multiQTRescued),
+            multiQTModelAccepted: try container.decodePolicyValue(String.self, "multiQTModelAccepted", default: fallback.multiQTModelAccepted)
         )
     }
 }
@@ -1456,7 +1484,8 @@ private extension QuestionClassificationReasonPolicy {
         QuestionClassificationReasonPolicy(
             multimodalRejectedTemplate: multimodalRejectedTemplate.trimmedQuestionClassificationPolicy,
             localGateRejectedTemplate: localGateRejectedTemplate.trimmedQuestionClassificationPolicy,
-            multiQTRescued: multiQTRescued.trimmedQuestionClassificationPolicy
+            multiQTRescued: multiQTRescued.trimmedQuestionClassificationPolicy,
+            multiQTModelAccepted: multiQTModelAccepted.trimmedQuestionClassificationPolicy
         )
     }
 }
@@ -1480,6 +1509,10 @@ struct LocalQuestionUnderstandingProvider {
         context: TranscriptContext,
         userProfile: UserMeetingProfile
     ) -> LocalQuestionUnderstanding {
+        if let cached = cachedSurfaceUnderstanding(for: candidate) {
+            return cached
+        }
+
         let analysis = analyzer.analyze(
             text: candidate.rawText,
             normalized: candidate.normalizedText,
@@ -1521,6 +1554,30 @@ struct LocalQuestionUnderstandingProvider {
             negativeSignals: [],
             reason: rulePack.reasons.localAnswerableTemplate
                 .replacingOccurrences(of: "{strongSignalCount}", with: "\(decisionSignalCount(analysis.strongSignals))"),
+            extractedQuestion: candidate.rawText
+        )
+    }
+
+    private func cachedSurfaceUnderstanding(for candidate: QuestionCandidate) -> LocalQuestionUnderstanding? {
+        guard candidate.discovery.source == .surface,
+              candidate.discovery.surfaceSuppressionSignals.isEmpty,
+              let confidence = candidate.discovery.surfaceConfidence else {
+            return nil
+        }
+        if candidate.discovery.hasTrainedPredictionSignal,
+           !candidate.discovery.hasPositiveTrainedQuestionSignal {
+            return nil
+        }
+        let signals = Set(candidate.discovery.surfaceSignals.compactMap(QuestionUnderstandingSignal.init(rawValue:)))
+        guard !signals.isEmpty else { return nil }
+        let intent: LocalQuestionIntent = signals.contains(.actionRequestFrame) ? .actionRequest : .answerableQuestion
+        return LocalQuestionUnderstanding(
+            intent: intent,
+            confidence: confidence,
+            strongSignals: signals,
+            negativeSignals: [],
+            reason: rulePack.reasons.localAnswerableTemplate
+                .replacingOccurrences(of: "{strongSignalCount}", with: "\(decisionSignalCount(signals))"),
             extractedQuestion: candidate.rawText
         )
     }
@@ -1641,9 +1698,7 @@ struct QuestionClassifier: QuestionClassifierProvider {
     ) async throws -> QuestionClassification {
         let understanding = understandingProvider.understand(candidate: candidate, context: context, userProfile: userProfile)
         let isMultiQTRescue = candidate.discovery.source == .multiqtRescue
-        let trainedPrediction = multimodalMode == .off
-            ? nil
-            : await trainedModelRunner?.prediction(for: candidate, signal: candidate.multimodalSignal)
+        let trainedPrediction = await trainedPrediction(for: candidate)
         let fallbackMultimodalDecision = multimodalScorer.score(
             understanding: understanding,
             signal: candidate.multimodalSignal,
@@ -1653,13 +1708,14 @@ struct QuestionClassifier: QuestionClassifierProvider {
         let multimodalDecision = trainedPrediction.map {
             QuestionMultimodalDecision(trainedPrediction: $0, textualConfidence: understanding.confidence)
         } ?? fallbackMultimodalDecision
-        let trainedPositive = trainedPrediction?.isPositiveLabel == true
+        let trainedAllowsQuestion = trainedPrediction.map { $0.shouldAllow && $0.isPositiveLabel } ?? false
+        let modelAcceptedCandidate = (isMultiQTRescue || candidate.discovery.source == .surface) && trainedAllowsQuestion
 
-        guard understanding.intent.isQuestionLike || (isMultiQTRescue && trainedPositive) else {
+        guard understanding.intent.isQuestionLike || modelAcceptedCandidate else {
             return QuestionClassification(understanding: understanding, candidate: candidate)
         }
 
-        if isMultiQTRescue {
+        if modelAcceptedCandidate {
             if let hardSuppression = intentGate.hardSuppression(candidate: candidate, context: context, profile: userProfile) {
                 return QuestionClassification(ignoredBy: hardSuppression.evaluation, candidate: candidate)
             }
@@ -1676,15 +1732,15 @@ struct QuestionClassifier: QuestionClassifierProvider {
         let directedToGroup = !directedToUser && isDirectedToGroup(candidate.normalizedText)
         let actionable = isActionable(candidate.normalizedText, type: type)
         let informational = isInformational(candidate.normalizedText)
-        let acceptedByDecisionGate = isMultiQTRescue
-            ? trainedPositive
+        let acceptedByDecisionGate = modelAcceptedCandidate
+            ? true
             : decisionGate.shouldAccept(
                 understanding: understanding,
                 precisionMode: precisionMode,
                 isPartial: candidate.isPartial
             )
         let acceptedByMultimodalGate = multimodalMode == .enforced ? multimodalDecision.shouldAllow : true
-        let semanticallyResponseNeeded = understanding.responseNeeded || (isMultiQTRescue && trainedPositive)
+        let semanticallyResponseNeeded = understanding.responseNeeded || modelAcceptedCandidate
         let contentJustification = isResponseJustified(
             type: type,
             signals: understanding.strongSignals,
@@ -1692,7 +1748,7 @@ struct QuestionClassifier: QuestionClassifierProvider {
             directedToUser: directedToUser,
             directedToGroup: directedToGroup,
             informational: informational,
-            multiQTRescued: isMultiQTRescue && trainedPositive
+            multiQTRescued: modelAcceptedCandidate
         )
         let responseNeeded = acceptedByDecisionGate
             && acceptedByMultimodalGate
@@ -1761,6 +1817,15 @@ struct QuestionClassifier: QuestionClassifierProvider {
             )
         }
 
+        let classificationReason: String
+        if isMultiQTRescue {
+            classificationReason = rulePack.reasons.multiQTRescued
+        } else if modelAcceptedCandidate {
+            classificationReason = rulePack.reasons.multiQTModelAccepted
+        } else {
+            classificationReason = understanding.reason
+        }
+
         return QuestionClassification(
             isQuestion: !filter.ignore || filter.rhetorical,
             rhetorical: filter.rhetorical,
@@ -1773,9 +1838,7 @@ struct QuestionClassifier: QuestionClassifierProvider {
             questionType: type,
             priority: priority,
             confidence: confidence,
-            reason: isMultiQTRescue
-                ? rulePack.reasons.multiQTRescued
-                : understanding.reason,
+            reason: classificationReason,
             extractedQuestion: extractedQuestion,
             expectedAnswerStyle: answerStyle(for: type, filter: filter),
             textualConfidence: multimodalDecision.textualConfidence,
@@ -1784,6 +1847,14 @@ struct QuestionClassifier: QuestionClassifierProvider {
             decisionSignals: multimodalDecision.decisionSignals,
             suppressionSignals: multimodalDecision.suppressionSignals
         )
+    }
+
+    private func trainedPrediction(for candidate: QuestionCandidate) async -> QuestionTrainedMultimodalPrediction? {
+        guard multimodalMode != .off else { return nil }
+        if let prediction = candidate.discovery.trainedPrediction {
+            return prediction
+        }
+        return await trainedModelRunner?.prediction(for: candidate, signal: candidate.multimodalSignal)
     }
 
     private func questionType(
@@ -1832,14 +1903,16 @@ struct QuestionClassifier: QuestionClassifierProvider {
         let aliases = ([profile.userName] + profile.userAliases)
             .map(QuestionDetectionService.normalize)
             .filter { !$0.isEmpty }
-        if aliases.contains(where: { intentGate.rulePack.textSegmentationPolicy.containsMarker($0, in: text) }) {
+        let policy = intentGate.rulePack.textSegmentationPolicy
+        if aliases.contains(where: { policy.containsNormalizedMarker($0, inNormalizedText: text) }) {
             return true
         }
         let normalizedSpeaker = speakerLabel.map(QuestionDetectionService.normalize)
         if let normalizedSpeaker,
            rulePack.selfSpeakerLabels.contains(where: { selfLabel in
-               normalizedSpeaker == selfLabel
-                   || intentGate.rulePack.textSegmentationPolicy.containsMarker(selfLabel, in: normalizedSpeaker)
+               let normalizedSelfLabel = QuestionDetectionService.normalize(selfLabel)
+               return normalizedSpeaker == normalizedSelfLabel
+                   || policy.containsNormalizedMarker(normalizedSelfLabel, inNormalizedText: normalizedSpeaker)
            }) {
             return false
         }
@@ -1993,8 +2066,14 @@ struct QuestionClassifier: QuestionClassifierProvider {
     }
 
     private func contains(_ text: String, _ patterns: [String]) -> Bool {
-        patterns.contains { pattern in
-            intentGate.rulePack.textSegmentationPolicy.containsMarker(pattern, in: text)
+        let normalizedText = QuestionDetectionService.normalize(text)
+        return containsNormalized(normalizedText, patterns)
+    }
+
+    private func containsNormalized(_ normalizedText: String, _ patterns: [String]) -> Bool {
+        let policy = intentGate.rulePack.textSegmentationPolicy
+        return patterns.contains { pattern in
+            policy.containsNormalizedMarker(QuestionDetectionService.normalize(pattern), inNormalizedText: normalizedText)
         }
     }
 
@@ -2007,7 +2086,7 @@ struct QuestionClassifier: QuestionClassifierProvider {
     private func matchesAnyRegex(_ text: String, _ patterns: [String]) -> Bool {
         let range = NSRange(text.startIndex..<text.endIndex, in: text)
         return patterns.contains { pattern in
-            guard let regex = try? NSRegularExpression(pattern: pattern) else { return false }
+            guard let regex = QuestionClassificationRegexCache.regex(for: pattern) else { return false }
             return regex.firstMatch(in: text, range: range) != nil
         }
     }
