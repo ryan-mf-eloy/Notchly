@@ -31,18 +31,24 @@ struct CodexCLIAIProvider: AIProvider {
     }
 
     static func availableModelCatalog() -> AIModelCatalog {
-        guard let data = try? Data(contentsOf: codexModelsCacheURL()),
+        availableModelCatalog(modelsCacheURL: codexModelsCacheURL())
+    }
+
+    static func availableModelCatalog(modelsCacheURL: URL) -> AIModelCatalog {
+        guard let data = try? Data(contentsOf: modelsCacheURL),
               let decoded = try? JSONDecoder().decode(CodexModelsCache.self, from: data) else {
             return .codexFallback
         }
-        let models = decoded.models.map {
-            AIModelOption(
-                id: $0.slug,
-                displayName: $0.displayName ?? $0.slug,
-                description: $0.description,
-                capabilities: [.chat, .webSearch]
-            )
-        }
+        let models = decoded.models
+            .filter { $0.isVisible }
+            .map {
+                AIModelOption(
+                    id: $0.slug,
+                    displayName: $0.displayName ?? $0.slug,
+                    description: $0.description,
+                    capabilities: [.chat, .webSearch]
+                )
+            }
         return AIModelCatalog.codex(from: models)
     }
 
@@ -103,16 +109,21 @@ struct CodexCLIAIProvider: AIProvider {
     }
 
     private func runCodexPrompt(_ prompt: String, model: String, enableWebSearch: Bool = false) async throws -> String {
-        let outputURL = FileManager.default.temporaryDirectory
-            .appendingPathComponent("notch-copilot-codex-\(UUID().uuidString).txt")
-        defer { try? FileManager.default.removeItem(at: outputURL) }
+        let scratchURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("notch-copilot-codex-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: scratchURL, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: scratchURL) }
+
+        let outputURL = scratchURL.appendingPathComponent("last-message.txt")
 
         let commandPrefix = enableWebSearch ? ["--search", "exec"] : ["exec"]
         let result = try await runner.runCodex(
             arguments: commandPrefix + [
                 "--skip-git-repo-check",
+                "--cd",
+                scratchURL.path,
                 "--sandbox",
-                "read-only",
+                "workspace-write",
                 "--ephemeral",
             ] + codexModelArguments(for: model) + [
                 "--output-last-message",
@@ -136,14 +147,27 @@ struct CodexCLIAIProvider: AIProvider {
     }
 
     private func codexModelArguments(for model: String) -> [String] {
+        ["--model", Self.resolvedCodexModelID(preferred: model)]
+    }
+
+    static func resolvedCodexModelID(preferred model: String) -> String {
+        resolvedCodexModelID(preferred: model, modelsCacheURL: codexModelsCacheURL())
+    }
+
+    static func resolvedCodexModelID(preferred model: String, modelsCacheURL: URL) -> String {
         let trimmed = model.trimmingCharacters(in: .whitespacesAndNewlines)
+        let preferredModel: String
         if trimmed.hasPrefix("codex:"), trimmed.count > "codex:".count {
-            return ["--model", String(trimmed.dropFirst("codex:".count))]
+            preferredModel = String(trimmed.dropFirst("codex:".count))
+        } else {
+            preferredModel = trimmed
         }
-        if trimmed.localizedCaseInsensitiveContains("codex") {
-            return ["--model", trimmed]
+
+        let availableModels = availableModelCatalog(modelsCacheURL: modelsCacheURL).chatModels.map(\.id)
+        if !preferredModel.isEmpty, availableModels.contains(preferredModel) {
+            return preferredModel
         }
-        return ["--model", "gpt-5.3-codex"]
+        return availableModels.first ?? "gpt-5.4"
     }
 
     private static func codexModelsCacheURL() -> URL {
@@ -164,10 +188,16 @@ private struct CodexCachedModel: Decodable {
     var slug: String
     var displayName: String?
     var description: String?
+    var visibility: String?
 
     enum CodingKeys: String, CodingKey {
         case slug
         case displayName = "display_name"
         case description
+        case visibility
+    }
+
+    var isVisible: Bool {
+        (visibility ?? "list").localizedCaseInsensitiveCompare("hide") != .orderedSame
     }
 }

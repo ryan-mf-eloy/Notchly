@@ -416,14 +416,12 @@ struct AIModelCatalog: Codable, Hashable {
 
     static let codexFallback = AIModelCatalog(
         chatModels: [
-            AIModelOption(id: "gpt-5.3-codex", displayName: "gpt-5.3-codex", capabilities: [.chat, .translation]),
-            AIModelOption(id: "gpt-5.3-codex-spark", displayName: "gpt-5.3-codex-spark", capabilities: [.chat, .translation]),
-            AIModelOption(id: "gpt-5.2", displayName: "gpt-5.2", capabilities: [.chat, .translation])
+            AIModelOption(id: "gpt-5.4", displayName: "GPT-5.4", capabilities: [.chat, .translation]),
+            AIModelOption(id: "gpt-5.4-mini", displayName: "GPT-5.4 Mini", capabilities: [.chat, .translation])
         ],
         translationModels: [
-            AIModelOption(id: "gpt-5.3-codex", displayName: "gpt-5.3-codex", capabilities: [.translation]),
-            AIModelOption(id: "gpt-5.3-codex-spark", displayName: "gpt-5.3-codex-spark", capabilities: [.translation]),
-            AIModelOption(id: "gpt-5.2", displayName: "gpt-5.2", capabilities: [.translation])
+            AIModelOption(id: "gpt-5.4", displayName: "GPT-5.4", capabilities: [.translation]),
+            AIModelOption(id: "gpt-5.4-mini", displayName: "GPT-5.4 Mini", capabilities: [.translation])
         ],
         realtimeModels: [],
         transcriptionModels: [],
@@ -701,7 +699,7 @@ private extension Array where Element == AIModelOption {
 
     func sortedByCodexPreference() -> [AIModelOption] {
         sorted { lhs, rhs in
-            let preferred = ["gpt-5.3-codex", "gpt-5.3-codex-spark", "gpt-5.4", "gpt-5.4-mini", "gpt-5.2"]
+            let preferred = ["gpt-5.4", "gpt-5.4-mini", "gpt-5.3-codex-spark"]
             let leftRank = preferred.firstIndex(of: lhs.id) ?? Int.max
             let rightRank = preferred.firstIndex(of: rhs.id) ?? Int.max
             if leftRank != rightRank {

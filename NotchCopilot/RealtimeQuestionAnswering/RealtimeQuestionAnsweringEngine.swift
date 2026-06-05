@@ -1059,11 +1059,7 @@ class RealtimeQuestionAnsweringEngine {
             eventBus.send(.questionMerged(source: incoming, target: candidate))
         }
 
-        let hasEnforcedModelPositiveSurface = preferences.qaMultimodalMode == .enforced
-            && candidate.discovery.source == .surface
-            && candidate.discovery.hasPositiveTrainedQuestionSignal
-
-        if candidate.discovery.source == .multiqtRescue || hasEnforcedModelPositiveSurface {
+        if candidate.discovery.source == .multiqtRescue {
             if let hardSuppression = intentGate.hardSuppression(candidate: candidate, context: transcriptContext, profile: profile) {
                 let classification = QuestionClassification(ignoredBy: hardSuppression.evaluation, candidate: candidate)
                 candidate.classification = classification

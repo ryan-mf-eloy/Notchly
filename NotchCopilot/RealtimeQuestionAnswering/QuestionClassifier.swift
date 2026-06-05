@@ -1709,7 +1709,7 @@ struct QuestionClassifier: QuestionClassifierProvider {
             QuestionMultimodalDecision(trainedPrediction: $0, textualConfidence: understanding.confidence)
         } ?? fallbackMultimodalDecision
         let trainedAllowsQuestion = trainedPrediction.map { $0.shouldAllow && $0.isPositiveLabel } ?? false
-        let modelAcceptedCandidate = (isMultiQTRescue || candidate.discovery.source == .surface) && trainedAllowsQuestion
+        let modelAcceptedCandidate = isMultiQTRescue && trainedAllowsQuestion
 
         guard understanding.intent.isQuestionLike || modelAcceptedCandidate else {
             return QuestionClassification(understanding: understanding, candidate: candidate)

@@ -11971,7 +11971,7 @@ final class NotchCopilotTests: XCTestCase {
     func testRealtimeQAClassifierLetsPositiveMultiQTBypassLexicalSurfaceRules() async throws {
         var candidate = makeQuestion("Seria melhor isolar o worker de audio em outro processo")
         candidate.discovery = QuestionCandidateDiscovery(
-            source: .surface,
+            source: .multiqtRescue,
             surfaceSignals: [],
             surfaceConfidence: 0.31
         )
@@ -11990,7 +11990,31 @@ final class NotchCopilotTests: XCTestCase {
         XCTAssertTrue(classification.isQuestion, classification.reason)
         XCTAssertTrue(classification.responseNeeded, classification.reason)
         XCTAssertEqual(classification.decisionScore ?? 0, 0.95, accuracy: 0.0001)
-        XCTAssertTrue(classification.reason.contains("MultiQT accepted"))
+        XCTAssertTrue(classification.reason.contains("MultiQT"))
+    }
+
+    func testRealtimeQAClassifierDoesNotLetPositiveSurfaceMultiQTBypassLocalIntent() async throws {
+        var candidate = makeQuestion("Deploy pronto e rollback testado")
+        candidate.discovery = QuestionCandidateDiscovery(
+            source: .surface,
+            surfaceSignals: [],
+            surfaceConfidence: 0.31
+        )
+        .withTrainedPrediction(positiveCandidateDetectionPrediction(label: "technical_explanation", responseScore: 0.95))
+
+        let classification = try await QuestionClassifier(
+            precisionMode: .highPrecision,
+            multimodalMode: .enforced,
+            trainedModelRunner: nil
+        ).classifyQuestion(
+            candidate: candidate,
+            context: makeContext(candidate.rawText),
+            userProfile: makeProfile()
+        )
+
+        XCTAssertFalse(classification.isQuestion, classification.reason)
+        XCTAssertFalse(classification.responseNeeded, classification.reason)
+        XCTAssertEqual(classification.decisionScore, nil)
     }
 
     func testRealtimeQAClassifierKeepsHardSuppressionWhenMultiQTIsPositive() async throws {
@@ -13579,6 +13603,88 @@ final class NotchCopilotTests: XCTestCase {
         XCTAssertLessThan(replayP95, 100)
     }
 
+    func testRealtimeQARecognizesNaturalPortugueseQuestionsWithoutKeywordShortcut() async throws {
+        let positives = [
+            "Quais são as notícias de hoje",
+            "Como funciona uma linked list",
+            "Como inverter uma árvore binária em Python",
+            "Como inverter uma árvore binária e python"
+        ]
+        let detector = QuestionDetectionService(precisionMode: .highPrecision)
+        let classifier = QuestionClassifier(precisionMode: .highPrecision)
+
+        for text in positives {
+            let segment = TranscriptSegment(
+                meetingId: UUID(),
+                speakerLabel: "Speaker",
+                text: text,
+                originalLanguage: "pt-BR",
+                confidence: 0.96,
+                isFinal: true
+            )
+            let context = TranscriptContext(
+                recentTranscript: text,
+                mediumTranscript: text,
+                completeTranscript: text,
+                dominantLanguage: "pt-BR",
+                currentSegment: segment
+            )
+
+            let candidate = try XCTUnwrap(
+                detector.detect(from: segment, context: context).surfaceCandidates.first,
+                text
+            )
+            let classification = try await classifier.classifyQuestion(
+                candidate: candidate,
+                context: context,
+                userProfile: makeProfile()
+            )
+
+            XCTAssertTrue(classification.responseNeeded, "\(text): \(classification.reason)")
+            XCTAssertTrue(classification.complete, text)
+        }
+    }
+
+    func testRealtimeQARejectsCorrectionAndExplanationFragmentsThatLookQuestionLike() async throws {
+        let negatives = [
+            "Duas formas e não duas formas duas somas meu Deus",
+            "Como eu disse, esse sistema usa cache local para reduzir latencia",
+            "O deploy esta pronto e o rollback foi testado"
+        ]
+        let detector = QuestionDetectionService(precisionMode: .highPrecision)
+        let classifier = QuestionClassifier(precisionMode: .highPrecision)
+
+        for text in negatives {
+            let segment = TranscriptSegment(
+                meetingId: UUID(),
+                speakerLabel: "Speaker",
+                text: text,
+                originalLanguage: "pt-BR",
+                confidence: 0.96,
+                isFinal: true
+            )
+            let context = TranscriptContext(
+                recentTranscript: text,
+                mediumTranscript: text,
+                completeTranscript: text,
+                dominantLanguage: "pt-BR",
+                currentSegment: segment
+            )
+            let detected = detector.detect(from: segment, context: context).surfaceCandidates
+
+            if let candidate = detected.first {
+                let classification = try await classifier.classifyQuestion(
+                    candidate: candidate,
+                    context: context,
+                    userProfile: makeProfile()
+                )
+                XCTAssertFalse(classification.responseNeeded, "\(text): \(classification.reason)")
+            } else {
+                XCTAssertTrue(detected.isEmpty, text)
+            }
+        }
+    }
+
     func testRealtimeQAIgnoresRhetoricalQuestion() async throws {
         let candidate = makeQuestion("Quem nunca passou por isso, né?")
         let classification = try await QuestionClassifier().classifyQuestion(candidate: candidate, context: makeContext(candidate.rawText), userProfile: makeProfile())
@@ -14431,6 +14537,40 @@ final class NotchCopilotTests: XCTestCase {
         XCTAssertTrue(runner.calls.contains { $0.arguments == ["login", "--device-auth"] })
     }
 
+    func testCodexCLICommandRunnerOverridesInvalidLegacyServiceTier() {
+        XCTAssertEqual(ProcessCodexCLICommandRunner.stableConfigArguments, ["-c", "service_tier=\"fast\""])
+    }
+
+    func testCodexCLIAIProviderResolvesStaleModelFromVisibleCache() throws {
+        let cacheURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("notchly-codex-models-\(UUID().uuidString).json")
+        defer { try? FileManager.default.removeItem(at: cacheURL) }
+
+        let cache = """
+        {
+          "models": [
+            {"slug": "codex-auto-review", "display_name": "Codex Auto Review", "visibility": "hide"},
+            {"slug": "gpt-5.4-mini", "display_name": "GPT-5.4 Mini", "visibility": "list"},
+            {"slug": "gpt-5.4", "display_name": "GPT-5.4", "visibility": "list"}
+          ]
+        }
+        """
+        try Data(cache.utf8).write(to: cacheURL)
+
+        let catalog = CodexCLIAIProvider.availableModelCatalog(modelsCacheURL: cacheURL)
+
+        XCTAssertEqual(catalog.chatModels.map(\.id), ["gpt-5.4", "gpt-5.4-mini"])
+        XCTAssertFalse(catalog.chatModels.map(\.id).contains("codex-auto-review"))
+        XCTAssertEqual(
+            CodexCLIAIProvider.resolvedCodexModelID(preferred: "gpt-5.3-codex", modelsCacheURL: cacheURL),
+            "gpt-5.4"
+        )
+        XCTAssertEqual(
+            CodexCLIAIProvider.resolvedCodexModelID(preferred: "codex:gpt-5.4-mini", modelsCacheURL: cacheURL),
+            "gpt-5.4-mini"
+        )
+    }
+
     func testCodexCLIAuthProviderStartsPendingDeviceLoginAndVerifiesAfterPastedCode() async throws {
         let runner = FakeCodexCLICommandRunner()
         runner.statusResults = [
@@ -14840,11 +14980,19 @@ final class NotchCopilotTests: XCTestCase {
         XCTAssertEqual(answer.text, "Ship it carefully.")
         XCTAssertTrue(execCall.arguments.contains("--ephemeral"))
         XCTAssertTrue(execCall.arguments.contains("--skip-git-repo-check"))
+        XCTAssertTrue(execCall.arguments.contains("--cd"))
         XCTAssertTrue(execCall.arguments.contains("--sandbox"))
-        XCTAssertTrue(execCall.arguments.contains("read-only"))
+        XCTAssertTrue(execCall.arguments.contains("workspace-write"))
+        XCTAssertFalse(execCall.arguments.contains("read-only"))
         XCTAssertFalse(execCall.arguments.contains("gpt-5-mini"))
-        XCTAssertTrue(execCall.arguments.contains("gpt-5.3-codex"))
+        XCTAssertTrue(execCall.arguments.contains(CodexCLIAIProvider.resolvedCodexModelID(preferred: preferences.aiConfig.model)))
         XCTAssertTrue(execCall.standardInput?.contains("Can we ship?") == true)
+
+        let cdIndex = try XCTUnwrap(execCall.arguments.firstIndex(of: "--cd"))
+        let outputIndex = try XCTUnwrap(execCall.arguments.firstIndex(of: "--output-last-message"))
+        let scratchPath = execCall.arguments[cdIndex + 1]
+        let outputPath = execCall.arguments[outputIndex + 1]
+        XCTAssertTrue(outputPath.hasPrefix(scratchPath))
     }
 
     func testCodexCLIAIProviderPassesSearchFlagForWebRequests() async throws {

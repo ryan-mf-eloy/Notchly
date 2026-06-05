@@ -40,6 +40,7 @@ protocol CodexCLILoginProcessManaging: AnyObject {
 @MainActor
 final class ProcessCodexCLICommandRunner: CodexCLICommandRunning {
     private let executable: String
+    nonisolated static let stableConfigArguments = ["-c", "service_tier=\"fast\""]
 
     init(executable: String = ProcessInfo.processInfo.environment["CODEX_BIN"] ?? "codex") {
         self.executable = executable
@@ -54,7 +55,7 @@ final class ProcessCodexCLICommandRunner: CodexCLICommandRunning {
         try await withCheckedThrowingContinuation { continuation in
             let process = Process()
             process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
-            process.arguments = [executable] + arguments
+            process.arguments = [executable] + Self.stableConfigArguments + arguments
             process.environment = Self.sanitizedEnvironment()
 
             let outputPipe = Pipe()
@@ -140,7 +141,7 @@ final class CodexCLILoginProcess: CodexCLILoginProcessManaging, @unchecked Senda
         id = UUID().uuidString
         process = Process()
         process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
-        process.arguments = [executable, "login", "--device-auth"]
+        process.arguments = [executable] + ProcessCodexCLICommandRunner.stableConfigArguments + ["login", "--device-auth"]
         process.environment = ProcessCodexCLICommandRunner.sanitizedEnvironment()
     }
 
