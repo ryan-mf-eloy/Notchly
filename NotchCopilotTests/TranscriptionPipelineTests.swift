@@ -598,9 +598,9 @@ final class TranscriptionPipelineTests: XCTestCase {
         XCTAssertFalse(silenceTrace.vadDecision.shouldForwardToASR)
         XCTAssertTrue(silenceTrace.frames.isEmpty)
 
-        let quietMicrophoneSpeech = TranscriptionAudioFixtureGenerator.speechLikeBuffer(amplitude: 0.00045, source: .microphone, offset: 1)
+        let quietMicrophoneSpeech = TranscriptionAudioFixtureGenerator.speechLikeBuffer(amplitude: 0.00028, source: .microphone, offset: 1)
         let speechTrace = service.conditionWithTrace(quietMicrophoneSpeech, config: config, featureFlags: flags)
-        XCTAssertGreaterThan(speechTrace.conditionedBuffer.rms, quietMicrophoneSpeech.rms * 2.8)
+        XCTAssertGreaterThan(speechTrace.conditionedBuffer.rms, quietMicrophoneSpeech.rms * 3.4)
         XCTAssertTrue(speechTrace.vadDecision.shouldForwardToASR, "\(speechTrace.vadDecision)")
         XCTAssertFalse(speechTrace.frames.isEmpty, "\(speechTrace.vadDecision)")
     }
@@ -609,8 +609,8 @@ final class TranscriptionPipelineTests: XCTestCase {
         let flags = TranscriptionFeatureFlags(vadGatingEnabled: true)
 
         for testCase in [
-            (source: TranscriptAudioSource.microphone, bridgedOffsets: 1...12, blockedOffset: 14),
-            (source: TranscriptAudioSource.system, bridgedOffsets: 1...14, blockedOffset: 16)
+            (source: TranscriptAudioSource.microphone, bridgedOffsets: 1...16, blockedOffset: 17),
+            (source: TranscriptAudioSource.system, bridgedOffsets: 1...18, blockedOffset: 19)
         ] {
             let isolatedService = AudioConditioningService(source: testCase.source, preRollDuration: 0.4)
             let config = AudioConditioningConfig(accuracyMode: .highAccuracy, target: .nativeSpeech, audioSource: testCase.source)
@@ -665,9 +665,9 @@ final class TranscriptionPipelineTests: XCTestCase {
         XCTAssertFalse(silenceTrace.vadDecision.shouldForwardToASR)
         XCTAssertTrue(silenceTrace.frames.isEmpty)
 
-        let quietSystemSpeech = TranscriptionAudioFixtureGenerator.speechLikeBuffer(amplitude: 0.00036, source: .system, offset: 1)
+        let quietSystemSpeech = TranscriptionAudioFixtureGenerator.speechLikeBuffer(amplitude: 0.00024, source: .system, offset: 1)
         let speechTrace = service.conditionWithTrace(quietSystemSpeech, config: config, featureFlags: flags)
-        XCTAssertGreaterThan(speechTrace.conditionedBuffer.rms, quietSystemSpeech.rms * 1.8)
+        XCTAssertGreaterThan(speechTrace.conditionedBuffer.rms, quietSystemSpeech.rms * 2.2)
         XCTAssertTrue(speechTrace.vadDecision.shouldForwardToASR, "\(speechTrace.vadDecision)")
         XCTAssertFalse(speechTrace.frames.isEmpty, "\(speechTrace.vadDecision)")
     }
@@ -5123,8 +5123,8 @@ final class TranscriptionPipelineTests: XCTestCase {
 
     func testStreamingASRRouterLetsVeryLowMicrophoneAndSystemSpeechReachASR() async throws {
         let cases: [(source: TranscriptAudioSource, amplitude: Float, speaker: String)] = [
-            (.microphone, 0.00045, "You"),
-            (.system, 0.00036, "System")
+            (.microphone, 0.00028, "You"),
+            (.system, 0.00024, "System")
         ]
 
         for testCase in cases {
@@ -5159,7 +5159,7 @@ final class TranscriptionPipelineTests: XCTestCase {
             XCTAssertEqual(segment.audioSource, testCase.source)
             XCTAssertEqual(segment.speakerLabel, testCase.speaker)
             XCTAssertEqual(segment.text, "heard Core ML")
-            XCTAssertGreaterThan(segment.audioEnergy ?? 0, 0.001)
+            XCTAssertGreaterThan(segment.audioEnergy ?? 0, 0.00025)
         }
     }
 
@@ -5908,7 +5908,7 @@ private final class EchoOnAudioTranscriptionService: TranscriptionService {
     func startTranscription(audioStream: AsyncStream<NotchCopilot.AudioBuffer>, config: TranscriptionConfig) async throws {
         task = Task { @MainActor [weak self] in
             for await buffer in audioStream {
-                guard buffer.rms > 0.001 else { continue }
+                guard buffer.rms > 0.00025 else { continue }
                 self?.continuation?.yield(TranscriptSegment(
                     meetingId: config.meetingId,
                     speakerLabel: "Echo",

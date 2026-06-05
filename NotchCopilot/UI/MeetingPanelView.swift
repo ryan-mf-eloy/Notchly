@@ -2180,12 +2180,13 @@ private final class TranscriptRowView: NSView {
     override var isFlipped: Bool { true }
 
     private enum LayoutMetrics {
-        static let actionSize: CGFloat = 18
+        static let actionSize: CGFloat = 16
         static let actionGap: CGFloat = 1
         static let actionRightInset: CGFloat = 4
         static let textLeftInset: CGFloat = 4
         static let verticalInset: CGFloat = 1
         static let hoverInset: CGFloat = -12
+        static let actionHitSlop: CGFloat = 5
     }
 
     private let label = NSTextField(labelWithString: "")
@@ -2264,11 +2265,8 @@ private final class TranscriptRowView: NSView {
 
     override func hitTest(_ point: NSPoint) -> NSView? {
         guard !isHidden, alphaValue > 0, bounds.contains(point) else { return nil }
-        if copyButton.frame.contains(point) {
-            return copyButton.hitTest(convert(point, to: copyButton)) ?? copyButton
-        }
-        if deleteButton.frame.contains(point) {
-            return deleteButton.hitTest(convert(point, to: deleteButton)) ?? deleteButton
+        if let actionButton = actionButtonHit(at: point) {
+            return actionButton.hitTest(convert(point, to: actionButton)) ?? actionButton
         }
         return self
     }
@@ -2373,7 +2371,7 @@ private final class TranscriptRowView: NSView {
             }
         }
         if let image = NSImage(systemSymbolName: systemName, accessibilityDescription: tooltip) {
-            button.image = image.withSymbolConfiguration(.init(pointSize: 7.0, weight: .regular))
+            button.image = image.withSymbolConfiguration(.init(pointSize: 6.4, weight: .regular))
         }
         button.isEnabled = true
         button.updateAppearance(rowHovered: false)
@@ -2397,6 +2395,19 @@ private final class TranscriptRowView: NSView {
             onHoverChanged(rowID)
         } else {
             onHoverChanged(nil)
+        }
+    }
+
+    private func expandedActionFrame(_ button: NSButton) -> CGRect {
+        button.frame.insetBy(dx: -LayoutMetrics.actionHitSlop, dy: -LayoutMetrics.actionHitSlop)
+    }
+
+    private func actionButtonHit(at point: NSPoint) -> NSButton? {
+        if copyButton.frame.contains(point) { return copyButton }
+        if deleteButton.frame.contains(point) { return deleteButton }
+        let candidates = [copyButton, deleteButton].filter { expandedActionFrame($0).contains(point) }
+        return candidates.min { lhs, rhs in
+            abs(lhs.frame.midX - point.x) < abs(rhs.frame.midX - point.x)
         }
     }
 
@@ -2461,13 +2472,13 @@ private final class TranscriptRowActionButton: NSButton {
 
     func updateAppearance(rowHovered: Bool) {
         self.rowHovered = rowHovered
-        alphaValue = rowHovered ? 0.88 : 0.32
-        contentTintColor = NSColor.white.withAlphaComponent(isPointerInside ? 0.88 : (rowHovered ? 0.66 : 0.48))
+        alphaValue = rowHovered ? 0.86 : 0.26
+        contentTintColor = NSColor.white.withAlphaComponent(isPointerInside ? 0.86 : (rowHovered ? 0.62 : 0.44))
         let backgroundAlpha: CGFloat
         if isPointerInside {
-            backgroundAlpha = 0.082
+            backgroundAlpha = 0.072
         } else if rowHovered {
-            backgroundAlpha = 0.020
+            backgroundAlpha = 0.016
         } else {
             backgroundAlpha = 0
         }

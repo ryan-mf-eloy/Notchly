@@ -138,7 +138,7 @@ struct VoiceActivityDetector: Sendable {
         let lowEnergySpeechOnset = onsetSpeechShapeLikely &&
             features.rms >= max(sensitivity.onsetRMSFloor, adaptiveNoiseFloor * 1.02) &&
             features.peak >= sensitivity.onsetPeakFloor
-        let continuationWindow: TimeInterval = source == .system ? 1.15 : 1.05
+        let continuationWindow: TimeInterval = source == .system ? 1.45 : 1.30
         let recentlyHadSpeech = lastSpeechAtBySource[source].map { timestamp.timeIntervalSince($0) <= continuationWindow } ?? false
         let lowEnergySpeechContinuation = recentlyHadSpeech &&
             features.zeroCrossingRate > 0.007 &&
@@ -315,33 +315,33 @@ private struct VoiceActivitySourceSensitivity {
         switch source {
         case .system:
             VoiceActivitySourceSensitivity(
-                absoluteRMSMultiplier: 0.42,
-                noiseFloorLift: 1.30,
-                likelyPeak: 0.0065,
+                absoluteRMSMultiplier: 0.38,
+                noiseFloorLift: 1.22,
+                likelyPeak: 0.0058,
                 activePeak: 0.052,
                 activeRMSMultiplier: 1.36,
                 activeRMSFloor: 0.0022,
-                minimumSpeechDynamicRange: 0.00024,
-                onsetRMSFloor: 0.00011,
-                onsetPeakFloor: 0.00045,
-                hangoverRMSFloor: 0.00016,
-                silenceRMSFloor: 0.000055,
-                silencePeakFloor: 0.00008
+                minimumSpeechDynamicRange: 0.00020,
+                onsetRMSFloor: 0.000095,
+                onsetPeakFloor: 0.00036,
+                hangoverRMSFloor: 0.00013,
+                silenceRMSFloor: 0.000045,
+                silencePeakFloor: 0.000065
             )
         case .microphone:
             VoiceActivitySourceSensitivity(
-                absoluteRMSMultiplier: 0.48,
-                noiseFloorLift: 1.45,
-                likelyPeak: 0.0070,
+                absoluteRMSMultiplier: 0.44,
+                noiseFloorLift: 1.34,
+                likelyPeak: 0.0062,
                 activePeak: 0.060,
                 activeRMSMultiplier: 1.42,
                 activeRMSFloor: 0.0024,
-                minimumSpeechDynamicRange: 0.00028,
-                onsetRMSFloor: 0.00012,
-                onsetPeakFloor: 0.00050,
-                hangoverRMSFloor: 0.00018,
-                silenceRMSFloor: 0.000060,
-                silencePeakFloor: 0.00009
+                minimumSpeechDynamicRange: 0.00023,
+                onsetRMSFloor: 0.000105,
+                onsetPeakFloor: 0.00042,
+                hangoverRMSFloor: 0.00015,
+                silenceRMSFloor: 0.000050,
+                silencePeakFloor: 0.000075
             )
         default:
             VoiceActivitySourceSensitivity(

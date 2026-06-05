@@ -153,7 +153,7 @@ private struct TranscriptInlineActions: View {
     var onDelete: () -> Void
 
     var body: some View {
-        HStack(spacing: 2) {
+        HStack(spacing: 0) {
             TranscriptInlineActionButton(
                 systemName: "doc.on.doc",
                 accessibilityLabel: "Copy transcript",
@@ -183,17 +183,24 @@ private struct TranscriptInlineActionButton: View {
 
     var body: some View {
         Button(action: action) {
-            Image(systemName: systemName)
-                .font(.system(size: 7.0, weight: .regular))
-                .foregroundStyle(Color.white.opacity(isHovered ? 0.82 : 0.58))
-                .frame(width: 18, height: 18)
-                .background(
-                    RoundedRectangle(cornerRadius: 4, style: .continuous)
-                        .fill(Color.white.opacity(isHovered ? 0.082 : 0.020))
-                )
+            ZStack {
+                RoundedRectangle(cornerRadius: 4, style: .continuous)
+                    .fill(Color.white.opacity(isHovered ? 0.072 : 0.016))
+                    .frame(width: 16, height: 16)
+                Image(systemName: systemName)
+                    .font(.system(size: 6.4, weight: .regular))
+                    .foregroundStyle(Color.white.opacity(isHovered ? 0.82 : 0.56))
+            }
+            .frame(width: 22, height: 22)
+            .background(
+                RoundedRectangle(cornerRadius: 5, style: .continuous)
+                    .fill(Color.clear)
+            )
         }
         .buttonStyle(.plain)
-        .contentShape(RoundedRectangle(cornerRadius: 4, style: .continuous))
+        .contentShape(
+            RoundedRectangle(cornerRadius: 5, style: .continuous)
+        )
         .help(accessibilityLabel)
         .accessibilityLabel(accessibilityLabel)
         .accessibilityIdentifier(accessibilityIdentifier)
