@@ -258,8 +258,9 @@ final class RecentAudioWindowStore: @unchecked Sendable {
             let removed = buffers.removeFirst()
             totalDuration -= max(0, removed.endTime - removed.startTime)
         }
-        if buffers.count > 240 {
-            buffers.removeFirst(buffers.count - 240)
+        let maximumBufferCount = max(240, Int(ceil(maxDuration / 0.01)) + 24)
+        if buffers.count > maximumBufferCount {
+            buffers.removeFirst(buffers.count - maximumBufferCount)
             totalDuration = buffers.reduce(0) { $0 + max(0, $1.endTime - $1.startTime) }
         }
     }
@@ -272,9 +273,9 @@ final class RecentAudioWindowStore: @unchecked Sendable {
     private static func firstAudioRMSFloor(for source: TranscriptAudioSource) -> Float {
         switch source {
         case .system:
-            return 0.000095
+            return 0.000078
         case .microphone:
-            return 0.00011
+            return 0.000088
         default:
             return 0.00018
         }

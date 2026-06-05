@@ -761,6 +761,82 @@ final class TranscriptionPipelineTests: XCTestCase {
         }
     }
 
+    func testAudioConditioningServiceRenewsBridgeForVeryWeakSpeechShapedAudioOnly() {
+        let flags = TranscriptionFeatureFlags(
+            advancedAudioConditioningEnabled: false,
+            vadGatingEnabled: true
+        )
+
+        for testCase in [
+            (source: TranscriptAudioSource.microphone, amplitude: Float(0.000014), lateOffset: 33),
+            (source: TranscriptAudioSource.system, amplitude: Float(0.000012), lateOffset: 36)
+        ] {
+            let config = AudioConditioningConfig(accuracyMode: .highAccuracy, target: .nativeSpeech, audioSource: testCase.source)
+            let service = AudioConditioningService(source: testCase.source, preRollDuration: 0.4)
+            let firstSpeech = TranscriptionAudioFixtureGenerator.speechLikeBuffer(amplitude: 0.004, source: testCase.source, offset: 0)
+            let firstTrace = service.conditionWithTrace(firstSpeech, config: config, featureFlags: flags)
+            XCTAssertTrue(firstTrace.vadDecision.shouldForwardToASR)
+
+            var bridgedWeakSpeechCount = 0
+            for offset in 1...testCase.lateOffset {
+                let weakSpeech = TranscriptionAudioFixtureGenerator.speechLikeBuffer(
+                    amplitude: testCase.amplitude,
+                    source: testCase.source,
+                    offset: offset
+                )
+                let trace = service.conditionWithTrace(weakSpeech, config: config, featureFlags: flags)
+                if !trace.vadDecision.shouldForwardToASR {
+                    bridgedWeakSpeechCount += 1
+                }
+                XCTAssertFalse(trace.frames.isEmpty, "\(testCase.source.displayName) should keep very weak speech-shaped audio connected at offset \(offset): \(trace.vadDecision)")
+            }
+            XCTAssertGreaterThan(bridgedWeakSpeechCount, 0, "\(testCase.source.displayName) test must exercise bridge renewal, not only direct VAD forwarding")
+
+            let silenceService = AudioConditioningService(source: testCase.source, preRollDuration: 0.4)
+            XCTAssertFalse(silenceService.conditionWithTrace(firstSpeech, config: config, featureFlags: flags).frames.isEmpty)
+            let blockedOffset = testCase.source == .system ? 29 : 26
+            for offset in 1...blockedOffset {
+                let silence = TranscriptionAudioFixtureGenerator.buffer(
+                    samples: Array(repeating: 0, count: 1_600),
+                    source: testCase.source,
+                    offset: offset
+                )
+                let trace = silenceService.conditionWithTrace(silence, config: config, featureFlags: flags)
+                if offset == blockedOffset {
+                    XCTAssertTrue(trace.frames.isEmpty, "\(testCase.source.displayName) pure silence should still expire instead of renewing bridge")
+                }
+            }
+
+            let quietMusicService = AudioConditioningService(source: testCase.source, preRollDuration: 0.4)
+            XCTAssertFalse(quietMusicService.conditionWithTrace(firstSpeech, config: config, featureFlags: flags).frames.isEmpty)
+            for offset in 1...blockedOffset {
+                let quietMusic = TranscriptionAudioFixtureGenerator.tonalMusicBuffer(
+                    amplitude: 0.00005,
+                    source: testCase.source,
+                    offset: offset
+                )
+                let trace = quietMusicService.conditionWithTrace(quietMusic, config: config, featureFlags: flags)
+                if offset == blockedOffset {
+                    XCTAssertTrue(trace.frames.isEmpty, "\(testCase.source.displayName) quiet music should not renew speech bridge")
+                }
+            }
+
+            let quietBreathingService = AudioConditioningService(source: testCase.source, preRollDuration: 0.4)
+            XCTAssertFalse(quietBreathingService.conditionWithTrace(firstSpeech, config: config, featureFlags: flags).frames.isEmpty)
+            for offset in 1...blockedOffset {
+                let quietBreathing = TranscriptionAudioFixtureGenerator.breathingNoiseBuffer(
+                    amplitude: 0.00005,
+                    source: testCase.source,
+                    offset: offset
+                )
+                let trace = quietBreathingService.conditionWithTrace(quietBreathing, config: config, featureFlags: flags)
+                if offset == blockedOffset {
+                    XCTAssertTrue(trace.frames.isEmpty, "\(testCase.source.displayName) quiet breathing should not renew speech bridge")
+                }
+            }
+        }
+    }
+
     func testAudioConditioningServiceNormalizesLowSystemSpeechWithoutForwardingSilence() {
         let service = AudioConditioningService(source: .system, preRollDuration: 0.4)
         let config = AudioConditioningConfig(accuracyMode: .highAccuracy, target: .nativeSpeech, audioSource: .system)
@@ -951,7 +1027,7 @@ final class TranscriptionPipelineTests: XCTestCase {
         systemStore.append(TranscriptionAudioFixtureGenerator.buffers(profile: .silence, source: .system, chunks: 1).first!)
         XCTAssertNil(systemStore.firstAudioAt())
 
-        let lowSystemSamples = Array(repeating: Float(0.000096), count: 1_600)
+        let lowSystemSamples = Array(repeating: Float(0.000080), count: 1_600)
         let lowSystem = TranscriptionAudioFixtureGenerator.buffer(samples: lowSystemSamples, source: .system, offset: 1)
         systemStore.append(lowSystem)
         XCTAssertEqual(systemStore.firstAudioAt(), lowSystem.createdAt)
@@ -960,10 +1036,25 @@ final class TranscriptionPipelineTests: XCTestCase {
         microphoneStore.append(TranscriptionAudioFixtureGenerator.buffers(profile: .silence, source: .microphone, chunks: 1).first!)
         XCTAssertNil(microphoneStore.firstAudioAt())
 
-        let lowMicrophoneSamples = Array(repeating: Float(0.000115), count: 1_600)
+        let lowMicrophoneSamples = Array(repeating: Float(0.000090), count: 1_600)
         let lowMicrophone = TranscriptionAudioFixtureGenerator.buffer(samples: lowMicrophoneSamples, source: .microphone, offset: 2)
         microphoneStore.append(lowMicrophone)
         XCTAssertEqual(microphoneStore.firstAudioAt(), lowMicrophone.createdAt)
+    }
+
+    func testRecentAudioWindowStorePreservesDurationWindowForSmallChunks() {
+        let store = RecentAudioWindowStore(maxDuration: 3)
+
+        for offset in 0..<520 {
+            let samples = Array(repeating: Float(0.00012), count: 160)
+            let buffer = TranscriptionAudioFixtureGenerator.buffer(samples: samples, source: .system, offset: offset)
+            store.append(buffer)
+        }
+
+        let buffers = store.recentBuffers()
+        XCTAssertGreaterThanOrEqual(buffers.count, 295)
+        XCTAssertLessThanOrEqual(buffers.count, 324)
+        XCTAssertEqual(store.firstAudioAt(), Date(timeIntervalSinceReferenceDate: 0))
     }
 
     func testSpeechVocabularyBiasProviderBuildsRankedAppleAndWhisperContext() {

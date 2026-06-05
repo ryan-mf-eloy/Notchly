@@ -442,9 +442,9 @@ struct SpeechAudioQualityMonitor: Sendable {
     private static func significantAudioFloor(for source: TranscriptAudioSource) -> Float {
         switch source {
         case .system:
-            0.000095
+            0.000078
         case .microphone:
-            0.00011
+            0.000088
         default:
             0.00020
         }

@@ -151,7 +151,7 @@ struct TranscriptLiveView: View {
 
 enum TranscriptInlineActionMetrics {
     static let buttonHitSize: CGFloat = 24
-    static let visibleButtonSize: CGFloat = 14
+    static let visibleButtonSize: CGFloat = 12
     static let visibleButtonCornerRadius: CGFloat = 4
     static let hitTargetCornerRadius: CGFloat = 5
     static let rowTrailingReserve: CGFloat = buttonHitSize * 2 + 4
@@ -200,7 +200,7 @@ private struct TranscriptInlineActionButton: View {
                     .fill(Color.white.opacity(isHovered ? 0.065 : 0.010))
                     .frame(width: TranscriptInlineActionMetrics.visibleButtonSize, height: TranscriptInlineActionMetrics.visibleButtonSize)
                 Image(systemName: systemName)
-                    .font(.system(size: 5.8, weight: .regular))
+                    .font(.system(size: 5.4, weight: .regular))
                     .foregroundStyle(Color.white.opacity(isHovered ? 0.84 : 0.58))
             }
             .frame(width: TranscriptInlineActionMetrics.buttonHitSize, height: TranscriptInlineActionMetrics.buttonHitSize)

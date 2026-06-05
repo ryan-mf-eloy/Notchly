@@ -118,6 +118,11 @@ final class AudioConditioningService: @unchecked Sendable {
             buffer: conditioned,
             quality: result.quality
         )
+        let shouldMaintainWeakSpeechContinuation = shouldBridgeSpeechGap && isWeakSpeechContinuationCandidate(
+            decision,
+            buffer: conditioned,
+            quality: result.quality
+        )
         let shouldForward = decision.shouldForwardToASR || shouldBridgeSpeechGap
 
         let frames: [ConditionedAudioFrame]
@@ -134,6 +139,9 @@ final class AudioConditioningService: @unchecked Sendable {
             if decision.shouldForwardToASR {
                 lastForwardedSpeechAt = conditioned.createdAt
                 bridgedNonSpeechDuration = 0
+            } else if shouldMaintainWeakSpeechContinuation {
+                lastForwardedSpeechAt = conditioned.createdAt
+                bridgedNonSpeechDuration = min(bridgedNonSpeechDuration, Self.duration(of: conditioned))
             } else {
                 bridgedNonSpeechDuration += Self.duration(of: conditioned)
             }
@@ -177,6 +185,30 @@ final class AudioConditioningService: @unchecked Sendable {
         return !quality.isClipping
     }
 
+    private func isWeakSpeechContinuationCandidate(
+        _ decision: VoiceActivityDecision,
+        buffer: AudioBuffer,
+        quality: SpeechAudioQualitySnapshot
+    ) -> Bool {
+        let source = decision.source == .unknown ? quality.source : decision.source
+        let floor = Self.weakSpeechContinuationFloor(for: source)
+        guard buffer.pcmBuffer != nil,
+              !quality.isClipping,
+              decision.reason != "impulse_click",
+              decision.reason != "sustained_tonal_non_speech",
+              decision.reason != "sustained_broadband_non_speech" else {
+            return false
+        }
+
+        return decision.rms >= floor.rms &&
+            decision.peak >= floor.peak &&
+            decision.dynamicRange >= floor.dynamicRange &&
+            decision.envelopeVariation >= floor.envelopeVariation &&
+            decision.zeroCrossingRate >= 0.007 &&
+            decision.zeroCrossingRate <= 0.54 &&
+            decision.snrDb >= -34.0
+    }
+
     private static func nonDestructiveSpeechBridgeDuration(for source: TranscriptAudioSource) -> TimeInterval {
         switch source {
         case .system:
@@ -185,6 +217,17 @@ final class AudioConditioningService: @unchecked Sendable {
             return 2.50
         default:
             return 2.00
+        }
+    }
+
+    private static func weakSpeechContinuationFloor(for source: TranscriptAudioSource) -> (rms: Float, peak: Float, dynamicRange: Float, envelopeVariation: Double) {
+        switch source {
+        case .system:
+            return (0.0000025, 0.0000080, 0.000016, 0.0028)
+        case .microphone:
+            return (0.0000030, 0.0000090, 0.000018, 0.0030)
+        default:
+            return (0.000040, 0.000070, 0.000060, 0.0040)
         }
     }
 

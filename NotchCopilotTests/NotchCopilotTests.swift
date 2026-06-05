@@ -3801,8 +3801,8 @@ final class NotchCopilotTests: XCTestCase {
 
     func testSpeechAudioQualityMonitorKeepsLowSpeechVisibleWithSourceSpecificFloors() {
         for testCase in [
-            (source: TranscriptAudioSource.microphone, rms: Float(0.00012), peak: Float(0.00026), maximumNoiseFloor: Float(0.000095)),
-            (source: TranscriptAudioSource.system, rms: Float(0.000105), peak: Float(0.00023), maximumNoiseFloor: Float(0.000085))
+            (source: TranscriptAudioSource.microphone, rms: Float(0.000090), peak: Float(0.00021), maximumNoiseFloor: Float(0.000085)),
+            (source: TranscriptAudioSource.system, rms: Float(0.000080), peak: Float(0.00018), maximumNoiseFloor: Float(0.000075))
         ] {
             var monitor = SpeechAudioQualityMonitor(source: testCase.source)
             let buffer = NotchCopilot.AudioBuffer(
@@ -10707,7 +10707,7 @@ final class NotchCopilotTests: XCTestCase {
 
     func testTranscriptInlineActionsReserveCompactNonOverlappingSpace() {
         XCTAssertEqual(TranscriptInlineActionMetrics.buttonHitSize, 24)
-        XCTAssertEqual(TranscriptInlineActionMetrics.visibleButtonSize, 14)
+        XCTAssertEqual(TranscriptInlineActionMetrics.visibleButtonSize, 12)
         XCTAssertGreaterThan(TranscriptInlineActionMetrics.buttonHitSize, TranscriptInlineActionMetrics.visibleButtonSize)
         XCTAssertGreaterThanOrEqual(
             TranscriptInlineActionMetrics.rowTrailingReserve,
