@@ -2568,6 +2568,7 @@ private enum TranscriptLayout {
         let rowWidth = max(1, min(width - 24, showTranslatedText ? 492 : 520))
         let rowHorizontalInset: CGFloat = 5
         let rowVerticalInset: CGFloat = 2
+        let minInteractiveRowHeight: CGFloat = 24
         let actionReserve: CGFloat = 50
         let measuredTextWidth = max(1, rowWidth - actionReserve)
         let rowX = max(0, (width - rowWidth) / 2)
@@ -2585,7 +2586,7 @@ private enum TranscriptLayout {
                 with: CGSize(width: measuredTextWidth, height: .greatestFiniteMagnitude),
                 options: [.usesLineFragmentOrigin, .usesFontLeading]
             )
-            return ceil(rect.height) + rowVerticalInset * 2
+            return max(minInteractiveRowHeight, ceil(rect.height) + rowVerticalInset * 2)
         }
         let contentHeight = zip(heights, blocks).reduce(CGFloat.zero) { partial, pair in
             partial + pair.0 + pair.1.spacingAfter
