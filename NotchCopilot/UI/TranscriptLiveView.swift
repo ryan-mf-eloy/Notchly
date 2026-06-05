@@ -150,11 +150,11 @@ struct TranscriptLiveView: View {
 }
 
 enum TranscriptInlineActionMetrics {
-    static let buttonHitSize: CGFloat = 24
-    static let visibleButtonSize: CGFloat = 10
+    static let buttonHitSize: CGFloat = 20
+    static let visibleButtonSize: CGFloat = 13
     static let visibleButtonCornerRadius: CGFloat = 3.5
     static let hitTargetCornerRadius: CGFloat = 5
-    static let rowTrailingReserve: CGFloat = buttonHitSize * 2 + 4
+    static let rowTrailingReserve: CGFloat = buttonHitSize * 2 + 2
 }
 
 private struct TranscriptInlineActions: View {
@@ -178,8 +178,8 @@ private struct TranscriptInlineActions: View {
                 action: onDelete
             )
         }
-        .opacity(isVisible ? 0.88 : 0.001)
-        .allowsHitTesting(isVisible)
+        .opacity(isVisible ? 0.92 : 0.24)
+        .allowsHitTesting(true)
         .animation(nil, value: isVisible)
         .contentShape(Rectangle())
         .onHover(perform: onHoverChanged)
@@ -198,11 +198,11 @@ private struct TranscriptInlineActionButton: View {
         Button(action: action) {
             ZStack {
                 RoundedRectangle(cornerRadius: TranscriptInlineActionMetrics.visibleButtonCornerRadius, style: .continuous)
-                    .fill(Color.white.opacity(isHovered ? 0.065 : 0.010))
+                    .fill(Color.white.opacity(isHovered ? 0.105 : 0.018))
                     .frame(width: TranscriptInlineActionMetrics.visibleButtonSize, height: TranscriptInlineActionMetrics.visibleButtonSize)
                 Image(systemName: systemName)
-                    .font(.system(size: 4.9, weight: .regular))
-                    .foregroundStyle(Color.white.opacity(isHovered ? 0.86 : 0.62))
+                    .font(.system(size: 7.0, weight: .regular))
+                    .foregroundStyle(Color.white.opacity(isHovered ? 0.88 : 0.58))
             }
             .frame(width: TranscriptInlineActionMetrics.buttonHitSize, height: TranscriptInlineActionMetrics.buttonHitSize)
             .background(

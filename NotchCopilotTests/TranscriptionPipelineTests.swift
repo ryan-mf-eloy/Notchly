@@ -910,6 +910,53 @@ final class TranscriptionPipelineTests: XCTestCase {
         XCTAssertFalse(speechTrace.frames.isEmpty, "\(speechTrace.vadDecision)")
     }
 
+    func testAudioConditioningServiceStartsUltraLowSpeechWithoutOpeningFlatSignal() {
+        let flags = TranscriptionFeatureFlags(vadGatingEnabled: true)
+
+        for testCase in [
+            (source: TranscriptAudioSource.microphone, speechAmplitude: Float(0.0000048), flatAmplitude: Float(0.0000048)),
+            (source: TranscriptAudioSource.system, speechAmplitude: Float(0.0000042), flatAmplitude: Float(0.0000042))
+        ] {
+            let config = AudioConditioningConfig(accuracyMode: .highAccuracy, target: .nativeSpeech, audioSource: testCase.source)
+            let speechService = AudioConditioningService(source: testCase.source, preRollDuration: 0.4)
+
+            var speechTraces: [AudioConditioningTrace] = []
+            for offset in 0...4 {
+                speechTraces.append(speechService.conditionWithTrace(
+                    TranscriptionAudioFixtureGenerator.speechLikeBuffer(
+                        amplitude: testCase.speechAmplitude,
+                        source: testCase.source,
+                        offset: offset
+                    ),
+                    config: config,
+                    featureFlags: flags
+                ))
+            }
+
+            XCTAssertTrue(
+                speechTraces.contains { $0.vadDecision.shouldForwardToASR && !$0.frames.isEmpty },
+                "\(testCase.source.displayName) should open ASR for ultra-low speech-shaped audio: \(speechTraces.map(\.vadDecision))"
+            )
+            XCTAssertTrue(
+                speechTraces.contains { $0.conditionedBuffer.rms > $0.inputBuffer.rms * 20.0 },
+                "\(testCase.source.displayName) should apply stronger local gain before native ASR"
+            )
+
+            let flatService = AudioConditioningService(source: testCase.source, preRollDuration: 0.4)
+            let flatTrace = flatService.conditionWithTrace(
+                TranscriptionAudioFixtureGenerator.buffer(
+                    samples: Array(repeating: testCase.flatAmplitude, count: 1_600),
+                    source: testCase.source,
+                    offset: 8
+                ),
+                config: config,
+                featureFlags: flags
+            )
+            XCTAssertFalse(flatTrace.vadDecision.shouldForwardToASR, "\(testCase.source.displayName) flat low-level signal must stay gated: \(flatTrace.vadDecision)")
+            XCTAssertTrue(flatTrace.frames.isEmpty)
+        }
+    }
+
     func testLanguageContinuityResolverKeepsTechnicalCodeSwitchFromChangingGlobalSourceLanguage() {
         var resolver = LanguageContinuityResolver()
         let first = resolver.resolve(

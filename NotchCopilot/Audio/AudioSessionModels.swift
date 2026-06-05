@@ -160,9 +160,9 @@ struct AudioConditioningPipeline: Sendable {
         let minimumRMS: Float
         switch config.audioSource {
         case .system:
-            minimumRMS = 0.000003
+            minimumRMS = 0.0000018
         case .microphone:
-            minimumRMS = 0.0000035
+            minimumRMS = 0.0000020
         default:
             minimumRMS = 0.000040
         }
@@ -170,9 +170,9 @@ struct AudioConditioningPipeline: Sendable {
         if config.target == .cloudRealtime {
             maxGain = 6.0
         } else if config.audioSource == .system {
-            maxGain = 18.0
+            maxGain = 24.0
         } else if config.audioSource == .microphone {
-            maxGain = 18.0
+            maxGain = 24.0
         } else {
             maxGain = 3.5
         }
