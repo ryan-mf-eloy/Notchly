@@ -26,7 +26,7 @@ struct TranscriptLiveView: View {
                             .padding(18)
                     }
                 }
-                .padding(14)
+                .padding(10)
             }
             .scrollContentBackground(.hidden)
             .onChange(of: segments.count) {
@@ -42,8 +42,8 @@ struct TranscriptLiveView: View {
 
     private func segmentRow(_ segment: TranscriptSegment) -> some View {
         let isHovered = hoveredSegmentID == segment.id
-        return VStack(alignment: .leading, spacing: 6) {
-            HStack(spacing: 8) {
+        return VStack(alignment: .leading, spacing: 4) {
+            HStack(spacing: 6) {
                 Text(DateFormatting.duration(segment.startTime))
                     .font(.system(size: 10, weight: .medium, design: .monospaced))
                     .foregroundStyle(MinimalTheme.historyFaint)
@@ -83,12 +83,12 @@ struct TranscriptLiveView: View {
                     .textSelection(.enabled)
             }
         }
-        .padding(.vertical, 3)
+        .padding(.vertical, 2)
         .padding(.horizontal, 4)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(
             RoundedRectangle(cornerRadius: 6, style: .continuous)
-                .fill(Color.white.opacity(isHovered ? 0.072 : 0))
+                .fill(Color.white.opacity(isHovered ? 0.088 : 0))
         )
         .overlay(alignment: .topTrailing) {
             if onCopySegment != nil || onDeleteSegment != nil {
@@ -97,11 +97,8 @@ struct TranscriptLiveView: View {
                     onCopy: { onCopySegment?(segment) },
                     onDelete: { onDeleteSegment?(segment) }
                 )
-                .padding(.top, 2)
-                .padding(.trailing, 3)
-                .onHover { hovering in
-                    updateHoveredSegment(hovering ? segment.id : nil)
-                }
+                .padding(.top, 1)
+                .padding(.trailing, 2)
             }
         }
         .contentShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
@@ -123,7 +120,7 @@ struct TranscriptLiveView: View {
             hoveredSegmentID = segmentID
         } else if let current = hoveredSegmentID {
             hoverClearTask = Task { @MainActor in
-                try? await Task.sleep(for: .milliseconds(140))
+                try? await Task.sleep(for: .milliseconds(220))
                 guard !Task.isCancelled, hoveredSegmentID == current else { return }
                 hoveredSegmentID = nil
             }
@@ -167,8 +164,8 @@ private struct TranscriptInlineActions: View {
                 action: onDelete
             )
         }
-        .opacity(isVisible ? 0.88 : 0.32)
-        .allowsHitTesting(true)
+        .opacity(isVisible ? 0.78 : 0.001)
+        .allowsHitTesting(isVisible)
         .animation(nil, value: isVisible)
     }
 }
@@ -185,13 +182,13 @@ private struct TranscriptInlineActionButton: View {
         Button(action: action) {
             ZStack {
                 RoundedRectangle(cornerRadius: 4, style: .continuous)
-                    .fill(Color.white.opacity(isHovered ? 0.072 : 0.016))
-                    .frame(width: 16, height: 16)
+                    .fill(Color.white.opacity(isHovered ? 0.080 : 0.018))
+                    .frame(width: 14, height: 14)
                 Image(systemName: systemName)
-                    .font(.system(size: 6.4, weight: .regular))
-                    .foregroundStyle(Color.white.opacity(isHovered ? 0.82 : 0.56))
+                    .font(.system(size: 5.8, weight: .regular))
+                    .foregroundStyle(Color.white.opacity(isHovered ? 0.84 : 0.58))
             }
-            .frame(width: 22, height: 22)
+            .frame(width: 24, height: 24)
             .background(
                 RoundedRectangle(cornerRadius: 5, style: .continuous)
                     .fill(Color.clear)

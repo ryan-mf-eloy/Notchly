@@ -51,15 +51,15 @@ struct VoiceActivityDetectorConfiguration: Sendable, Hashable {
     var noiseFloorAdaptation: Float
 
     init(
-        absoluteSpeechRMS: Float = 0.00085,
-        likelySpeechSNRDb: Double = 5.5,
-        activeSpeechSNRDb: Double = 9.5,
+        absoluteSpeechRMS: Float = 0.00072,
+        likelySpeechSNRDb: Double = 4.8,
+        activeSpeechSNRDb: Double = 8.6,
         clickPeakThreshold: Float = 0.55,
         clickRMSRatio: Float = 0.16,
         tonalEnvelopeVariationThreshold: Double = 0.045,
         broadbandNoiseZeroCrossingThreshold: Double = 0.42,
         broadbandNoiseEnvelopeVariationThreshold: Double = 0.24,
-        hangoverDuration: TimeInterval = 1.55,
+        hangoverDuration: TimeInterval = 1.9,
         noiseFloorAdaptation: Float = 0.05
     ) {
         self.absoluteSpeechRMS = absoluteSpeechRMS
@@ -99,16 +99,16 @@ struct VoiceActivityDetector: Sendable {
         let timestamp = now ?? buffer.createdAt
         let sensitivity = VoiceActivitySourceSensitivity.profile(for: source)
         let previousNoiseFloor = noiseFloorBySource[source]
-        let rawMeasuredNoiseFloor = quality?.noiseFloor ?? previousNoiseFloor ?? max(features.rms * 0.35, 0.00025)
+        let rawMeasuredNoiseFloor = quality?.noiseFloor ?? previousNoiseFloor ?? max(features.rms * 0.35, sensitivity.minimumNoiseFloor)
         let bootstrappedNoiseFloor = previousNoiseFloor == nil
-            ? min(rawMeasuredNoiseFloor, max(features.rms * 0.35, 0.00025))
+            ? min(rawMeasuredNoiseFloor, max(features.rms * 0.35, sensitivity.minimumNoiseFloor))
             : rawMeasuredNoiseFloor
         let unclampedMeasuredNoiseFloor = bootstrappedNoiseFloor
         let priorNoiseFloor = previousNoiseFloor ?? unclampedMeasuredNoiseFloor
         let measuredNoiseFloor = previousNoiseFloor == nil
             ? unclampedMeasuredNoiseFloor
-            : min(unclampedMeasuredNoiseFloor, max(priorNoiseFloor, 0.0002) * 1.25)
-        let adaptiveNoiseFloor = max(0.0002, min(max(priorNoiseFloor, measuredNoiseFloor), 0.04))
+            : min(unclampedMeasuredNoiseFloor, max(priorNoiseFloor, sensitivity.minimumNoiseFloor) * 1.25)
+        let adaptiveNoiseFloor = max(sensitivity.minimumNoiseFloor, min(max(priorNoiseFloor, measuredNoiseFloor), 0.04))
         let snrDb = Self.snrDb(rms: features.rms, noiseFloor: adaptiveNoiseFloor)
         let isClipping = (quality?.isClipping ?? false) || features.peak >= 0.98
         let impulseDominance = features.peak / max(features.rms, 0.000001)
@@ -138,7 +138,7 @@ struct VoiceActivityDetector: Sendable {
         let lowEnergySpeechOnset = onsetSpeechShapeLikely &&
             features.rms >= max(sensitivity.onsetRMSFloor, adaptiveNoiseFloor * 1.02) &&
             features.peak >= sensitivity.onsetPeakFloor
-        let continuationWindow: TimeInterval = source == .system ? 1.45 : 1.30
+        let continuationWindow: TimeInterval = source == .system ? 1.85 : 1.65
         let recentlyHadSpeech = lastSpeechAtBySource[source].map { timestamp.timeIntervalSince($0) <= continuationWindow } ?? false
         let lowEnergySpeechContinuation = recentlyHadSpeech &&
             features.zeroCrossingRate > 0.007 &&
@@ -151,7 +151,7 @@ struct VoiceActivityDetector: Sendable {
         let state: VoiceActivityState
         let probability: Double
         let reason: String
-        if buffer.pcmBuffer == nil || ((features.rms <= sensitivity.silenceRMSFloor || features.peak <= sensitivity.silencePeakFloor) && !lowEnergySpeechContinuation) {
+        if buffer.pcmBuffer == nil || ((features.rms <= sensitivity.silenceRMSFloor && features.peak <= sensitivity.silencePeakFloor) && !lowEnergySpeechContinuation) {
             state = .silence
             probability = 0.0
             reason = "below_floor"
@@ -221,9 +221,10 @@ struct VoiceActivityDetector: Sendable {
 
     private mutating func updateNoiseFloor(source: TranscriptAudioSource, rms: Float) {
         guard rms >= 0, rms < 0.04 else { return }
-        let previous = noiseFloorBySource[source] ?? max(rms, 0.00025)
+        let minimumNoiseFloor = VoiceActivitySourceSensitivity.profile(for: source).minimumNoiseFloor
+        let previous = noiseFloorBySource[source] ?? max(rms, minimumNoiseFloor)
         let alpha = configuration.noiseFloorAdaptation
-        noiseFloorBySource[source] = max(0.0002, previous * (1 - alpha) + rms * alpha)
+        noiseFloorBySource[source] = max(minimumNoiseFloor, previous * (1 - alpha) + rms * alpha)
     }
 
     private static func snrDb(rms: Float, noiseFloor: Float) -> Double {
@@ -310,38 +311,41 @@ private struct VoiceActivitySourceSensitivity {
     var hangoverRMSFloor: Float
     var silenceRMSFloor: Float
     var silencePeakFloor: Float
+    var minimumNoiseFloor: Float
 
     static func profile(for source: TranscriptAudioSource) -> VoiceActivitySourceSensitivity {
         switch source {
         case .system:
             VoiceActivitySourceSensitivity(
-                absoluteRMSMultiplier: 0.38,
-                noiseFloorLift: 1.22,
-                likelyPeak: 0.0058,
+                absoluteRMSMultiplier: 0.34,
+                noiseFloorLift: 1.12,
+                likelyPeak: 0.0048,
                 activePeak: 0.052,
-                activeRMSMultiplier: 1.36,
-                activeRMSFloor: 0.0022,
-                minimumSpeechDynamicRange: 0.00020,
-                onsetRMSFloor: 0.000095,
-                onsetPeakFloor: 0.00036,
-                hangoverRMSFloor: 0.00013,
-                silenceRMSFloor: 0.000045,
-                silencePeakFloor: 0.000065
+                activeRMSMultiplier: 1.30,
+                activeRMSFloor: 0.0018,
+                minimumSpeechDynamicRange: 0.00016,
+                onsetRMSFloor: 0.000075,
+                onsetPeakFloor: 0.00028,
+                hangoverRMSFloor: 0.00010,
+                silenceRMSFloor: 0.000035,
+                silencePeakFloor: 0.000052,
+                minimumNoiseFloor: 0.00010
             )
         case .microphone:
             VoiceActivitySourceSensitivity(
-                absoluteRMSMultiplier: 0.44,
-                noiseFloorLift: 1.34,
-                likelyPeak: 0.0062,
+                absoluteRMSMultiplier: 0.39,
+                noiseFloorLift: 1.20,
+                likelyPeak: 0.0052,
                 activePeak: 0.060,
-                activeRMSMultiplier: 1.42,
-                activeRMSFloor: 0.0024,
-                minimumSpeechDynamicRange: 0.00023,
-                onsetRMSFloor: 0.000105,
-                onsetPeakFloor: 0.00042,
-                hangoverRMSFloor: 0.00015,
-                silenceRMSFloor: 0.000050,
-                silencePeakFloor: 0.000075
+                activeRMSMultiplier: 1.34,
+                activeRMSFloor: 0.0020,
+                minimumSpeechDynamicRange: 0.00018,
+                onsetRMSFloor: 0.000085,
+                onsetPeakFloor: 0.00032,
+                hangoverRMSFloor: 0.00012,
+                silenceRMSFloor: 0.000040,
+                silencePeakFloor: 0.000060,
+                minimumNoiseFloor: 0.00012
             )
         default:
             VoiceActivitySourceSensitivity(
@@ -356,7 +360,8 @@ private struct VoiceActivitySourceSensitivity {
                 onsetPeakFloor: 0.00055,
                 hangoverRMSFloor: 0.00019,
                 silenceRMSFloor: 0.000065,
-                silencePeakFloor: 0.000095
+                silencePeakFloor: 0.000095,
+                minimumNoiseFloor: 0.00016
             )
         }
     }

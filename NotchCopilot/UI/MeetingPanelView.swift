@@ -2169,7 +2169,7 @@ private final class FlippedTranscriptDocumentView: NSView {
     private func clearHoveredRowAfterGracePeriod() {
         hoverClearTask?.cancel()
         hoverClearTask = Task { @MainActor [weak self] in
-            try? await Task.sleep(for: .milliseconds(140))
+            try? await Task.sleep(for: .milliseconds(220))
             guard !Task.isCancelled else { return }
             self?.setHoveredRow(nil)
         }
@@ -2180,13 +2180,13 @@ private final class TranscriptRowView: NSView {
     override var isFlipped: Bool { true }
 
     private enum LayoutMetrics {
-        static let actionSize: CGFloat = 16
+        static let actionSize: CGFloat = 14
         static let actionGap: CGFloat = 1
-        static let actionRightInset: CGFloat = 4
+        static let actionRightInset: CGFloat = 3
         static let textLeftInset: CGFloat = 4
         static let verticalInset: CGFloat = 1
         static let hoverInset: CGFloat = -12
-        static let actionHitSlop: CGFloat = 5
+        static let actionHitSlop: CGFloat = 7
     }
 
     private let label = NSTextField(labelWithString: "")
@@ -2266,8 +2266,10 @@ private final class TranscriptRowView: NSView {
     override func hitTest(_ point: NSPoint) -> NSView? {
         guard !isHidden, alphaValue > 0, bounds.contains(point) else { return nil }
         if let actionButton = actionButtonHit(at: point) {
+            onHoverChanged(rowID)
             return actionButton.hitTest(convert(point, to: actionButton)) ?? actionButton
         }
+        onHoverChanged(rowID)
         return self
     }
 
@@ -2366,12 +2368,10 @@ private final class TranscriptRowView: NSView {
             guard let self else { return }
             if hovering {
                 self.onHoverChanged(self.rowID)
-            } else {
-                self.updateHoverFromCurrentPointer()
             }
         }
         if let image = NSImage(systemSymbolName: systemName, accessibilityDescription: tooltip) {
-            button.image = image.withSymbolConfiguration(.init(pointSize: 6.4, weight: .regular))
+            button.image = image.withSymbolConfiguration(.init(pointSize: 5.8, weight: .regular))
         }
         button.isEnabled = true
         button.updateAppearance(rowHovered: false)
@@ -2380,7 +2380,7 @@ private final class TranscriptRowView: NSView {
     func setHovered(_ hovered: Bool) {
         guard isHovered != hovered else { return }
         isHovered = hovered
-        layer?.backgroundColor = NSColor.white.withAlphaComponent(hovered ? 0.072 : 0).cgColor
+        layer?.backgroundColor = NSColor.white.withAlphaComponent(hovered ? 0.088 : 0).cgColor
         copyButton.updateAppearance(rowHovered: hovered)
         deleteButton.updateAppearance(rowHovered: hovered)
     }
@@ -2472,13 +2472,13 @@ private final class TranscriptRowActionButton: NSButton {
 
     func updateAppearance(rowHovered: Bool) {
         self.rowHovered = rowHovered
-        alphaValue = rowHovered ? 0.86 : 0.26
-        contentTintColor = NSColor.white.withAlphaComponent(isPointerInside ? 0.86 : (rowHovered ? 0.62 : 0.44))
+        alphaValue = rowHovered ? 0.78 : 0.08
+        contentTintColor = NSColor.white.withAlphaComponent(isPointerInside ? 0.84 : (rowHovered ? 0.58 : 0.30))
         let backgroundAlpha: CGFloat
         if isPointerInside {
-            backgroundAlpha = 0.072
+            backgroundAlpha = 0.080
         } else if rowHovered {
-            backgroundAlpha = 0.016
+            backgroundAlpha = 0.018
         } else {
             backgroundAlpha = 0
         }
@@ -2589,7 +2589,7 @@ private enum TranscriptLayout {
         let rowWidth = max(1, min(width - 24, showTranslatedText ? 492 : 520))
         let rowHorizontalInset: CGFloat = 5
         let rowVerticalInset: CGFloat = 2
-        let actionReserve: CGFloat = 38
+        let actionReserve: CGFloat = 34
         let measuredTextWidth = max(1, rowWidth - actionReserve)
         let rowX = max(0, (width - rowWidth) / 2)
         let verticalPadding: CGFloat = 0

@@ -571,7 +571,7 @@ final class TranscriptionPipelineTests: XCTestCase {
 
         var subtleMicrophoneDetector = VoiceActivityDetector()
         let subtleMicrophoneSpeech = TranscriptionAudioFixtureGenerator.speechLikeBuffer(
-            amplitude: 0.0014,
+            amplitude: 0.00085,
             source: .microphone,
             offset: 7
         )
@@ -581,7 +581,7 @@ final class TranscriptionPipelineTests: XCTestCase {
 
         var subtleSystemDetector = VoiceActivityDetector()
         let subtleSystemSpeech = TranscriptionAudioFixtureGenerator.speechLikeBuffer(
-            amplitude: 0.0011,
+            amplitude: 0.00070,
             source: .system,
             offset: 8
         )
@@ -625,6 +625,18 @@ final class TranscriptionPipelineTests: XCTestCase {
             XCTAssertTrue(secondTailDecision.shouldForwardToASR, "\(testCase.source.displayName): \(secondTailDecision)")
             XCTAssertEqual(secondTailDecision.state, .lowAudio)
             XCTAssertEqual(secondTailDecision.reason, "low_audio_speech_continuation")
+
+            var lateTailDetector = VoiceActivityDetector()
+            XCTAssertTrue(lateTailDetector.analyze(activeSpeech, now: start).shouldForwardToASR)
+            let lateWeakTail = TranscriptionAudioFixtureGenerator.speechLikeBuffer(
+                amplitude: testCase.secondTailAmplitude,
+                source: testCase.source,
+                offset: 3
+            )
+            let lateOffset = testCase.source == .system ? 1.78 : 1.58
+            let lateTailDecision = lateTailDetector.analyze(lateWeakTail, now: start.addingTimeInterval(lateOffset))
+            XCTAssertTrue(lateTailDecision.shouldForwardToASR, "\(testCase.source.displayName) late low-energy tail should remain connected: \(lateTailDecision)")
+            XCTAssertEqual(lateTailDecision.reason, "low_audio_speech_continuation")
 
             var isolatedDetector = VoiceActivityDetector()
             let isolatedDecision = isolatedDetector.analyze(secondWeakTail)
@@ -686,9 +698,9 @@ final class TranscriptionPipelineTests: XCTestCase {
         XCTAssertFalse(silenceTrace.vadDecision.shouldForwardToASR)
         XCTAssertTrue(silenceTrace.frames.isEmpty)
 
-        let quietMicrophoneSpeech = TranscriptionAudioFixtureGenerator.speechLikeBuffer(amplitude: 0.00028, source: .microphone, offset: 1)
+        let quietMicrophoneSpeech = TranscriptionAudioFixtureGenerator.speechLikeBuffer(amplitude: 0.00018, source: .microphone, offset: 1)
         let speechTrace = service.conditionWithTrace(quietMicrophoneSpeech, config: config, featureFlags: flags)
-        XCTAssertGreaterThan(speechTrace.conditionedBuffer.rms, quietMicrophoneSpeech.rms * 3.4)
+        XCTAssertGreaterThan(speechTrace.conditionedBuffer.rms, quietMicrophoneSpeech.rms * 5.0)
         XCTAssertTrue(speechTrace.vadDecision.shouldForwardToASR, "\(speechTrace.vadDecision)")
         XCTAssertFalse(speechTrace.frames.isEmpty, "\(speechTrace.vadDecision)")
     }
@@ -697,8 +709,8 @@ final class TranscriptionPipelineTests: XCTestCase {
         let flags = TranscriptionFeatureFlags(vadGatingEnabled: true)
 
         for testCase in [
-            (source: TranscriptAudioSource.microphone, bridgedOffsets: 1...16, blockedOffset: 17),
-            (source: TranscriptAudioSource.system, bridgedOffsets: 1...18, blockedOffset: 19)
+            (source: TranscriptAudioSource.microphone, bridgedOffsets: 1...21, blockedOffset: 22),
+            (source: TranscriptAudioSource.system, bridgedOffsets: 1...23, blockedOffset: 24)
         ] {
             let isolatedService = AudioConditioningService(source: testCase.source, preRollDuration: 0.4)
             let config = AudioConditioningConfig(accuracyMode: .highAccuracy, target: .nativeSpeech, audioSource: testCase.source)
@@ -753,9 +765,9 @@ final class TranscriptionPipelineTests: XCTestCase {
         XCTAssertFalse(silenceTrace.vadDecision.shouldForwardToASR)
         XCTAssertTrue(silenceTrace.frames.isEmpty)
 
-        let quietSystemSpeech = TranscriptionAudioFixtureGenerator.speechLikeBuffer(amplitude: 0.00024, source: .system, offset: 1)
+        let quietSystemSpeech = TranscriptionAudioFixtureGenerator.speechLikeBuffer(amplitude: 0.00015, source: .system, offset: 1)
         let speechTrace = service.conditionWithTrace(quietSystemSpeech, config: config, featureFlags: flags)
-        XCTAssertGreaterThan(speechTrace.conditionedBuffer.rms, quietSystemSpeech.rms * 2.2)
+        XCTAssertGreaterThan(speechTrace.conditionedBuffer.rms, quietSystemSpeech.rms * 5.0)
         XCTAssertTrue(speechTrace.vadDecision.shouldForwardToASR, "\(speechTrace.vadDecision)")
         XCTAssertFalse(speechTrace.frames.isEmpty, "\(speechTrace.vadDecision)")
     }
@@ -933,7 +945,7 @@ final class TranscriptionPipelineTests: XCTestCase {
         systemStore.append(TranscriptionAudioFixtureGenerator.buffers(profile: .silence, source: .system, chunks: 1).first!)
         XCTAssertNil(systemStore.firstAudioAt())
 
-        let lowSystemSamples = Array(repeating: Float(0.00021), count: 1_600)
+        let lowSystemSamples = Array(repeating: Float(0.00017), count: 1_600)
         let lowSystem = TranscriptionAudioFixtureGenerator.buffer(samples: lowSystemSamples, source: .system, offset: 1)
         systemStore.append(lowSystem)
         XCTAssertEqual(systemStore.firstAudioAt(), lowSystem.createdAt)
@@ -942,7 +954,7 @@ final class TranscriptionPipelineTests: XCTestCase {
         microphoneStore.append(TranscriptionAudioFixtureGenerator.buffers(profile: .silence, source: .microphone, chunks: 1).first!)
         XCTAssertNil(microphoneStore.firstAudioAt())
 
-        let lowMicrophoneSamples = Array(repeating: Float(0.00025), count: 1_600)
+        let lowMicrophoneSamples = Array(repeating: Float(0.00021), count: 1_600)
         let lowMicrophone = TranscriptionAudioFixtureGenerator.buffer(samples: lowMicrophoneSamples, source: .microphone, offset: 2)
         microphoneStore.append(lowMicrophone)
         XCTAssertEqual(microphoneStore.firstAudioAt(), lowMicrophone.createdAt)
@@ -5211,8 +5223,8 @@ final class TranscriptionPipelineTests: XCTestCase {
 
     func testStreamingASRRouterLetsVeryLowMicrophoneAndSystemSpeechReachASR() async throws {
         let cases: [(source: TranscriptAudioSource, amplitude: Float, speaker: String)] = [
-            (.microphone, 0.00028, "You"),
-            (.system, 0.00024, "System")
+            (.microphone, 0.00018, "You"),
+            (.system, 0.00015, "System")
         ]
 
         for testCase in cases {
