@@ -93,6 +93,16 @@ struct MeetingTranscriptLedger: Sendable, Hashable {
             return merge(existing: segments[overlapIndex], incoming: incoming, at: overlapIndex)
         }
 
+        if let continuationIndex = segments.indices.reversed().first(where: {
+            shouldContinueSentence(existing: segments[$0], incoming: incoming)
+        }) {
+            return .replace(
+                index: continuationIndex,
+                segment: continuedSentence(existing: segments[continuationIndex], incoming: incoming),
+                tail: nil
+            )
+        }
+
         return .append(freshSegmentIDIfNeeded(incoming, in: segments))
     }
 
@@ -229,6 +239,79 @@ struct MeetingTranscriptLedger: Sendable, Hashable {
         }
         let allowedTemporalGap: TimeInterval = isIncrementalRevision ? 2.40 : 1.50
         return temporalGap(existing: existing, incoming: incoming) <= allowedTemporalGap
+    }
+
+    private func shouldContinueSentence(existing: TranscriptSegment, incoming: TranscriptSegment) -> Bool {
+        guard existing.audioSource == incoming.audioSource,
+              existing.meetingId == incoming.meetingId,
+              existing.id != incoming.id,
+              !existing.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+              !incoming.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+              !hasTerminalSentencePunctuation(existing.text),
+              startsWithContinuationCue(incoming.text) else {
+            return false
+        }
+
+        if let existingRange = existing.sourceFrameRange, let incomingRange = incoming.sourceFrameRange {
+            let frameGap = incomingRange.start - existingRange.end
+            return frameGap >= 0 && frameGap <= 22_000
+        }
+
+        let gap = incoming.startTime - existing.endTime
+        return gap >= 0 && gap <= 1.35
+    }
+
+    private func continuedSentence(existing: TranscriptSegment, incoming: TranscriptSegment) -> TranscriptSegment {
+        var replacement = incoming
+        replacement.id = existing.id
+        replacement.createdAt = existing.createdAt
+        replacement.text = joinedSentence(existing.text, incoming.text)
+        replacement.startTime = min(existing.startTime, incoming.startTime)
+        replacement.endTime = max(existing.endTime, incoming.endTime)
+        replacement.sourceFrameRange = mergedRange(existing.sourceFrameRange, incoming.sourceFrameRange)
+        replacement.isFinal = existing.isFinal && incoming.isFinal
+        replacement.transcriptionPhase = replacement.isFinal ? .final : .draft
+        replacement.finalizedBy = replacement.isFinal ? (incoming.finalizedBy ?? incoming.transcriptionEngine ?? existing.finalizedBy) : nil
+        replacement.engineConfidence = maxOptional(existing.engineConfidence, incoming.engineConfidence)
+        replacement.confidence = max(existing.confidence, incoming.confidence)
+        replacement.originalLanguage = incoming.originalLanguage ?? existing.originalLanguage
+        replacement.languageConfidence = maxOptional(existing.languageConfidence, incoming.languageConfidence)
+        replacement.languageEvidenceSource = incoming.languageEvidenceSource ?? existing.languageEvidenceSource
+        replacement.languageDetectionWindowMs = maxOptional(existing.languageDetectionWindowMs, incoming.languageDetectionWindowMs)
+        replacement.languageSpanCodes = Array(NSOrderedSet(array: existing.languageSpanCodes + incoming.languageSpanCodes)) as? [String] ?? existing.languageSpanCodes
+        replacement.wordTimestamps = existing.wordTimestamps + incoming.wordTimestamps
+        replacement.alternatives = mergedAlternatives(existing.alternatives, incoming.alternatives, limit: 8)
+        replacement.revisionNumber = max(existing.revisionNumber, incoming.revisionNumber) + 1
+        replacement.draftTranslatedText = nil
+        replacement.translatedText = nil
+        replacement.translationState = .none
+        replacement.translationPhase = nil
+        replacement.translationConfidence = nil
+        replacement.preservedTerms = []
+        return replacement
+    }
+
+    private func joinedSentence(_ lhs: String, _ rhs: String) -> String {
+        let left = lhs.trimmingCharacters(in: .whitespacesAndNewlines)
+        let right = rhs.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !left.isEmpty else { return right }
+        guard !right.isEmpty else { return left }
+        if left.hasSuffix(" ") || right.hasPrefix(" ") {
+            return left + right
+        }
+        return left + " " + right
+    }
+
+    private func hasTerminalSentencePunctuation(_ text: String) -> Bool {
+        guard let last = text.trimmingCharacters(in: .whitespacesAndNewlines).unicodeScalars.last else {
+            return false
+        }
+        return CharacterSet(charactersIn: ".!?。！？").contains(last)
+    }
+
+    private func startsWithContinuationCue(_ text: String) -> Bool {
+        guard let first = tokens(in: normalized(text)).first else { return false }
+        return Self.continuationLeadTokens.contains(first)
     }
 
     private func shouldPromoteExistingDraftOverShortFinal(existing: TranscriptSegment, incoming: TranscriptSegment) -> Bool {
@@ -376,6 +459,13 @@ struct MeetingTranscriptLedger: Sendable, Hashable {
     private func tokens(in normalizedText: String) -> [String] {
         normalizedText.split { !$0.isLetter && !$0.isNumber }.map(String.init)
     }
+
+    private static let continuationLeadTokens: Set<String> = [
+        "a", "ao", "as", "com", "da", "das", "de", "do", "dos", "e", "em", "entao", "então", "mas", "na", "nas", "no", "nos", "ou", "para", "porque", "pra", "que",
+        "and", "because", "but", "for", "in", "of", "or", "so", "that", "to", "with",
+        "y", "o", "pero", "porque", "que", "con", "de", "del", "en", "para",
+        "そして", "でも", "ので", "から"
+    ]
 
     private func isTokenPrefix(_ prefix: [String], of full: [String]) -> Bool {
         guard !prefix.isEmpty, prefix.count <= full.count else { return false }

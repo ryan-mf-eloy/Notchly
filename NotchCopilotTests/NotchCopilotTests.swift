@@ -4451,6 +4451,117 @@ final class NotchCopilotTests: XCTestCase {
         }
     }
 
+    func testMeetingTranscriptLedgerMergesShortFinalWithContinuationTail() {
+        let meetingId = UUID()
+        let committed = TranscriptSegment(
+            id: UUID(),
+            meetingId: meetingId,
+            speakerLabel: "You",
+            audioSource: .microphone,
+            text: "Qual é a capital",
+            transcriptionPhase: .final,
+            transcriptionEngine: .appleSpeech,
+            sourceFrameRange: AudioSourceFrameRange(start: 0, end: 18_000),
+            startTime: 0,
+            endTime: 1.12,
+            isFinal: true
+        )
+        let tail = TranscriptSegment(
+            id: UUID(),
+            meetingId: meetingId,
+            speakerLabel: "You",
+            audioSource: .microphone,
+            text: "do Brasil",
+            transcriptionPhase: .draft,
+            transcriptionEngine: .appleSpeech,
+            sourceFrameRange: AudioSourceFrameRange(start: 24_000, end: 36_000),
+            startTime: 1.50,
+            endTime: 2.25,
+            isFinal: false
+        )
+
+        let decision = MeetingTranscriptLedger().decision(for: tail, in: [committed])
+
+        guard case let .replace(index, replacement, tailSegment) = decision else {
+            return XCTFail("A short continuation tail should keep the sentence in one transcript block.")
+        }
+        XCTAssertEqual(index, 0)
+        XCTAssertEqual(replacement.id, committed.id)
+        XCTAssertEqual(replacement.text, "Qual é a capital do Brasil")
+        XCTAssertFalse(replacement.isFinal)
+        XCTAssertEqual(replacement.transcriptionPhase, .draft)
+        XCTAssertEqual(replacement.sourceFrameRange, AudioSourceFrameRange(start: 0, end: 36_000))
+        XCTAssertNil(tailSegment)
+    }
+
+    func testMeetingTranscriptLedgerDoesNotMergeFreshSentenceWithoutContinuationCue() {
+        let meetingId = UUID()
+        let committed = TranscriptSegment(
+            id: UUID(),
+            meetingId: meetingId,
+            speakerLabel: "You",
+            audioSource: .microphone,
+            text: "Qual é a capital do Brasil",
+            transcriptionPhase: .final,
+            transcriptionEngine: .appleSpeech,
+            sourceFrameRange: AudioSourceFrameRange(start: 0, end: 24_000),
+            startTime: 0,
+            endTime: 1.50,
+            isFinal: true
+        )
+        let newSentence = TranscriptSegment(
+            id: UUID(),
+            meetingId: meetingId,
+            speakerLabel: "You",
+            audioSource: .microphone,
+            text: "Brasilia fica no planalto central",
+            transcriptionPhase: .draft,
+            transcriptionEngine: .appleSpeech,
+            sourceFrameRange: AudioSourceFrameRange(start: 30_000, end: 48_000),
+            startTime: 1.88,
+            endTime: 3.0,
+            isFinal: false
+        )
+
+        guard case .append = MeetingTranscriptLedger().decision(for: newSentence, in: [committed]) else {
+            return XCTFail("A fresh sentence without a continuation cue should append as its own block.")
+        }
+    }
+
+    func testMeetingTranscriptLedgerDoesNotMergeContinuationAcrossAudioSources() {
+        let meetingId = UUID()
+        let committed = TranscriptSegment(
+            id: UUID(),
+            meetingId: meetingId,
+            speakerLabel: "You",
+            audioSource: .microphone,
+            text: "Vamos revisar",
+            transcriptionPhase: .final,
+            transcriptionEngine: .appleSpeech,
+            sourceFrameRange: AudioSourceFrameRange(start: 0, end: 16_000),
+            startTime: 0,
+            endTime: 1,
+            isFinal: true
+        )
+        let systemTail = TranscriptSegment(
+            id: UUID(),
+            meetingId: meetingId,
+            speakerLabel: "System",
+            audioSource: .system,
+            text: "o plano de rollout",
+            transcriptionPhase: .draft,
+            transcriptionEngine: .appleSpeech,
+            sourceFrameRange: AudioSourceFrameRange(start: 18_000, end: 34_000),
+            startTime: 1.12,
+            endTime: 2.12,
+            isFinal: false
+        )
+
+        guard case .append = MeetingTranscriptLedger().decision(for: systemTail, in: [committed]) else {
+            return XCTFail("Mic and system audio must stay separated even when the text looks like a continuation.")
+        }
+    }
+
     func testMeetingTranscriptLedgerRevisesFreshlyAppendedUtteranceWithOriginalASRID() {
         let meetingId = UUID()
         let originalASRID = UUID()
