@@ -2180,17 +2180,17 @@ private final class TranscriptRowView: NSView {
     override var isFlipped: Bool { true }
 
     private enum LayoutMetrics {
-        static let actionSize: CGFloat = 14
-        static let actionGap: CGFloat = 2
+        static let actionSize: CGFloat = 18
+        static let actionGap: CGFloat = 1
         static let actionRightInset: CGFloat = 4
-        static let textLeftInset: CGFloat = 5
-        static let verticalInset: CGFloat = 2
-        static let hoverInset: CGFloat = -10
+        static let textLeftInset: CGFloat = 4
+        static let verticalInset: CGFloat = 1
+        static let hoverInset: CGFloat = -12
     }
 
     private let label = NSTextField(labelWithString: "")
-    private let copyButton = NSButton()
-    private let deleteButton = NSButton()
+    private let copyButton = TranscriptRowActionButton()
+    private let deleteButton = TranscriptRowActionButton()
     private var row: TranscriptLayout.Row
     private var onCopyBlock: (TranscriptSegment, String) -> Void
     private var onDeleteSegment: (TranscriptSegment) -> Void
@@ -2226,6 +2226,7 @@ private final class TranscriptRowView: NSView {
     override func layout() {
         super.layout()
         let actionsWidth = LayoutMetrics.actionSize * 2 + LayoutMetrics.actionGap + LayoutMetrics.actionRightInset + 2
+        let actionY = max(0, floor((bounds.height - LayoutMetrics.actionSize) / 2))
         label.frame = CGRect(
             x: LayoutMetrics.textLeftInset,
             y: LayoutMetrics.verticalInset,
@@ -2234,13 +2235,13 @@ private final class TranscriptRowView: NSView {
         )
         deleteButton.frame = CGRect(
             x: bounds.width - LayoutMetrics.actionRightInset - LayoutMetrics.actionSize,
-            y: LayoutMetrics.verticalInset,
+            y: actionY,
             width: LayoutMetrics.actionSize,
             height: LayoutMetrics.actionSize
         )
         copyButton.frame = CGRect(
             x: deleteButton.frame.minX - LayoutMetrics.actionGap - LayoutMetrics.actionSize,
-            y: LayoutMetrics.verticalInset,
+            y: actionY,
             width: LayoutMetrics.actionSize,
             height: LayoutMetrics.actionSize
         )
@@ -2283,7 +2284,7 @@ private final class TranscriptRowView: NSView {
 
     private func configure() {
         wantsLayer = true
-        layer?.cornerRadius = 6
+        layer?.cornerRadius = 5
         layer?.masksToBounds = true
 
         label.isEditable = false
@@ -2333,7 +2334,7 @@ private final class TranscriptRowView: NSView {
     }
 
     private func configureButton(
-        _ button: NSButton,
+        _ button: TranscriptRowActionButton,
         systemName: String,
         tooltip: String,
         accessibilityIdentifier: String,
@@ -2349,24 +2350,43 @@ private final class TranscriptRowView: NSView {
         button.setAccessibilityIdentifier(accessibilityIdentifier)
         button.setAccessibilityLabel(tooltip)
         button.setAccessibilityHelp(tooltip)
-        button.contentTintColor = NSColor.white.withAlphaComponent(0.58)
         button.wantsLayer = true
-        button.layer?.cornerRadius = 3
+        button.layer?.cornerRadius = 4
         button.layer?.backgroundColor = NSColor.clear.cgColor
+        button.onPointerHoverChanged = { [weak self] hovering in
+            guard let self else { return }
+            if hovering {
+                self.onHoverChanged(self.rowID)
+            } else {
+                self.updateHoverFromCurrentPointer()
+            }
+        }
         if let image = NSImage(systemSymbolName: systemName, accessibilityDescription: tooltip) {
-            button.image = image.withSymbolConfiguration(.init(pointSize: 6.8, weight: .regular))
+            button.image = image.withSymbolConfiguration(.init(pointSize: 7.0, weight: .regular))
         }
         button.isEnabled = true
+        button.updateAppearance(rowHovered: false)
     }
 
     func setHovered(_ hovered: Bool) {
         guard isHovered != hovered else { return }
         isHovered = hovered
-        layer?.backgroundColor = NSColor.white.withAlphaComponent(hovered ? 0.064 : 0).cgColor
-        copyButton.alphaValue = hovered ? 0.86 : 0.36
-        deleteButton.alphaValue = hovered ? 0.86 : 0.36
-        copyButton.layer?.backgroundColor = NSColor.white.withAlphaComponent(hovered ? 0.056 : 0).cgColor
-        deleteButton.layer?.backgroundColor = NSColor.white.withAlphaComponent(hovered ? 0.056 : 0).cgColor
+        layer?.backgroundColor = NSColor.white.withAlphaComponent(hovered ? 0.072 : 0).cgColor
+        copyButton.updateAppearance(rowHovered: hovered)
+        deleteButton.updateAppearance(rowHovered: hovered)
+    }
+
+    private func updateHoverFromCurrentPointer() {
+        guard let window else {
+            onHoverChanged(nil)
+            return
+        }
+        let point = convert(window.mouseLocationOutsideOfEventStream, from: nil)
+        if bounds.insetBy(dx: LayoutMetrics.hoverInset, dy: LayoutMetrics.hoverInset / 2).contains(point) {
+            onHoverChanged(rowID)
+        } else {
+            onHoverChanged(nil)
+        }
     }
 
     @objc private func copyTranscriptBlock() {
@@ -2375,6 +2395,72 @@ private final class TranscriptRowView: NSView {
 
     @objc private func deleteTranscriptSegment() {
         onDeleteSegment(row.segment)
+    }
+}
+
+private final class TranscriptRowActionButton: NSButton {
+    var onPointerHoverChanged: ((Bool) -> Void)?
+    private var trackingArea: NSTrackingArea?
+    private var isPointerInside = false
+    private var rowHovered = false
+
+    override var acceptsFirstResponder: Bool { false }
+
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool {
+        true
+    }
+
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        if let trackingArea {
+            removeTrackingArea(trackingArea)
+        }
+        let area = NSTrackingArea(
+            rect: bounds,
+            options: [.mouseEnteredAndExited, .mouseMoved, .activeInActiveApp, .inVisibleRect],
+            owner: self,
+            userInfo: nil
+        )
+        addTrackingArea(area)
+        trackingArea = area
+    }
+
+    override func mouseEntered(with event: NSEvent) {
+        isPointerInside = true
+        updateAppearance(rowHovered: rowHovered)
+        onPointerHoverChanged?(true)
+        super.mouseEntered(with: event)
+    }
+
+    override func mouseMoved(with event: NSEvent) {
+        if !isPointerInside {
+            isPointerInside = true
+            updateAppearance(rowHovered: rowHovered)
+        }
+        onPointerHoverChanged?(true)
+        super.mouseMoved(with: event)
+    }
+
+    override func mouseExited(with event: NSEvent) {
+        isPointerInside = false
+        updateAppearance(rowHovered: rowHovered)
+        onPointerHoverChanged?(false)
+        super.mouseExited(with: event)
+    }
+
+    func updateAppearance(rowHovered: Bool) {
+        self.rowHovered = rowHovered
+        alphaValue = rowHovered ? 0.88 : 0.32
+        contentTintColor = NSColor.white.withAlphaComponent(isPointerInside ? 0.88 : (rowHovered ? 0.66 : 0.48))
+        let backgroundAlpha: CGFloat
+        if isPointerInside {
+            backgroundAlpha = 0.082
+        } else if rowHovered {
+            backgroundAlpha = 0.020
+        } else {
+            backgroundAlpha = 0
+        }
+        layer?.backgroundColor = NSColor.white.withAlphaComponent(backgroundAlpha).cgColor
     }
 }
 

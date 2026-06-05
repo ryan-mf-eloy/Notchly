@@ -71,6 +71,7 @@ final class RealtimeQuestionAnsweringFlowTests: XCTestCase {
         XCTAssertTrue(deleteButton.isEnabled)
 
         copyButton.click()
+        deleteButton.click()
     }
 
     @MainActor

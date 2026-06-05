@@ -138,14 +138,15 @@ struct VoiceActivityDetector: Sendable {
         let lowEnergySpeechOnset = onsetSpeechShapeLikely &&
             features.rms >= max(sensitivity.onsetRMSFloor, adaptiveNoiseFloor * 1.02) &&
             features.peak >= sensitivity.onsetPeakFloor
-        let recentlyHadSpeech = lastSpeechAtBySource[source].map { timestamp.timeIntervalSince($0) <= 0.85 } ?? false
+        let continuationWindow: TimeInterval = source == .system ? 1.15 : 1.05
+        let recentlyHadSpeech = lastSpeechAtBySource[source].map { timestamp.timeIntervalSince($0) <= continuationWindow } ?? false
         let lowEnergySpeechContinuation = recentlyHadSpeech &&
-            features.zeroCrossingRate > 0.008 &&
-            features.zeroCrossingRate < 0.50 &&
-            features.dynamicRange > sensitivity.minimumSpeechDynamicRange * 0.48 &&
-            features.envelopeVariation > 0.006 &&
-            features.rms >= max(sensitivity.silenceRMSFloor * 0.66, adaptiveNoiseFloor * 0.14) &&
-            (features.peak >= sensitivity.silencePeakFloor * 1.32 || snrDb >= -18.0)
+            features.zeroCrossingRate > 0.007 &&
+            features.zeroCrossingRate < 0.52 &&
+            features.dynamicRange > sensitivity.minimumSpeechDynamicRange * 0.40 &&
+            features.envelopeVariation > 0.0045 &&
+            features.rms >= max(sensitivity.silenceRMSFloor * 0.52, adaptiveNoiseFloor * 0.10) &&
+            (features.peak >= sensitivity.silencePeakFloor * 1.08 || snrDb >= -20.0)
 
         let state: VoiceActivityState
         let probability: Double

@@ -82,12 +82,12 @@ struct TranscriptLiveView: View {
                     .textSelection(.enabled)
             }
         }
-        .padding(.vertical, 4)
-        .padding(.horizontal, 5)
+        .padding(.vertical, 3)
+        .padding(.horizontal, 4)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(
             RoundedRectangle(cornerRadius: 6, style: .continuous)
-                .fill(Color.white.opacity(isHovered ? 0.064 : 0))
+                .fill(Color.white.opacity(isHovered ? 0.072 : 0))
         )
         .overlay(alignment: .topTrailing) {
             if onCopySegment != nil || onDeleteSegment != nil {
@@ -96,8 +96,8 @@ struct TranscriptLiveView: View {
                     onCopy: { onCopySegment?(segment) },
                     onDelete: { onDeleteSegment?(segment) }
                 )
-                .padding(.top, 4)
-                .padding(.trailing, 4)
+                .padding(.top, 2)
+                .padding(.trailing, 3)
             }
         }
         .contentShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
@@ -144,7 +144,7 @@ private struct TranscriptInlineActions: View {
                 action: onDelete
             )
         }
-        .opacity(isVisible ? 0.88 : 0.36)
+        .opacity(isVisible ? 0.88 : 0.32)
         .allowsHitTesting(true)
         .animation(nil, value: isVisible)
     }
@@ -163,14 +163,14 @@ private struct TranscriptInlineActionButton: View {
             Image(systemName: systemName)
                 .font(.system(size: 7.0, weight: .regular))
                 .foregroundStyle(Color.white.opacity(isHovered ? 0.82 : 0.58))
-                .frame(width: 14, height: 14)
+                .frame(width: 18, height: 18)
                 .background(
-                    RoundedRectangle(cornerRadius: 3, style: .continuous)
-                        .fill(Color.white.opacity(isHovered ? 0.056 : 0))
+                    RoundedRectangle(cornerRadius: 4, style: .continuous)
+                        .fill(Color.white.opacity(isHovered ? 0.082 : 0.020))
                 )
         }
         .buttonStyle(.plain)
-        .contentShape(RoundedRectangle(cornerRadius: 3, style: .continuous))
+        .contentShape(RoundedRectangle(cornerRadius: 4, style: .continuous))
         .help(accessibilityLabel)
         .accessibilityLabel(accessibilityLabel)
         .accessibilityIdentifier(accessibilityIdentifier)

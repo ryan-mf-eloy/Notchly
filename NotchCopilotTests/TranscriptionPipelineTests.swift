@@ -503,32 +503,43 @@ final class TranscriptionPipelineTests: XCTestCase {
     }
 
     func testVoiceActivityDetectorKeepsLowAudioSpeechContinuationAfterActiveSpeech() {
-        let cases: [(source: TranscriptAudioSource, tailAmplitude: Float)] = [
-            (.microphone, 0.00020),
-            (.system, 0.00016)
+        let cases: [(source: TranscriptAudioSource, firstTailAmplitude: Float, secondTailAmplitude: Float)] = [
+            (.microphone, 0.00020, 0.00014),
+            (.system, 0.00016, 0.00011)
         ]
 
         for testCase in cases {
             var detector = VoiceActivityDetector()
+            let start = Date()
             let activeSpeech = TranscriptionAudioFixtureGenerator.speechLikeBuffer(
                 amplitude: 0.004,
                 source: testCase.source,
                 offset: 0
             )
-            XCTAssertTrue(detector.analyze(activeSpeech).shouldForwardToASR)
+            XCTAssertTrue(detector.analyze(activeSpeech, now: start).shouldForwardToASR)
 
-            let weakTail = TranscriptionAudioFixtureGenerator.speechLikeBuffer(
-                amplitude: testCase.tailAmplitude,
+            let firstWeakTail = TranscriptionAudioFixtureGenerator.speechLikeBuffer(
+                amplitude: testCase.firstTailAmplitude,
                 source: testCase.source,
                 offset: 1
             )
-            let tailDecision = detector.analyze(weakTail)
-            XCTAssertTrue(tailDecision.shouldForwardToASR, "\(testCase.source.displayName): \(tailDecision)")
-            XCTAssertEqual(tailDecision.state, .lowAudio)
-            XCTAssertEqual(tailDecision.reason, "low_audio_speech_continuation")
+            let firstTailDecision = detector.analyze(firstWeakTail, now: start.addingTimeInterval(0.52))
+            XCTAssertTrue(firstTailDecision.shouldForwardToASR, "\(testCase.source.displayName): \(firstTailDecision)")
+            XCTAssertEqual(firstTailDecision.state, .lowAudio)
+            XCTAssertEqual(firstTailDecision.reason, "low_audio_speech_continuation")
+
+            let secondWeakTail = TranscriptionAudioFixtureGenerator.speechLikeBuffer(
+                amplitude: testCase.secondTailAmplitude,
+                source: testCase.source,
+                offset: 2
+            )
+            let secondTailDecision = detector.analyze(secondWeakTail, now: start.addingTimeInterval(1.04))
+            XCTAssertTrue(secondTailDecision.shouldForwardToASR, "\(testCase.source.displayName): \(secondTailDecision)")
+            XCTAssertEqual(secondTailDecision.state, .lowAudio)
+            XCTAssertEqual(secondTailDecision.reason, "low_audio_speech_continuation")
 
             var isolatedDetector = VoiceActivityDetector()
-            let isolatedDecision = isolatedDetector.analyze(weakTail)
+            let isolatedDecision = isolatedDetector.analyze(secondWeakTail)
             XCTAssertFalse(isolatedDecision.shouldForwardToASR, "Isolated weak audio should not bypass the speech gate: \(isolatedDecision)")
         }
     }
@@ -774,11 +785,19 @@ final class TranscriptionPipelineTests: XCTestCase {
 
     func testASRStabilitySmootherRejectsShorterDraftRegressionAndLoops() {
         var smoother = ASRStabilitySmoother()
-        let draft = segment(text: "hello world this is the stable partial", isFinal: false)
+        let draft = segment(text: "hello world this is the stable partial", isFinal: false, start: 0, end: 2.8)
         XCTAssertEqual(smoother.observe(draft).count, 1)
 
         let regression = segment(id: draft.id, text: "hello world", isFinal: false)
         XCTAssertTrue(smoother.observe(regression).isEmpty)
+
+        let shortFinal = segment(id: draft.id, text: "hello world this", isFinal: true, start: 0, end: 1.2)
+        let promoted = smoother.observe(shortFinal)
+        XCTAssertEqual(promoted.count, 1)
+        XCTAssertEqual(promoted.first?.text, draft.text)
+        XCTAssertTrue(promoted.first?.isFinal == true)
+        XCTAssertEqual(promoted.first?.retentionReason, .appleDraftPromoted)
+        XCTAssertEqual(promoted.first?.endTime, draft.endTime)
 
         let loop = segment(text: "thank you thank you thank you thank you thank you", isFinal: true)
         XCTAssertTrue(smoother.observe(loop).isEmpty)
