@@ -498,7 +498,8 @@ final class SpeechAnalyzerTranscriptionService: TranscriptionService {
                     now: now,
                     lastSignificantAudioAt: self.lastSignificantAudioAt,
                     lastSegmentAt: self.lastSegmentEmittedAt,
-                    lastRestartAt: self.lastWatchdogNudgeAt
+                    lastRestartAt: self.lastWatchdogNudgeAt,
+                    activeWindowStartedAt: self.analysisStartedAt
                 ) {
                     self.lastWatchdogNudgeAt = now
                     AppLog.audio.info("SpeechAnalyzer watchdog activating SFSpeech fallback after audio without transcript")
@@ -918,7 +919,8 @@ final class AppleSpeechTranscriptionService: NSObject, TranscriptionService {
                           now: now,
                           lastSignificantAudioAt: lastSignificantAudioAt,
                           lastSegmentAt: lastSegmentEmittedAt,
-                          lastRestartAt: lastRestartAt
+                          lastRestartAt: lastRestartAt,
+                          activeWindowStartedAt: activeWindowStartedAt
                       ) {
                 AppLog.audio.info("Apple Speech watchdog restarting recognition window after audio without transcript")
                 scheduleRestart(delay: .milliseconds(0), reason: .watchdogRestart)

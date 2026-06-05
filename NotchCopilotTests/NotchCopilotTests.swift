@@ -3888,7 +3888,8 @@ final class NotchCopilotTests: XCTestCase {
             significantAudioRMS: 0.0025,
             significantAudioWindow: 5,
             noSegmentWindow: 4,
-            minimumRestartInterval: 2
+            minimumRestartInterval: 2,
+            minimumActiveWindowBeforeRestart: 1.2
         )
         let now = Date(timeIntervalSince1970: 10)
 
@@ -3896,19 +3897,29 @@ final class NotchCopilotTests: XCTestCase {
             now: now,
             lastSignificantAudioAt: Date(timeIntervalSince1970: 8),
             lastSegmentAt: Date(timeIntervalSince1970: 2),
-            lastRestartAt: Date(timeIntervalSince1970: 0)
+            lastRestartAt: Date(timeIntervalSince1970: 0),
+            activeWindowStartedAt: Date(timeIntervalSince1970: 8.5)
+        ))
+        XCTAssertFalse(policy.shouldRestart(
+            now: now,
+            lastSignificantAudioAt: Date(timeIntervalSince1970: 8),
+            lastSegmentAt: Date(timeIntervalSince1970: 2),
+            lastRestartAt: Date(timeIntervalSince1970: 0),
+            activeWindowStartedAt: Date(timeIntervalSince1970: 9.2)
         ))
         XCTAssertFalse(policy.shouldRestart(
             now: now,
             lastSignificantAudioAt: Date(timeIntervalSince1970: 1),
             lastSegmentAt: Date(timeIntervalSince1970: 2),
-            lastRestartAt: Date(timeIntervalSince1970: 0)
+            lastRestartAt: Date(timeIntervalSince1970: 0),
+            activeWindowStartedAt: Date(timeIntervalSince1970: 8.5)
         ))
         XCTAssertFalse(policy.shouldRestart(
             now: now,
             lastSignificantAudioAt: Date(timeIntervalSince1970: 8),
             lastSegmentAt: Date(timeIntervalSince1970: 9),
-            lastRestartAt: Date(timeIntervalSince1970: 0)
+            lastRestartAt: Date(timeIntervalSince1970: 0),
+            activeWindowStartedAt: Date(timeIntervalSince1970: 8.5)
         ))
     }
 

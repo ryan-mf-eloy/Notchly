@@ -786,13 +786,18 @@ struct SpeechRecognitionWatchdogPolicy: Sendable, Equatable {
     var significantAudioWindow: TimeInterval = 5
     var noSegmentWindow: TimeInterval = 4
     var minimumRestartInterval: TimeInterval = 2
+    var minimumActiveWindowBeforeRestart: TimeInterval = 1.2
 
     func shouldRestart(
         now: Date,
         lastSignificantAudioAt: Date,
         lastSegmentAt: Date,
-        lastRestartAt: Date
+        lastRestartAt: Date,
+        activeWindowStartedAt: Date = .distantPast
     ) -> Bool {
+        if activeWindowStartedAt != .distantPast {
+            guard now.timeIntervalSince(activeWindowStartedAt) >= minimumActiveWindowBeforeRestart else { return false }
+        }
         guard now.timeIntervalSince(lastSignificantAudioAt) <= significantAudioWindow else { return false }
         guard now.timeIntervalSince(lastSegmentAt) >= noSegmentWindow else { return false }
         guard now.timeIntervalSince(lastRestartAt) >= minimumRestartInterval else { return false }

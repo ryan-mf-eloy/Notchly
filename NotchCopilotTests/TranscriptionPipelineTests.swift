@@ -1,5 +1,6 @@
 import AVFoundation
 import CryptoKit
+import Speech
 import XCTest
 @testable import NotchCopilot
 
@@ -8,12 +9,14 @@ private enum CaptureHarnessOptIn {
         case microphone
         case systemAudio
         case whisperKitRefiner
+        case appleSpeechASR
 
         var environmentKey: String {
             switch self {
             case .microphone: "RUN_MICROPHONE_CAPTURE_HARNESS"
             case .systemAudio: "RUN_SYSTEM_AUDIO_CAPTURE_HARNESS"
             case .whisperKitRefiner: "RUN_WHISPERKIT_REFINER_HARNESS"
+            case .appleSpeechASR: "RUN_APPLE_SPEECH_ASR_HARNESS"
             }
         }
 
@@ -22,6 +25,7 @@ private enum CaptureHarnessOptIn {
             case .microphone: "/private/tmp/notchly-run-microphone-capture-harness"
             case .systemAudio: "/private/tmp/notchly-run-system-audio-capture-harness"
             case .whisperKitRefiner: "/private/tmp/notchly-run-whisperkit-refiner-harness"
+            case .appleSpeechASR: "/private/tmp/notchly-run-apple-speech-asr-harness"
             }
         }
     }
@@ -204,6 +208,90 @@ final class TranscriptionPipelineTests: XCTestCase {
                 outcome.segment.text.localizedCaseInsensitiveContains("Core ML"),
             "Refined text should preserve meeting vocabulary: \(outcome.segment.text)"
         )
+    }
+
+    func testAppleSpeechHarnessTranscribesGeneratedSpeechWhenOptedIn() async throws {
+        guard CaptureHarnessOptIn.isEnabled(.appleSpeechASR) else {
+            throw XCTSkip(CaptureHarnessOptIn.skipMessage(for: .appleSpeechASR))
+        }
+        guard FileManager.default.fileExists(atPath: "/usr/bin/say") else {
+            throw XCTSkip("The Apple Speech ASR harness needs /usr/bin/say to generate deterministic local speech audio.")
+        }
+        guard SFSpeechRecognizer.authorizationStatus() == .authorized else {
+            throw XCTSkip("Speech Recognition permission is required for RUN_APPLE_SPEECH_ASR_HARNESS=1.")
+        }
+        let locale = Locale(identifier: "en-US")
+        guard let recognizer = SFSpeechRecognizer(locale: locale), recognizer.isAvailable else {
+            throw XCTSkip("Apple Speech recognizer for en-US is unavailable on this machine.")
+        }
+
+        let spokenText = "Notchly uses SpeechAnalyzer and Core ML for local transcription"
+        let buffers = try Self.generatedSpeechBuffers(text: spokenText, source: .microphone)
+        XCTAssertGreaterThan(buffers.count, 2)
+
+        let service = AppleSpeechTranscriptionService(allowsAutomaticLanguageSwitching: false)
+        let collector = SegmentCollector()
+        let startedAt = Date()
+        let collectTask = Task {
+            for await segment in service.segments {
+                await collector.append(segment)
+            }
+        }
+        defer { collectTask.cancel() }
+
+        let config = TranscriptionConfig(
+            languageCode: "en-US",
+            requiresOnDeviceRecognition: recognizer.supportsOnDeviceRecognition,
+            meetingId: UUID(),
+            contextualStrings: ["Notchly", "SpeechAnalyzer", "Core ML"],
+            speechContext: SpeechRecognitionContext(
+                locale: "en-US",
+                terms: [
+                    SpeechContextTerm(text: "Notchly", locale: "en-US", category: .product, weight: 3, pronunciationXSAMPA: nil, source: "apple-speech-harness"),
+                    SpeechContextTerm(text: "SpeechAnalyzer", locale: "en-US", category: .technicalTerm, weight: 3, pronunciationXSAMPA: nil, source: "apple-speech-harness"),
+                    SpeechContextTerm(text: "Core ML", locale: "en-US", category: .technicalTerm, weight: 3, pronunciationXSAMPA: nil, source: "apple-speech-harness")
+                ]
+            ),
+            audioSource: .microphone,
+            accuracyMode: .highAccuracy,
+            commitPolicy: .accurate,
+            featureFlags: TranscriptionFeatureFlags(
+                advancedAudioConditioningEnabled: true,
+                vadGatingEnabled: true,
+                transcriptionMetricsEnabled: true
+            )
+        )
+
+        try await service.startTranscription(audioStream: Self.timedStream(buffers, nanosecondsBetweenBuffers: 80_000_000), config: config)
+        let segments = await Self.collectSegments(
+            from: collector,
+            minimumCount: 1,
+            timeoutNanoseconds: 8_000_000_000,
+            isSatisfied: { segments in
+                let normalizedText = SpeechVocabularyTerm.normalizedKey(
+                    segments
+                        .map(\.text)
+                        .joined(separator: " ")
+                )
+                return normalizedText.contains("notchly") ||
+                    normalizedText.contains("core ml") ||
+                    normalizedText.contains("speechanalyzer")
+            }
+        )
+        await service.stop()
+
+        let joined = segments
+            .map(\.text)
+            .joined(separator: " ")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        XCTAssertFalse(joined.isEmpty, "Apple Speech should emit transcript text for generated speech.")
+        XCTAssertTrue(
+            SpeechVocabularyTerm.normalizedKey(joined).contains("notchly") ||
+                SpeechVocabularyTerm.normalizedKey(joined).contains("core ml") ||
+                SpeechVocabularyTerm.normalizedKey(joined).contains("speechanalyzer"),
+            "Apple Speech text should preserve at least one contextual meeting term. Got: \(joined)"
+        )
+        XCTAssertLessThan(Date().timeIntervalSince(startedAt), 9.0)
     }
 
     func testWhisperKitRefinerHarnessMeasuresGeneratedSpeechBenchmarkWhenOptedIn() async throws {
@@ -5644,8 +5732,50 @@ final class TranscriptionPipelineTests: XCTestCase {
         }
     }
 
+    private static func timedStream(
+        _ buffers: [NotchCopilot.AudioBuffer],
+        nanosecondsBetweenBuffers: UInt64
+    ) -> AsyncStream<NotchCopilot.AudioBuffer> {
+        AsyncStream { continuation in
+            let task = Task {
+                for buffer in buffers {
+                    if Task.isCancelled { break }
+                    continuation.yield(buffer)
+                    if nanosecondsBetweenBuffers > 0 {
+                        try? await Task.sleep(nanoseconds: nanosecondsBetweenBuffers)
+                    }
+                }
+                continuation.finish()
+            }
+            continuation.onTermination = { @Sendable _ in
+                task.cancel()
+            }
+        }
+    }
+
     private static func emptyStream() -> AsyncStream<NotchCopilot.AudioBuffer> {
         AsyncStream { $0.finish() }
+    }
+
+    private static func collectSegments(
+        from collector: SegmentCollector,
+        minimumCount: Int,
+        timeoutNanoseconds: UInt64,
+        isSatisfied: (([TranscriptSegment]) -> Bool)? = nil
+    ) async -> [TranscriptSegment] {
+        let pollInterval: UInt64 = 50_000_000
+        var waited: UInt64 = 0
+        while waited < timeoutNanoseconds {
+            let values = await collector.values
+            if values.count >= minimumCount {
+                if isSatisfied?(values) ?? true {
+                    break
+                }
+            }
+            try? await Task.sleep(nanoseconds: pollInterval)
+            waited += pollInterval
+        }
+        return await collector.values
     }
 
     private static func collectBuffers(
@@ -5849,6 +5979,10 @@ private actor SegmentCollector {
 
     var values: [TranscriptSegment] {
         collected
+    }
+
+    var count: Int {
+        collected.count
     }
 
     func append(_ segment: TranscriptSegment) {
