@@ -411,7 +411,7 @@ final class SpeechAnalyzerTranscriptionService: TranscriptionService {
         fallbackPreRollBuffer.append(buffer)
         fallbackAudioContinuation?.yield(buffer)
         let activity = activityPolicy.classify(snapshot)
-        if activity.isSignificant {
+        if activity.shouldDriveRecognition {
             lastSignificantAudioAt = buffer.createdAt
         }
         guard fallbackService == nil else { return }
@@ -908,7 +908,7 @@ final class AppleSpeechTranscriptionService: NSObject, TranscriptionService {
         if qualitySnapshot.isClipping {
             AppLog.audio.info("Apple Speech audio clipping detected source=\(qualitySnapshot.source.displayName, privacy: .public)")
         }
-        let speechActivity = activityPolicy.classify(qualitySnapshot).isSignificant
+        let speechActivity = activityPolicy.classify(qualitySnapshot).shouldDriveRecognition
         if speechActivity {
             lastSignificantAudioAt = now
             if task == nil, recognizer != nil, activeConfig != nil, !isStopping {

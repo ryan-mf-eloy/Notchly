@@ -58,31 +58,31 @@ struct TranscriptLiveView: View {
 
             if let translatedText = translatedDisplayText(for: segment) {
                 Text(translatedText)
-                    .font(.system(size: segment.audioSource.isUserSide ? 13.6 : 14.4, weight: .regular))
+                    .font(.system(size: segment.audioSource.isUserSide ? 13.2 : 13.8, weight: .regular))
                     .foregroundStyle(MinimalTheme.historyText.opacity(0.96))
-                    .multilineTextAlignment(.leading)
-                    .lineSpacing(2.5)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .textSelection(.enabled)
-
-                Text(segment.text)
-                    .font(.system(size: 12.2, weight: .regular))
-                    .foregroundStyle(MinimalTheme.historyMuted.opacity(0.72))
                     .multilineTextAlignment(.leading)
                     .lineSpacing(2)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .textSelection(.enabled)
+
+                Text(segment.text)
+                    .font(.system(size: 12.0, weight: .regular))
+                    .foregroundStyle(MinimalTheme.historyMuted.opacity(0.72))
+                    .multilineTextAlignment(.leading)
+                    .lineSpacing(1.6)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .textSelection(.enabled)
             } else {
                 Text(segment.text)
-                    .font(.system(size: segment.audioSource.isUserSide ? 13.6 : 14.4, weight: .regular))
+                    .font(.system(size: segment.audioSource.isUserSide ? 13.2 : 13.8, weight: .regular))
                     .foregroundStyle(transcriptColor(for: segment))
                     .multilineTextAlignment(.leading)
-                    .lineSpacing(2.5)
+                    .lineSpacing(2)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .textSelection(.enabled)
             }
         }
-        .padding(.vertical, 8)
+        .padding(.vertical, 6)
         .padding(.horizontal, 6)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(

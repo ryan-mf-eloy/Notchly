@@ -3941,6 +3941,26 @@ final class NotchCopilotTests: XCTestCase {
         XCTAssertTrue(policy.classify(subtleSnapshot).isSignificant)
     }
 
+    func testSpeechActivityPolicyUsesLowAudioToDriveRecognitionWithoutConfirmingSpeech() {
+        let policy = SpeechActivityPolicy()
+        let lowAudio = SpeechAudioQualitySnapshot(
+            source: .microphone,
+            rms: 0.00042,
+            peak: 0.0016,
+            isClipping: false,
+            isTooQuiet: true,
+            noiseFloor: 0.00024,
+            gapCount: 0,
+            lastAudioAt: Date()
+        )
+
+        let activity = policy.classify(lowAudio)
+
+        XCTAssertEqual(activity, .lowAudio)
+        XCTAssertFalse(activity.isSignificant)
+        XCTAssertTrue(activity.shouldDriveRecognition)
+    }
+
     func testAppleSpeechWindowControllerPreservesSegmentOnRestartAndRotation() {
         var controller = AppleSpeechWindowController()
         let now = Date(timeIntervalSince1970: 100)

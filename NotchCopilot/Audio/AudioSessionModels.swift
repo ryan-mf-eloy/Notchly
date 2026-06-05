@@ -454,6 +454,10 @@ enum SpeechActivityLevel: String, Sendable, Equatable {
     var isSignificant: Bool {
         self == .speechLikely || self == .speechActive
     }
+
+    var shouldDriveRecognition: Bool {
+        self == .lowAudio || isSignificant
+    }
 }
 
 struct SpeechActivityPolicy: Sendable, Equatable {

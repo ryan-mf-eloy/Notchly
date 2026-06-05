@@ -2428,8 +2428,8 @@ private enum TranscriptLayout {
     ) -> (rows: [Row], documentHeight: CGFloat) {
         let rowWidth = max(1, min(width - 24, showTranslatedText ? 492 : 520))
         let rowHorizontalInset: CGFloat = 6
-        let rowVerticalInset: CGFloat = 3
-        let actionReserve: CGFloat = 44
+        let rowVerticalInset: CGFloat = 2.5
+        let actionReserve: CGFloat = 42
         let measuredTextWidth = max(1, rowWidth - actionReserve)
         let rowX = max(0, (width - rowWidth) / 2)
         let verticalPadding: CGFloat = 0
@@ -2497,7 +2497,7 @@ private enum TranscriptLayout {
                             questionHighlights: questionHighlights
                         ),
                         copyText: copyText(originalText: pair.original, translatedText: pair.translation),
-                        spacingAfter: index == pairs.count - 1 ? 14 : 8
+                        spacingAfter: index == pairs.count - 1 ? 11 : 6
                     )
                 }
             }
@@ -2515,7 +2515,7 @@ private enum TranscriptLayout {
                         questionHighlights: questionHighlights
                     ),
                     copyText: chunk,
-                    spacingAfter: index == chunks.count - 1 ? 14 : 8
+                    spacingAfter: index == chunks.count - 1 ? 11 : 6
                 )
             }
         }
@@ -2533,7 +2533,7 @@ private enum TranscriptLayout {
                     questionHighlights: questionHighlights
                 ),
                 copyText: chunk,
-                spacingAfter: index == chunks.count - 1 ? 13 : 7
+                spacingAfter: index == chunks.count - 1 ? 10 : 5
             )
         }
     }
@@ -2561,18 +2561,18 @@ private enum TranscriptLayout {
         let translatedColor = NSColor.white.withAlphaComponent(0.96)
         let originalSecondaryColor = NSColor.white.withAlphaComponent(0.46)
         let primaryParagraph = NSMutableParagraphStyle()
-        primaryParagraph.lineSpacing = 3.2
-        primaryParagraph.paragraphSpacing = translatedText == nil ? 0.8 : 3.2
+        primaryParagraph.lineSpacing = 2.4
+        primaryParagraph.paragraphSpacing = translatedText == nil ? 0.5 : 2.4
         let secondaryParagraph = NSMutableParagraphStyle()
-        secondaryParagraph.lineSpacing = 3.0
-        secondaryParagraph.paragraphSpacing = 0.8
+        secondaryParagraph.lineSpacing = 2.0
+        secondaryParagraph.paragraphSpacing = 0.5
 
         if let translatedText {
             let translatedStart = result.length
             result.append(NSAttributedString(
                 string: translatedText,
                 attributes: [
-                    .font: NSFont.systemFont(ofSize: translationOnly ? 15.1 : 14.7, weight: .light),
+                    .font: NSFont.systemFont(ofSize: translationOnly ? 14.6 : 14.2, weight: .light),
                     .foregroundColor: translatedColor,
                     .paragraphStyle: primaryParagraph
                 ]
@@ -2590,7 +2590,7 @@ private enum TranscriptLayout {
                 result.append(NSAttributedString(
                     string: originalText,
                     attributes: [
-                        .font: NSFont.systemFont(ofSize: 12.8, weight: .light),
+                        .font: NSFont.systemFont(ofSize: 12.4, weight: .light),
                         .foregroundColor: originalSecondaryColor,
                         .paragraphStyle: secondaryParagraph
                     ]
@@ -2608,7 +2608,7 @@ private enum TranscriptLayout {
             result.append(NSAttributedString(
                 string: originalText,
                 attributes: [
-                    .font: NSFont.systemFont(ofSize: segment.audioSource.isUserSide ? 14.7 : 15.1, weight: .light),
+                    .font: NSFont.systemFont(ofSize: segment.audioSource.isUserSide ? 14.2 : 14.6, weight: .light),
                     .foregroundColor: transcriptionColor,
                     .paragraphStyle: primaryParagraph
                 ]
