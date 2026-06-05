@@ -2047,6 +2047,8 @@ private final class TranscriptScrollView: NSScrollView {
 private final class FlippedTranscriptDocumentView: NSView {
     override var isFlipped: Bool { true }
     private var rowViewsByID: [String: TranscriptRowView] = [:]
+    private var hoveredRowID: String?
+    private var trackingArea: NSTrackingArea?
 
     func replaceRows(
         _ rows: [TranscriptLayout.Row],
@@ -2081,6 +2083,70 @@ private final class FlippedTranscriptDocumentView: NSView {
             }
         }
 
+        updateHoveredRowFromCurrentMouse()
+    }
+
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        if let trackingArea {
+            removeTrackingArea(trackingArea)
+        }
+        let area = NSTrackingArea(
+            rect: bounds,
+            options: [.mouseEnteredAndExited, .mouseMoved, .activeInActiveApp, .inVisibleRect],
+            owner: self,
+            userInfo: nil
+        )
+        addTrackingArea(area)
+        trackingArea = area
+    }
+
+    override func mouseEntered(with event: NSEvent) {
+        updateHoveredRow(at: convert(event.locationInWindow, from: nil))
+    }
+
+    override func mouseMoved(with event: NSEvent) {
+        updateHoveredRow(at: convert(event.locationInWindow, from: nil))
+    }
+
+    override func mouseExited(with event: NSEvent) {
+        let point = convert(event.locationInWindow, from: nil)
+        if bounds.contains(point) {
+            updateHoveredRow(at: point)
+        } else {
+            setHoveredRow(nil)
+        }
+    }
+
+    private func updateHoveredRowFromCurrentMouse() {
+        guard let window else {
+            setHoveredRow(nil)
+            return
+        }
+        updateHoveredRow(at: convert(window.mouseLocationOutsideOfEventStream, from: nil))
+    }
+
+    private func updateHoveredRow(at point: CGPoint) {
+        guard bounds.contains(point) else {
+            setHoveredRow(nil)
+            return
+        }
+        let hovered = rowViewsByID.values
+            .filter { !$0.isHidden && $0.alphaValue > 0 }
+            .sorted { $0.frame.minY < $1.frame.minY }
+            .first { $0.hoverFrameInDocument.contains(point) }
+        setHoveredRow(hovered?.rowID)
+    }
+
+    private func setHoveredRow(_ rowID: String?) {
+        guard hoveredRowID != rowID else { return }
+        if let hoveredRowID {
+            rowViewsByID[hoveredRowID]?.setHovered(false)
+        }
+        hoveredRowID = rowID
+        if let rowID {
+            rowViewsByID[rowID]?.setHovered(true)
+        }
     }
 }
 
@@ -2088,7 +2154,7 @@ private final class TranscriptRowView: NSView {
     override var isFlipped: Bool { true }
 
     private enum LayoutMetrics {
-        static let actionSize: CGFloat = 15
+        static let actionSize: CGFloat = 14
         static let actionGap: CGFloat = 2
         static let actionRightInset: CGFloat = 5
         static let textLeftInset: CGFloat = 6
@@ -2099,13 +2165,15 @@ private final class TranscriptRowView: NSView {
     private let label = NSTextField(labelWithString: "")
     private let copyButton = NSButton()
     private let deleteButton = NSButton()
-    private var trackingArea: NSTrackingArea?
     private var row: TranscriptLayout.Row
     private var onCopyBlock: (TranscriptSegment, String) -> Void
     private var onDeleteSegment: (TranscriptSegment) -> Void
     private var isHovered = false
 
     var rowID: String { row.id }
+    var hoverFrameInDocument: CGRect {
+        frame.insetBy(dx: LayoutMetrics.hoverInset, dy: min(-3, LayoutMetrics.hoverInset / 2))
+    }
 
     init(
         row: TranscriptLayout.Row,
@@ -2146,37 +2214,6 @@ private final class TranscriptRowView: NSView {
             width: LayoutMetrics.actionSize,
             height: LayoutMetrics.actionSize
         )
-    }
-
-    override func updateTrackingAreas() {
-        super.updateTrackingAreas()
-        if let trackingArea {
-            removeTrackingArea(trackingArea)
-        }
-        let area = NSTrackingArea(
-            rect: bounds,
-            options: [.mouseEnteredAndExited, .mouseMoved, .activeInActiveApp, .inVisibleRect],
-            owner: self,
-            userInfo: nil
-        )
-        addTrackingArea(area)
-        trackingArea = area
-    }
-
-    override func mouseEntered(with event: NSEvent) {
-        setHovered(true)
-    }
-
-    override func mouseMoved(with event: NSEvent) {
-        setHovered(true)
-    }
-
-    override func mouseExited(with event: NSEvent) {
-        let point = convert(event.locationInWindow, from: nil)
-        if bounds.insetBy(dx: LayoutMetrics.hoverInset, dy: LayoutMetrics.hoverInset).contains(point) {
-            return
-        }
-        setHovered(false)
     }
 
     private func configure() {
@@ -2229,18 +2266,18 @@ private final class TranscriptRowView: NSView {
         button.layer?.cornerRadius = 3.5
         button.layer?.backgroundColor = NSColor.white.withAlphaComponent(0.045).cgColor
         if let image = NSImage(systemSymbolName: systemName, accessibilityDescription: tooltip) {
-            button.image = image.withSymbolConfiguration(.init(pointSize: 8.4, weight: .regular))
+            button.image = image.withSymbolConfiguration(.init(pointSize: 7.8, weight: .regular))
         }
         button.isEnabled = true
     }
 
-    private func setHovered(_ hovered: Bool) {
+    func setHovered(_ hovered: Bool) {
         isHovered = hovered
-        layer?.backgroundColor = NSColor.white.withAlphaComponent(hovered ? 0.082 : 0.018).cgColor
-        copyButton.alphaValue = hovered ? 0.92 : 0.24
-        deleteButton.alphaValue = hovered ? 0.92 : 0.24
-        copyButton.layer?.backgroundColor = NSColor.white.withAlphaComponent(hovered ? 0.095 : 0.036).cgColor
-        deleteButton.layer?.backgroundColor = NSColor.white.withAlphaComponent(hovered ? 0.095 : 0.036).cgColor
+        layer?.backgroundColor = NSColor.white.withAlphaComponent(hovered ? 0.076 : 0).cgColor
+        copyButton.alphaValue = hovered ? 0.90 : 0.20
+        deleteButton.alphaValue = hovered ? 0.90 : 0.20
+        copyButton.layer?.backgroundColor = NSColor.white.withAlphaComponent(hovered ? 0.085 : 0.024).cgColor
+        deleteButton.layer?.backgroundColor = NSColor.white.withAlphaComponent(hovered ? 0.085 : 0.024).cgColor
     }
 
     @objc private func copyTranscriptBlock() {

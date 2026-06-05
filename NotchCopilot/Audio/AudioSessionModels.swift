@@ -157,12 +157,22 @@ struct AudioConditioningPipeline: Sendable {
         } else {
             targetRMS = 0.045
         }
-        let minimumRMS: Float = config.audioSource == .system ? 0.00012 : 0.0006
+        let minimumRMS: Float
+        switch config.audioSource {
+        case .system:
+            minimumRMS = 0.00005
+        case .microphone:
+            minimumRMS = 0.00005
+        default:
+            minimumRMS = 0.00008
+        }
         let maxGain: Float
         if config.target == .cloudRealtime {
             maxGain = 5.0
         } else if config.audioSource == .system {
-            maxGain = 2.6
+            maxGain = 3.2
+        } else if config.audioSource == .microphone {
+            maxGain = 4.2
         } else {
             maxGain = 3.5
         }
@@ -398,12 +408,21 @@ struct SpeechAudioQualityMonitor: Sendable {
             lastChannelCount = channelCount
         }
 
-        if buffer.rms > 0.0012 {
+        let significantAudioFloor: Float
+        switch buffer.audioSource == .unknown ? source : buffer.audioSource {
+        case .system:
+            significantAudioFloor = 0.00035
+        case .microphone:
+            significantAudioFloor = 0.00045
+        default:
+            significantAudioFloor = 0.00050
+        }
+        if buffer.rms > significantAudioFloor {
             lastAudioAt = now
         }
 
         if noiseFloor == 0 {
-            noiseFloor = buffer.rms
+            noiseFloor = buffer.rms > 0 ? min(buffer.rms, max(buffer.rms * 0.35, 0.0002)) : 0
         } else if buffer.rms < 0.012 {
             noiseFloor = noiseFloor * 0.94 + buffer.rms * 0.06
         }
@@ -440,11 +459,11 @@ enum SpeechActivityLevel: String, Sendable, Equatable {
 struct SpeechActivityPolicy: Sendable, Equatable {
     var preRollDuration: TimeInterval = 1.7
     var hangoverDuration: TimeInterval = 2.2
-    var absoluteSpeechRMS: Float = 0.00065
-    var likelySpeechRMS: Float = 0.00105
-    var activeSpeechRMS: Float = 0.0042
-    var peakAssistThreshold: Float = 0.009
-    var noiseFloorLift: Float = 1.70
+    var absoluteSpeechRMS: Float = 0.00045
+    var likelySpeechRMS: Float = 0.00075
+    var activeSpeechRMS: Float = 0.0036
+    var peakAssistThreshold: Float = 0.0065
+    var noiseFloorLift: Float = 1.55
 
     func classify(_ snapshot: SpeechAudioQualitySnapshot) -> SpeechActivityLevel {
         let rms = max(snapshot.rms, 0)

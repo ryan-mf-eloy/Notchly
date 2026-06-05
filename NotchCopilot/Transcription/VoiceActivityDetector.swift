@@ -300,48 +300,48 @@ private struct VoiceActivitySourceSensitivity {
         switch source {
         case .system:
             VoiceActivitySourceSensitivity(
-                absoluteRMSMultiplier: 0.50,
-                noiseFloorLift: 1.45,
-                likelyPeak: 0.008,
-                activePeak: 0.060,
-                activeRMSMultiplier: 1.45,
-                activeRMSFloor: 0.0026,
-                minimumSpeechDynamicRange: 0.00035,
-                onsetRMSFloor: 0.00016,
-                onsetPeakFloor: 0.00070,
-                hangoverRMSFloor: 0.00022,
-                silenceRMSFloor: 0.000065,
-                silencePeakFloor: 0.00010
+                absoluteRMSMultiplier: 0.42,
+                noiseFloorLift: 1.30,
+                likelyPeak: 0.0065,
+                activePeak: 0.052,
+                activeRMSMultiplier: 1.36,
+                activeRMSFloor: 0.0022,
+                minimumSpeechDynamicRange: 0.00024,
+                onsetRMSFloor: 0.00011,
+                onsetPeakFloor: 0.00045,
+                hangoverRMSFloor: 0.00016,
+                silenceRMSFloor: 0.000055,
+                silencePeakFloor: 0.00008
             )
         case .microphone:
             VoiceActivitySourceSensitivity(
-                absoluteRMSMultiplier: 0.62,
-                noiseFloorLift: 1.65,
-                likelyPeak: 0.010,
-                activePeak: 0.075,
-                activeRMSMultiplier: 1.55,
-                activeRMSFloor: 0.0032,
-                minimumSpeechDynamicRange: 0.00045,
-                onsetRMSFloor: 0.00018,
-                onsetPeakFloor: 0.00090,
-                hangoverRMSFloor: 0.00028,
-                silenceRMSFloor: 0.000080,
-                silencePeakFloor: 0.00012
+                absoluteRMSMultiplier: 0.48,
+                noiseFloorLift: 1.45,
+                likelyPeak: 0.0070,
+                activePeak: 0.060,
+                activeRMSMultiplier: 1.42,
+                activeRMSFloor: 0.0024,
+                minimumSpeechDynamicRange: 0.00028,
+                onsetRMSFloor: 0.00012,
+                onsetPeakFloor: 0.00050,
+                hangoverRMSFloor: 0.00018,
+                silenceRMSFloor: 0.000060,
+                silencePeakFloor: 0.00009
             )
         default:
             VoiceActivitySourceSensitivity(
-                absoluteRMSMultiplier: 0.58,
-                noiseFloorLift: 1.55,
-                likelyPeak: 0.009,
-                activePeak: 0.068,
-                activeRMSMultiplier: 1.50,
-                activeRMSFloor: 0.0029,
-                minimumSpeechDynamicRange: 0.00040,
-                onsetRMSFloor: 0.00017,
-                onsetPeakFloor: 0.00080,
-                hangoverRMSFloor: 0.00025,
-                silenceRMSFloor: 0.000075,
-                silencePeakFloor: 0.00011
+                absoluteRMSMultiplier: 0.50,
+                noiseFloorLift: 1.45,
+                likelyPeak: 0.0075,
+                activePeak: 0.062,
+                activeRMSMultiplier: 1.44,
+                activeRMSFloor: 0.0025,
+                minimumSpeechDynamicRange: 0.00030,
+                onsetRMSFloor: 0.00013,
+                onsetPeakFloor: 0.00055,
+                hangoverRMSFloor: 0.00019,
+                silenceRMSFloor: 0.000065,
+                silencePeakFloor: 0.000095
             )
         }
     }

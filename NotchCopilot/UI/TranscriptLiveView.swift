@@ -41,7 +41,7 @@ struct TranscriptLiveView: View {
 
     private func segmentRow(_ segment: TranscriptSegment) -> some View {
         let isHovered = hoveredSegmentID == segment.id
-        return VStack(alignment: .leading, spacing: 7) {
+        return VStack(alignment: .leading, spacing: 6) {
             HStack(spacing: 8) {
                 Text(DateFormatting.duration(segment.startTime))
                     .font(.system(size: 10, weight: .medium, design: .monospaced))
@@ -82,12 +82,12 @@ struct TranscriptLiveView: View {
                     .textSelection(.enabled)
             }
         }
-        .padding(.vertical, 10)
+        .padding(.vertical, 8)
         .padding(.horizontal, 6)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(
             RoundedRectangle(cornerRadius: 6, style: .continuous)
-                .fill(Color.white.opacity(isHovered ? 0.082 : 0.018))
+                .fill(Color.white.opacity(isHovered ? 0.076 : 0))
         )
         .overlay(alignment: .topTrailing) {
             if onCopySegment != nil || onDeleteSegment != nil {
@@ -134,7 +134,7 @@ private struct TranscriptInlineActions: View {
             TranscriptInlineActionButton(systemName: "doc.on.doc", accessibilityLabel: "Copy transcript", action: onCopy)
             TranscriptInlineActionButton(systemName: "trash", accessibilityLabel: "Delete transcript", action: onDelete)
         }
-        .opacity(isVisible ? 0.92 : 0.24)
+        .opacity(isVisible ? 0.90 : 0.20)
         .allowsHitTesting(true)
         .animation(nil, value: isVisible)
     }
@@ -150,12 +150,12 @@ private struct TranscriptInlineActionButton: View {
     var body: some View {
         Button(action: action) {
             Image(systemName: systemName)
-                .font(.system(size: 8.4, weight: .regular))
+                .font(.system(size: 7.8, weight: .regular))
                 .foregroundStyle(Color.white.opacity(isHovered ? 0.84 : 0.60))
-                .frame(width: 15, height: 15)
+                .frame(width: 14, height: 14)
                 .background(
                     RoundedRectangle(cornerRadius: 3.5, style: .continuous)
-                        .fill(Color.white.opacity(isHovered ? 0.105 : 0.036))
+                        .fill(Color.white.opacity(isHovered ? 0.085 : 0.024))
                 )
         }
         .buttonStyle(.plain)
