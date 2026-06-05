@@ -23,7 +23,6 @@ final class AudioConditioningService: @unchecked Sendable {
     private var wasForwardingSpeech = false
     private var lastForwardedSpeechAt: Date?
     private var bridgedNonSpeechDuration: TimeInterval = 0
-    private let nonDestructiveSpeechBridgeDuration: TimeInterval = 0.95
 
     init(source: TranscriptAudioSource, preRollDuration: TimeInterval = 1.25) {
         self.processor = AudioConditioningStreamProcessor(source: source)
@@ -160,19 +159,33 @@ final class AudioConditioningService: @unchecked Sendable {
         buffer: AudioBuffer,
         quality: SpeechAudioQualitySnapshot
     ) -> Bool {
+        let bridgeDuration = Self.nonDestructiveSpeechBridgeDuration(
+            for: decision.source == .unknown ? quality.source : decision.source
+        )
         guard wasForwardingSpeech,
               !decision.shouldForwardToASR,
               buffer.pcmBuffer != nil,
               decision.reason != "impulse_click",
               decision.reason != "sustained_tonal_non_speech",
               decision.reason != "sustained_broadband_non_speech",
-              bridgedNonSpeechDuration < nonDestructiveSpeechBridgeDuration,
+              bridgedNonSpeechDuration < bridgeDuration,
               let lastForwardedSpeechAt,
-              buffer.createdAt.timeIntervalSince(lastForwardedSpeechAt) <= nonDestructiveSpeechBridgeDuration + 0.20 else {
+              buffer.createdAt.timeIntervalSince(lastForwardedSpeechAt) <= bridgeDuration + 0.20 else {
             return false
         }
 
         return !quality.isClipping
+    }
+
+    private static func nonDestructiveSpeechBridgeDuration(for source: TranscriptAudioSource) -> TimeInterval {
+        switch source {
+        case .system:
+            return 1.35
+        case .microphone:
+            return 1.20
+        default:
+            return 1.10
+        }
     }
 
     private static func duration(of buffer: AudioBuffer) -> TimeInterval {

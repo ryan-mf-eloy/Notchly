@@ -606,47 +606,53 @@ final class TranscriptionPipelineTests: XCTestCase {
     }
 
     func testAudioConditioningServiceBridgesShortWeakGapsInsideSpeech() {
-        let service = AudioConditioningService(source: .microphone, preRollDuration: 0.4)
-        let config = AudioConditioningConfig(accuracyMode: .highAccuracy, target: .nativeSpeech, audioSource: .microphone)
         let flags = TranscriptionFeatureFlags(vadGatingEnabled: true)
 
-        let firstSpeech = TranscriptionAudioFixtureGenerator.speechLikeBuffer(amplitude: 0.004, source: .microphone, offset: 0)
-        let firstTrace = service.conditionWithTrace(firstSpeech, config: config, featureFlags: flags)
-        XCTAssertTrue(firstTrace.vadDecision.shouldForwardToASR)
-        XCTAssertEqual(firstTrace.frames.filter { !$0.isPreRollReplay }.count, 1)
-
-        let shortMute = TranscriptionAudioFixtureGenerator.buffer(
-            samples: Array(repeating: 0, count: 1_600),
-            source: .microphone,
-            offset: 1
-        )
-        let muteTrace = service.conditionWithTrace(shortMute, config: config, featureFlags: flags)
-        XCTAssertFalse(muteTrace.vadDecision.shouldForwardToASR)
-        XCTAssertEqual(muteTrace.frames.count, 1)
-        XCTAssertFalse(muteTrace.frames[0].isPreRollReplay)
-
-        for offset in 2...10 {
-            let pauseTrace = service.conditionWithTrace(
-                TranscriptionAudioFixtureGenerator.buffer(
-                    samples: Array(repeating: 0, count: 1_600),
-                    source: .microphone,
-                    offset: offset
-                ),
-                config: config,
-                featureFlags: flags
+        for testCase in [
+            (source: TranscriptAudioSource.microphone, bridgedOffsets: 1...12, blockedOffset: 14),
+            (source: TranscriptAudioSource.system, bridgedOffsets: 1...14, blockedOffset: 16)
+        ] {
+            let isolatedService = AudioConditioningService(source: testCase.source, preRollDuration: 0.4)
+            let config = AudioConditioningConfig(accuracyMode: .highAccuracy, target: .nativeSpeech, audioSource: testCase.source)
+            let isolatedSilence = TranscriptionAudioFixtureGenerator.buffer(
+                samples: Array(repeating: 0, count: 1_600),
+                source: testCase.source,
+                offset: 0
             )
-            XCTAssertFalse(pauseTrace.vadDecision.shouldForwardToASR)
-            XCTAssertEqual(pauseTrace.frames.count, 1)
-            XCTAssertFalse(pauseTrace.frames[0].isPreRollReplay)
+            let isolatedTrace = isolatedService.conditionWithTrace(isolatedSilence, config: config, featureFlags: flags)
+            XCTAssertFalse(isolatedTrace.vadDecision.shouldForwardToASR)
+            XCTAssertTrue(isolatedTrace.frames.isEmpty, "\(testCase.source.displayName) isolated silence must stay gated")
+
+            let service = AudioConditioningService(source: testCase.source, preRollDuration: 0.4)
+            let firstSpeech = TranscriptionAudioFixtureGenerator.speechLikeBuffer(amplitude: 0.004, source: testCase.source, offset: 0)
+            let firstTrace = service.conditionWithTrace(firstSpeech, config: config, featureFlags: flags)
+            XCTAssertTrue(firstTrace.vadDecision.shouldForwardToASR)
+            XCTAssertEqual(firstTrace.frames.filter { !$0.isPreRollReplay }.count, 1)
+
+            for offset in testCase.bridgedOffsets {
+                let pauseTrace = service.conditionWithTrace(
+                    TranscriptionAudioFixtureGenerator.buffer(
+                        samples: Array(repeating: 0, count: 1_600),
+                        source: testCase.source,
+                        offset: offset
+                    ),
+                    config: config,
+                    featureFlags: flags
+                )
+                XCTAssertFalse(pauseTrace.vadDecision.shouldForwardToASR)
+                XCTAssertEqual(pauseTrace.frames.count, 1, "\(testCase.source.displayName) should bridge natural pause chunk \(offset)")
+                XCTAssertFalse(pauseTrace.frames[0].isPreRollReplay)
+            }
+
+            let longGap = TranscriptionAudioFixtureGenerator.buffer(
+                samples: Array(repeating: 0, count: 1_600),
+                source: testCase.source,
+                offset: testCase.blockedOffset
+            )
+            let longGapTrace = service.conditionWithTrace(longGap, config: config, featureFlags: flags)
+            XCTAssertFalse(longGapTrace.vadDecision.shouldForwardToASR)
+            XCTAssertTrue(longGapTrace.frames.isEmpty, "\(testCase.source.displayName) should stop bridging after a real pause")
         }
-        let longGap = TranscriptionAudioFixtureGenerator.buffer(
-            samples: Array(repeating: 0, count: 1_600),
-            source: .microphone,
-            offset: 11
-        )
-        let longGapTrace = service.conditionWithTrace(longGap, config: config, featureFlags: flags)
-        XCTAssertFalse(longGapTrace.vadDecision.shouldForwardToASR)
-        XCTAssertTrue(longGapTrace.frames.isEmpty)
     }
 
     func testAudioConditioningServiceNormalizesLowSystemSpeechWithoutForwardingSilence() {
