@@ -682,7 +682,7 @@ final class TranscriptionPipelineTests: XCTestCase {
         let config = AudioConditioningConfig(accuracyMode: .highAccuracy, target: .nativeSpeech, audioSource: .microphone)
         let flags = TranscriptionFeatureFlags(vadGatingEnabled: true)
 
-        let quietLead = TranscriptionAudioFixtureGenerator.speechLikeBuffer(amplitude: 0.00002, source: .microphone, offset: 0)
+        let quietLead = TranscriptionAudioFixtureGenerator.speechLikeBuffer(amplitude: 0.000004, source: .microphone, offset: 0)
         let leadTrace = service.conditionWithTrace(quietLead, config: config, featureFlags: flags)
         XCTAssertFalse(leadTrace.vadDecision.shouldForwardToASR)
         XCTAssertTrue(leadTrace.frames.isEmpty)
@@ -709,6 +709,62 @@ final class TranscriptionPipelineTests: XCTestCase {
         XCTAssertGreaterThan(speechTrace.conditionedBuffer.rms, quietMicrophoneSpeech.rms * 5.0)
         XCTAssertTrue(speechTrace.vadDecision.shouldForwardToASR, "\(speechTrace.vadDecision)")
         XCTAssertFalse(speechTrace.frames.isEmpty, "\(speechTrace.vadDecision)")
+    }
+
+    func testAudioConditioningServiceStartsVeryLowSpeechWithHighAccuracyGainWithoutForwardingNonSpeech() {
+        let flags = TranscriptionFeatureFlags(vadGatingEnabled: true)
+
+        for testCase in [
+            (source: TranscriptAudioSource.microphone, speechAmplitude: Float(0.000018), noiseAmplitude: Float(0.000050)),
+            (source: TranscriptAudioSource.system, speechAmplitude: Float(0.000016), noiseAmplitude: Float(0.000045))
+        ] {
+            let config = AudioConditioningConfig(accuracyMode: .highAccuracy, target: .nativeSpeech, audioSource: testCase.source)
+            let service = AudioConditioningService(source: testCase.source, preRollDuration: 0.4)
+
+            let silence = TranscriptionAudioFixtureGenerator.buffers(profile: .silence, source: testCase.source, chunks: 1).first!
+            let silenceTrace = service.conditionWithTrace(silence, config: config, featureFlags: flags)
+            XCTAssertFalse(silenceTrace.vadDecision.shouldForwardToASR)
+            XCTAssertTrue(silenceTrace.frames.isEmpty)
+
+            var speechTraces: [AudioConditioningTrace] = []
+            for offset in 1...5 {
+                let weakSpeech = TranscriptionAudioFixtureGenerator.speechLikeBuffer(
+                    amplitude: testCase.speechAmplitude,
+                    source: testCase.source,
+                    offset: offset
+                )
+                speechTraces.append(service.conditionWithTrace(weakSpeech, config: config, featureFlags: flags))
+            }
+
+            XCTAssertTrue(
+                speechTraces.contains { $0.vadDecision.shouldForwardToASR && !$0.frames.isEmpty },
+                "\(testCase.source.displayName) should start ASR for very low speech within the first few chunks: \(speechTraces.map(\.vadDecision))"
+            )
+            XCTAssertTrue(
+                speechTraces.contains { $0.conditionedBuffer.rms > $0.inputBuffer.rms * 9.0 },
+                "\(testCase.source.displayName) should apply enough native gain to expose very low speech"
+            )
+
+            let musicService = AudioConditioningService(source: testCase.source, preRollDuration: 0.4)
+            let quietMusic = TranscriptionAudioFixtureGenerator.tonalMusicBuffer(
+                amplitude: testCase.noiseAmplitude,
+                source: testCase.source,
+                offset: 6
+            )
+            let quietMusicTrace = musicService.conditionWithTrace(quietMusic, config: config, featureFlags: flags)
+            XCTAssertFalse(quietMusicTrace.vadDecision.shouldForwardToASR, "\(testCase.source.displayName) quiet music should stay gated: \(quietMusicTrace.vadDecision)")
+            XCTAssertTrue(quietMusicTrace.frames.isEmpty)
+
+            let breathingService = AudioConditioningService(source: testCase.source, preRollDuration: 0.4)
+            let quietBreathing = TranscriptionAudioFixtureGenerator.breathingNoiseBuffer(
+                amplitude: testCase.noiseAmplitude,
+                source: testCase.source,
+                offset: 7
+            )
+            let quietBreathingTrace = breathingService.conditionWithTrace(quietBreathing, config: config, featureFlags: flags)
+            XCTAssertFalse(quietBreathingTrace.vadDecision.shouldForwardToASR, "\(testCase.source.displayName) quiet breathing should stay gated: \(quietBreathingTrace.vadDecision)")
+            XCTAssertTrue(quietBreathingTrace.frames.isEmpty)
+        }
     }
 
     func testAudioConditioningServiceBridgesShortWeakGapsInsideSpeech() {

@@ -116,11 +116,11 @@ struct VoiceActivityDetector: Sendable {
             features.duration <= 0.14 &&
             (features.rms <= max(0.00001, features.peak * configuration.clickRMSRatio) || impulseDominance >= 14)
         let isSustainedTonalAudio = features.envelopeVariation < configuration.tonalEnvelopeVariationThreshold &&
-            features.rms >= 0.003 &&
+            features.rms >= 0.00018 &&
             features.zeroCrossingRate > 0.012 &&
             features.zeroCrossingRate < 0.18
         let isSustainedBroadbandNoise = features.duration >= 0.08 &&
-            features.rms >= 0.0018 &&
+            features.rms >= 0.00018 &&
             features.zeroCrossingRate >= configuration.broadbandNoiseZeroCrossingThreshold &&
             features.envelopeVariation <= configuration.broadbandNoiseEnvelopeVariationThreshold &&
             impulseDominance <= 8
