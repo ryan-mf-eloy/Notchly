@@ -138,7 +138,7 @@ struct VoiceActivityDetector: Sendable {
         let lowEnergySpeechOnset = onsetSpeechShapeLikely &&
             features.rms >= max(sensitivity.onsetRMSFloor, adaptiveNoiseFloor * 1.02) &&
             features.peak >= sensitivity.onsetPeakFloor
-        let continuationWindow: TimeInterval = source == .system ? 2.20 : 2.00
+        let continuationWindow = Self.lowAudioContinuationWindow(for: source)
         let recentlyHadSpeech = lastSpeechAtBySource[source].map { timestamp.timeIntervalSince($0) <= continuationWindow } ?? false
         let lowEnergySpeechContinuation = recentlyHadSpeech &&
             features.zeroCrossingRate > 0.007 &&
@@ -225,6 +225,17 @@ struct VoiceActivityDetector: Sendable {
         let previous = noiseFloorBySource[source] ?? max(rms, minimumNoiseFloor)
         let alpha = configuration.noiseFloorAdaptation
         noiseFloorBySource[source] = max(minimumNoiseFloor, previous * (1 - alpha) + rms * alpha)
+    }
+
+    private static func lowAudioContinuationWindow(for source: TranscriptAudioSource) -> TimeInterval {
+        switch source {
+        case .system:
+            return 2.75
+        case .microphone:
+            return 2.50
+        default:
+            return 2.10
+        }
     }
 
     private static func snrDb(rms: Float, noiseFloor: Float) -> Double {

@@ -633,10 +633,16 @@ final class TranscriptionPipelineTests: XCTestCase {
                 source: testCase.source,
                 offset: 3
             )
-            let lateOffset = testCase.source == .system ? 2.08 : 1.88
+            let lateOffset = testCase.source == .system ? 2.68 : 2.43
             let lateTailDecision = lateTailDetector.analyze(lateWeakTail, now: start.addingTimeInterval(lateOffset))
             XCTAssertTrue(lateTailDecision.shouldForwardToASR, "\(testCase.source.displayName) late low-energy tail should remain connected: \(lateTailDecision)")
             XCTAssertEqual(lateTailDecision.reason, "low_audio_speech_continuation")
+
+            var expiredTailDetector = VoiceActivityDetector()
+            XCTAssertTrue(expiredTailDetector.analyze(activeSpeech, now: start).shouldForwardToASR)
+            let expiredOffset = testCase.source == .system ? 2.98 : 2.72
+            let expiredTailDecision = expiredTailDetector.analyze(lateWeakTail, now: start.addingTimeInterval(expiredOffset))
+            XCTAssertFalse(expiredTailDecision.shouldForwardToASR, "\(testCase.source.displayName) weak tail after continuation window should not reopen ASR: \(expiredTailDecision)")
 
             var isolatedDetector = VoiceActivityDetector()
             let isolatedDecision = isolatedDetector.analyze(secondWeakTail)
