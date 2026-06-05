@@ -945,7 +945,7 @@ final class TranscriptionPipelineTests: XCTestCase {
         systemStore.append(TranscriptionAudioFixtureGenerator.buffers(profile: .silence, source: .system, chunks: 1).first!)
         XCTAssertNil(systemStore.firstAudioAt())
 
-        let lowSystemSamples = Array(repeating: Float(0.00011), count: 1_600)
+        let lowSystemSamples = Array(repeating: Float(0.000096), count: 1_600)
         let lowSystem = TranscriptionAudioFixtureGenerator.buffer(samples: lowSystemSamples, source: .system, offset: 1)
         systemStore.append(lowSystem)
         XCTAssertEqual(systemStore.firstAudioAt(), lowSystem.createdAt)
@@ -954,7 +954,7 @@ final class TranscriptionPipelineTests: XCTestCase {
         microphoneStore.append(TranscriptionAudioFixtureGenerator.buffers(profile: .silence, source: .microphone, chunks: 1).first!)
         XCTAssertNil(microphoneStore.firstAudioAt())
 
-        let lowMicrophoneSamples = Array(repeating: Float(0.00013), count: 1_600)
+        let lowMicrophoneSamples = Array(repeating: Float(0.000115), count: 1_600)
         let lowMicrophone = TranscriptionAudioFixtureGenerator.buffer(samples: lowMicrophoneSamples, source: .microphone, offset: 2)
         microphoneStore.append(lowMicrophone)
         XCTAssertEqual(microphoneStore.firstAudioAt(), lowMicrophone.createdAt)
