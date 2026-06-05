@@ -1409,7 +1409,7 @@ struct SpeechRestartDecision: Equatable {
 }
 
 struct SpeechRestartPolicy {
-    var recentAudioWindow: TimeInterval = 2.5
+    var recentAudioWindow: TimeInterval = 3.2
     var minimumRestartInterval: TimeInterval = 1.2
 
     func decision(
