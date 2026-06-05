@@ -682,7 +682,7 @@ final class TranscriptionPipelineTests: XCTestCase {
         let config = AudioConditioningConfig(accuracyMode: .highAccuracy, target: .nativeSpeech, audioSource: .microphone)
         let flags = TranscriptionFeatureFlags(vadGatingEnabled: true)
 
-        let quietLead = TranscriptionAudioFixtureGenerator.speechLikeBuffer(amplitude: 0.000004, source: .microphone, offset: 0)
+        let quietLead = TranscriptionAudioFixtureGenerator.speechLikeBuffer(amplitude: 0.000002, source: .microphone, offset: 0)
         let leadTrace = service.conditionWithTrace(quietLead, config: config, featureFlags: flags)
         XCTAssertFalse(leadTrace.vadDecision.shouldForwardToASR)
         XCTAssertTrue(leadTrace.frames.isEmpty)
@@ -715,8 +715,8 @@ final class TranscriptionPipelineTests: XCTestCase {
         let flags = TranscriptionFeatureFlags(vadGatingEnabled: true)
 
         for testCase in [
-            (source: TranscriptAudioSource.microphone, speechAmplitude: Float(0.000018), noiseAmplitude: Float(0.000050)),
-            (source: TranscriptAudioSource.system, speechAmplitude: Float(0.000016), noiseAmplitude: Float(0.000045))
+            (source: TranscriptAudioSource.microphone, speechAmplitude: Float(0.000012), noiseAmplitude: Float(0.000050)),
+            (source: TranscriptAudioSource.system, speechAmplitude: Float(0.000010), noiseAmplitude: Float(0.000045))
         ] {
             let config = AudioConditioningConfig(accuracyMode: .highAccuracy, target: .nativeSpeech, audioSource: testCase.source)
             let service = AudioConditioningService(source: testCase.source, preRollDuration: 0.4)

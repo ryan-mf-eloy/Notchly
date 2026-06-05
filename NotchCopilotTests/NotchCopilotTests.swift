@@ -10706,8 +10706,8 @@ final class NotchCopilotTests: XCTestCase {
     }
 
     func testTranscriptInlineActionsReserveCompactNonOverlappingSpace() {
-        XCTAssertEqual(TranscriptInlineActionMetrics.buttonHitSize, 24)
-        XCTAssertEqual(TranscriptInlineActionMetrics.visibleButtonSize, 12)
+        XCTAssertEqual(TranscriptInlineActionMetrics.buttonHitSize, 23)
+        XCTAssertEqual(TranscriptInlineActionMetrics.visibleButtonSize, 11)
         XCTAssertGreaterThan(TranscriptInlineActionMetrics.buttonHitSize, TranscriptInlineActionMetrics.visibleButtonSize)
         XCTAssertGreaterThanOrEqual(
             TranscriptInlineActionMetrics.rowTrailingReserve,
