@@ -64,7 +64,7 @@ struct AudioConditioningConfig: Sendable, Hashable {
     }
 
     var shouldNormalizeGain: Bool {
-        accuracyMode == .highAccuracy && audioSource != .system
+        accuracyMode == .highAccuracy && audioSource != .unknown
     }
 }
 
@@ -149,9 +149,23 @@ struct AudioConditioningPipeline: Sendable {
         guard frameCount > 0, channelCount > 0 else { return workingBuffer }
 
         let metrics = amplitudeMetrics(channelData: channelData, channels: channelCount, frames: frameCount)
-        let targetRMS: Float = config.target == .cloudRealtime ? 0.052 : 0.045
-        let minimumRMS: Float = 0.0006
-        let maxGain: Float = config.target == .cloudRealtime ? 5.0 : 3.5
+        let targetRMS: Float
+        if config.target == .cloudRealtime {
+            targetRMS = 0.052
+        } else if config.audioSource == .system {
+            targetRMS = 0.034
+        } else {
+            targetRMS = 0.045
+        }
+        let minimumRMS: Float = config.audioSource == .system ? 0.00012 : 0.0006
+        let maxGain: Float
+        if config.target == .cloudRealtime {
+            maxGain = 5.0
+        } else if config.audioSource == .system {
+            maxGain = 2.6
+        } else {
+            maxGain = 3.5
+        }
         let clippingCeiling: Float = 0.92
         var gain: Float = 1
         if metrics.rms >= minimumRMS {

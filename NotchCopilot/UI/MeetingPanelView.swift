@@ -2088,12 +2088,12 @@ private final class TranscriptRowView: NSView {
     override var isFlipped: Bool { true }
 
     private enum LayoutMetrics {
-        static let actionSize: CGFloat = 16
+        static let actionSize: CGFloat = 15
         static let actionGap: CGFloat = 2
         static let actionRightInset: CGFloat = 5
         static let textLeftInset: CGFloat = 6
         static let verticalInset: CGFloat = 3
-        static let hoverInset: CGFloat = -8
+        static let hoverInset: CGFloat = -12
     }
 
     private let label = NSTextField(labelWithString: "")
@@ -2127,7 +2127,7 @@ private final class TranscriptRowView: NSView {
 
     override func layout() {
         super.layout()
-        let actionsWidth = LayoutMetrics.actionSize * 2 + LayoutMetrics.actionGap + LayoutMetrics.actionRightInset + 4
+        let actionsWidth = LayoutMetrics.actionSize * 2 + LayoutMetrics.actionGap + LayoutMetrics.actionRightInset + 3
         label.frame = CGRect(
             x: LayoutMetrics.textLeftInset,
             y: LayoutMetrics.verticalInset,
@@ -2226,21 +2226,21 @@ private final class TranscriptRowView: NSView {
         button.toolTip = tooltip
         button.contentTintColor = NSColor.white.withAlphaComponent(0.58)
         button.wantsLayer = true
-        button.layer?.cornerRadius = 4
-        button.layer?.backgroundColor = NSColor.white.withAlphaComponent(0.050).cgColor
+        button.layer?.cornerRadius = 3.5
+        button.layer?.backgroundColor = NSColor.white.withAlphaComponent(0.045).cgColor
         if let image = NSImage(systemSymbolName: systemName, accessibilityDescription: tooltip) {
-            button.image = image.withSymbolConfiguration(.init(pointSize: 9.0, weight: .regular))
+            button.image = image.withSymbolConfiguration(.init(pointSize: 8.4, weight: .regular))
         }
+        button.isEnabled = true
     }
 
     private func setHovered(_ hovered: Bool) {
-        guard isHovered != hovered else { return }
         isHovered = hovered
-        copyButton.isEnabled = hovered
-        deleteButton.isEnabled = hovered
-        layer?.backgroundColor = NSColor.white.withAlphaComponent(hovered ? 0.070 : 0).cgColor
-        copyButton.alphaValue = hovered ? 0.90 : 0.001
-        deleteButton.alphaValue = hovered ? 0.90 : 0.001
+        layer?.backgroundColor = NSColor.white.withAlphaComponent(hovered ? 0.082 : 0.018).cgColor
+        copyButton.alphaValue = hovered ? 0.92 : 0.24
+        deleteButton.alphaValue = hovered ? 0.92 : 0.24
+        copyButton.layer?.backgroundColor = NSColor.white.withAlphaComponent(hovered ? 0.095 : 0.036).cgColor
+        deleteButton.layer?.backgroundColor = NSColor.white.withAlphaComponent(hovered ? 0.095 : 0.036).cgColor
     }
 
     @objc private func copyTranscriptBlock() {

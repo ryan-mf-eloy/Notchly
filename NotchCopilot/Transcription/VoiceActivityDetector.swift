@@ -102,8 +102,11 @@ struct VoiceActivityDetector: Sendable {
         let bootstrappedNoiseFloor = previousNoiseFloor == nil
             ? min(rawMeasuredNoiseFloor, max(features.rms * 0.35, 0.00025))
             : rawMeasuredNoiseFloor
-        let measuredNoiseFloor = bootstrappedNoiseFloor
-        let priorNoiseFloor = previousNoiseFloor ?? measuredNoiseFloor
+        let unclampedMeasuredNoiseFloor = bootstrappedNoiseFloor
+        let priorNoiseFloor = previousNoiseFloor ?? unclampedMeasuredNoiseFloor
+        let measuredNoiseFloor = previousNoiseFloor == nil
+            ? unclampedMeasuredNoiseFloor
+            : min(unclampedMeasuredNoiseFloor, max(priorNoiseFloor, 0.0002) * 1.25)
         let adaptiveNoiseFloor = max(0.0002, min(max(priorNoiseFloor, measuredNoiseFloor), 0.04))
         let snrDb = Self.snrDb(rms: features.rms, noiseFloor: adaptiveNoiseFloor)
         let isClipping = (quality?.isClipping ?? false) || features.peak >= 0.98

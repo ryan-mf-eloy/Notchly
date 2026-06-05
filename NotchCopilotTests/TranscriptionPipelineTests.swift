@@ -546,6 +546,63 @@ final class TranscriptionPipelineTests: XCTestCase {
         XCTAssertTrue(speechTrace.frames.contains { !$0.isPreRollReplay })
     }
 
+    func testAudioConditioningServiceBridgesShortWeakGapsInsideSpeech() {
+        let service = AudioConditioningService(source: .microphone, preRollDuration: 0.4)
+        let config = AudioConditioningConfig(accuracyMode: .highAccuracy, target: .nativeSpeech, audioSource: .microphone)
+        let flags = TranscriptionFeatureFlags(vadGatingEnabled: true)
+
+        let firstSpeech = TranscriptionAudioFixtureGenerator.speechLikeBuffer(amplitude: 0.004, source: .microphone, offset: 0)
+        let firstTrace = service.conditionWithTrace(firstSpeech, config: config, featureFlags: flags)
+        XCTAssertTrue(firstTrace.vadDecision.shouldForwardToASR)
+        XCTAssertEqual(firstTrace.frames.filter { !$0.isPreRollReplay }.count, 1)
+
+        let shortMute = TranscriptionAudioFixtureGenerator.buffer(
+            samples: Array(repeating: 0, count: 1_600),
+            source: .microphone,
+            offset: 1
+        )
+        let muteTrace = service.conditionWithTrace(shortMute, config: config, featureFlags: flags)
+        XCTAssertFalse(muteTrace.vadDecision.shouldForwardToASR)
+        XCTAssertEqual(muteTrace.frames.count, 1)
+        XCTAssertFalse(muteTrace.frames[0].isPreRollReplay)
+
+        let weakGap = TranscriptionAudioFixtureGenerator.speechLikeBuffer(amplitude: 0.00025, source: .microphone, offset: 2)
+        let gapTrace = service.conditionWithTrace(weakGap, config: config, featureFlags: flags)
+        XCTAssertFalse(gapTrace.vadDecision.shouldForwardToASR)
+        XCTAssertTrue(gapTrace.vadDecision.state == .silence || gapTrace.vadDecision.state == .noise)
+        XCTAssertEqual(gapTrace.frames.count, 1)
+        XCTAssertFalse(gapTrace.frames[0].isPreRollReplay)
+
+        for offset in 3...8 {
+            _ = service.conditionWithTrace(
+                TranscriptionAudioFixtureGenerator.speechLikeBuffer(amplitude: 0.00025, source: .microphone, offset: offset),
+                config: config,
+                featureFlags: flags
+            )
+        }
+        let longGap = TranscriptionAudioFixtureGenerator.speechLikeBuffer(amplitude: 0.00025, source: .microphone, offset: 9)
+        let longGapTrace = service.conditionWithTrace(longGap, config: config, featureFlags: flags)
+        XCTAssertFalse(longGapTrace.vadDecision.shouldForwardToASR)
+        XCTAssertTrue(longGapTrace.frames.isEmpty)
+    }
+
+    func testAudioConditioningServiceNormalizesLowSystemSpeechWithoutForwardingSilence() {
+        let service = AudioConditioningService(source: .system, preRollDuration: 0.4)
+        let config = AudioConditioningConfig(accuracyMode: .highAccuracy, target: .nativeSpeech, audioSource: .system)
+        let flags = TranscriptionFeatureFlags(vadGatingEnabled: true)
+
+        let silence = TranscriptionAudioFixtureGenerator.buffers(profile: .silence, source: .system, chunks: 1).first!
+        let silenceTrace = service.conditionWithTrace(silence, config: config, featureFlags: flags)
+        XCTAssertFalse(silenceTrace.vadDecision.shouldForwardToASR)
+        XCTAssertTrue(silenceTrace.frames.isEmpty)
+
+        let quietSystemSpeech = TranscriptionAudioFixtureGenerator.speechLikeBuffer(amplitude: 0.00055, source: .system, offset: 1)
+        let speechTrace = service.conditionWithTrace(quietSystemSpeech, config: config, featureFlags: flags)
+        XCTAssertGreaterThan(speechTrace.conditionedBuffer.rms, quietSystemSpeech.rms * 1.8)
+        XCTAssertTrue(speechTrace.vadDecision.shouldForwardToASR, "\(speechTrace.vadDecision)")
+        XCTAssertFalse(speechTrace.frames.isEmpty, "\(speechTrace.vadDecision)")
+    }
+
     func testLanguageContinuityResolverKeepsTechnicalCodeSwitchFromChangingGlobalSourceLanguage() {
         var resolver = LanguageContinuityResolver()
         let first = resolver.resolve(

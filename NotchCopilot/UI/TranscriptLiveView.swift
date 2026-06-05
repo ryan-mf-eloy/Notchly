@@ -87,7 +87,7 @@ struct TranscriptLiveView: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(
             RoundedRectangle(cornerRadius: 6, style: .continuous)
-                .fill(Color.white.opacity(isHovered ? 0.070 : 0))
+                .fill(Color.white.opacity(isHovered ? 0.082 : 0.018))
         )
         .overlay(alignment: .topTrailing) {
             if onCopySegment != nil || onDeleteSegment != nil {
@@ -134,8 +134,8 @@ private struct TranscriptInlineActions: View {
             TranscriptInlineActionButton(systemName: "doc.on.doc", accessibilityLabel: "Copy transcript", action: onCopy)
             TranscriptInlineActionButton(systemName: "trash", accessibilityLabel: "Delete transcript", action: onDelete)
         }
-        .opacity(isVisible ? 0.92 : 0.001)
-        .allowsHitTesting(isVisible)
+        .opacity(isVisible ? 0.92 : 0.24)
+        .allowsHitTesting(true)
         .animation(nil, value: isVisible)
     }
 }
@@ -150,12 +150,12 @@ private struct TranscriptInlineActionButton: View {
     var body: some View {
         Button(action: action) {
             Image(systemName: systemName)
-                .font(.system(size: 9.2, weight: .regular))
+                .font(.system(size: 8.4, weight: .regular))
                 .foregroundStyle(Color.white.opacity(isHovered ? 0.84 : 0.60))
-                .frame(width: 16, height: 16)
+                .frame(width: 15, height: 15)
                 .background(
-                    RoundedRectangle(cornerRadius: 4, style: .continuous)
-                        .fill(Color.white.opacity(isHovered ? 0.105 : 0.050))
+                    RoundedRectangle(cornerRadius: 3.5, style: .continuous)
+                        .fill(Color.white.opacity(isHovered ? 0.105 : 0.036))
                 )
         }
         .buttonStyle(.plain)

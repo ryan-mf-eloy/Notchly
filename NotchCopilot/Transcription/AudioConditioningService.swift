@@ -21,6 +21,9 @@ final class AudioConditioningService: @unchecked Sendable {
     private var vad = VoiceActivityDetector()
     private var preRoll: SpeechPreRollBuffer
     private var wasForwardingSpeech = false
+    private var lastForwardedSpeechAt: Date?
+    private var bridgedNonSpeechDuration: TimeInterval = 0
+    private let nonDestructiveSpeechBridgeDuration: TimeInterval = 0.58
 
     init(source: TranscriptAudioSource, preRollDuration: TimeInterval = 1.25) {
         self.processor = AudioConditioningStreamProcessor(source: source)
@@ -32,6 +35,8 @@ final class AudioConditioningService: @unchecked Sendable {
         vad.reset()
         preRoll.removeAll()
         wasForwardingSpeech = false
+        lastForwardedSpeechAt = nil
+        bridgedNonSpeechDuration = 0
         lock.unlock()
     }
 
@@ -109,10 +114,17 @@ final class AudioConditioningService: @unchecked Sendable {
             }
         }
 
+        let shouldBridgeSpeechGap = shouldBridgeNonSpeechFrame(
+            decision,
+            buffer: conditioned,
+            quality: result.quality
+        )
+        let shouldForward = decision.shouldForwardToASR || shouldBridgeSpeechGap
+
         let frames: [ConditionedAudioFrame]
-        if decision.shouldForwardToASR {
+        if shouldForward {
             var emitted = [ConditionedAudioFrame]()
-            if !wasForwardingSpeech {
+            if !wasForwardingSpeech && decision.shouldForwardToASR {
                 emitted.append(contentsOf: preRoll.buffers.map {
                     ConditionedAudioFrame(buffer: $0, quality: result.quality, vadDecision: decision, isPreRollReplay: true)
                 })
@@ -120,10 +132,17 @@ final class AudioConditioningService: @unchecked Sendable {
             }
             emitted.append(ConditionedAudioFrame(buffer: conditioned, quality: result.quality, vadDecision: decision, isPreRollReplay: false))
             wasForwardingSpeech = true
+            if decision.shouldForwardToASR {
+                lastForwardedSpeechAt = conditioned.createdAt
+                bridgedNonSpeechDuration = 0
+            } else {
+                bridgedNonSpeechDuration += Self.duration(of: conditioned)
+            }
             frames = emitted
         } else {
             preRoll.append(conditioned)
             wasForwardingSpeech = false
+            bridgedNonSpeechDuration = 0
             frames = []
         }
         lock.unlock()
@@ -134,5 +153,32 @@ final class AudioConditioningService: @unchecked Sendable {
             quality: result.quality,
             vadDecision: decision
         )
+    }
+
+    private func shouldBridgeNonSpeechFrame(
+        _ decision: VoiceActivityDecision,
+        buffer: AudioBuffer,
+        quality: SpeechAudioQualitySnapshot
+    ) -> Bool {
+        guard wasForwardingSpeech,
+              !decision.shouldForwardToASR,
+              buffer.pcmBuffer != nil,
+              decision.reason != "impulse_click",
+              decision.reason != "sustained_tonal_non_speech",
+              decision.reason != "sustained_broadband_non_speech",
+              bridgedNonSpeechDuration < nonDestructiveSpeechBridgeDuration,
+              let lastForwardedSpeechAt,
+              buffer.createdAt.timeIntervalSince(lastForwardedSpeechAt) <= nonDestructiveSpeechBridgeDuration + 0.20 else {
+            return false
+        }
+
+        return !quality.isClipping
+    }
+
+    private static func duration(of buffer: AudioBuffer) -> TimeInterval {
+        guard let pcmBuffer = buffer.pcmBuffer, pcmBuffer.format.sampleRate > 0 else {
+            return 0.10
+        }
+        return Double(pcmBuffer.frameLength) / pcmBuffer.format.sampleRate
     }
 }
