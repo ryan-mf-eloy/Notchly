@@ -2180,13 +2180,12 @@ private final class TranscriptRowView: NSView {
     override var isFlipped: Bool { true }
 
     private enum LayoutMetrics {
-        static let actionSize: CGFloat = 14
-        static let actionGap: CGFloat = 1
-        static let actionRightInset: CGFloat = 3
+        static let actionHitSize: CGFloat = 24
+        static let actionGap: CGFloat = 0
+        static let actionRightInset: CGFloat = 0
         static let textLeftInset: CGFloat = 4
         static let verticalInset: CGFloat = 1
         static let hoverInset: CGFloat = -12
-        static let actionHitSlop: CGFloat = 7
     }
 
     private let label = NSTextField(labelWithString: "")
@@ -2226,8 +2225,8 @@ private final class TranscriptRowView: NSView {
 
     override func layout() {
         super.layout()
-        let actionsWidth = LayoutMetrics.actionSize * 2 + LayoutMetrics.actionGap + LayoutMetrics.actionRightInset + 2
-        let actionY = max(0, floor((bounds.height - LayoutMetrics.actionSize) / 2))
+        let actionsWidth = LayoutMetrics.actionHitSize * 2 + LayoutMetrics.actionGap + LayoutMetrics.actionRightInset + 2
+        let actionY = max(0, floor((bounds.height - LayoutMetrics.actionHitSize) / 2))
         label.frame = CGRect(
             x: LayoutMetrics.textLeftInset,
             y: LayoutMetrics.verticalInset,
@@ -2235,16 +2234,16 @@ private final class TranscriptRowView: NSView {
             height: max(1, bounds.height - LayoutMetrics.verticalInset * 2)
         )
         deleteButton.frame = CGRect(
-            x: bounds.width - LayoutMetrics.actionRightInset - LayoutMetrics.actionSize,
+            x: bounds.width - LayoutMetrics.actionRightInset - LayoutMetrics.actionHitSize,
             y: actionY,
-            width: LayoutMetrics.actionSize,
-            height: LayoutMetrics.actionSize
+            width: LayoutMetrics.actionHitSize,
+            height: LayoutMetrics.actionHitSize
         )
         copyButton.frame = CGRect(
-            x: deleteButton.frame.minX - LayoutMetrics.actionGap - LayoutMetrics.actionSize,
+            x: deleteButton.frame.minX - LayoutMetrics.actionGap - LayoutMetrics.actionHitSize,
             y: actionY,
-            width: LayoutMetrics.actionSize,
-            height: LayoutMetrics.actionSize
+            width: LayoutMetrics.actionHitSize,
+            height: LayoutMetrics.actionHitSize
         )
     }
 
@@ -2385,30 +2384,10 @@ private final class TranscriptRowView: NSView {
         deleteButton.updateAppearance(rowHovered: hovered)
     }
 
-    private func updateHoverFromCurrentPointer() {
-        guard let window else {
-            onHoverChanged(nil)
-            return
-        }
-        let point = convert(window.mouseLocationOutsideOfEventStream, from: nil)
-        if bounds.insetBy(dx: LayoutMetrics.hoverInset, dy: LayoutMetrics.hoverInset / 2).contains(point) {
-            onHoverChanged(rowID)
-        } else {
-            onHoverChanged(nil)
-        }
-    }
-
-    private func expandedActionFrame(_ button: NSButton) -> CGRect {
-        button.frame.insetBy(dx: -LayoutMetrics.actionHitSlop, dy: -LayoutMetrics.actionHitSlop)
-    }
-
     private func actionButtonHit(at point: NSPoint) -> NSButton? {
         if copyButton.frame.contains(point) { return copyButton }
         if deleteButton.frame.contains(point) { return deleteButton }
-        let candidates = [copyButton, deleteButton].filter { expandedActionFrame($0).contains(point) }
-        return candidates.min { lhs, rhs in
-            abs(lhs.frame.midX - point.x) < abs(rhs.frame.midX - point.x)
-        }
+        return nil
     }
 
     @objc private func copyTranscriptBlock() {
@@ -2476,9 +2455,9 @@ private final class TranscriptRowActionButton: NSButton {
         contentTintColor = NSColor.white.withAlphaComponent(isPointerInside ? 0.84 : (rowHovered ? 0.58 : 0.30))
         let backgroundAlpha: CGFloat
         if isPointerInside {
-            backgroundAlpha = 0.080
+            backgroundAlpha = 0.065
         } else if rowHovered {
-            backgroundAlpha = 0.018
+            backgroundAlpha = 0.010
         } else {
             backgroundAlpha = 0
         }
@@ -2589,7 +2568,7 @@ private enum TranscriptLayout {
         let rowWidth = max(1, min(width - 24, showTranslatedText ? 492 : 520))
         let rowHorizontalInset: CGFloat = 5
         let rowVerticalInset: CGFloat = 2
-        let actionReserve: CGFloat = 34
+        let actionReserve: CGFloat = 50
         let measuredTextWidth = max(1, rowWidth - actionReserve)
         let rowX = max(0, (width - rowWidth) / 2)
         let verticalPadding: CGFloat = 0

@@ -153,26 +153,26 @@ struct AudioConditioningPipeline: Sendable {
         if config.target == .cloudRealtime {
             targetRMS = 0.056
         } else if config.audioSource == .system {
-            targetRMS = 0.046
+            targetRMS = 0.052
         } else {
-            targetRMS = 0.056
+            targetRMS = 0.062
         }
         let minimumRMS: Float
         switch config.audioSource {
         case .system:
-            minimumRMS = 0.000035
+            minimumRMS = 0.000018
         case .microphone:
-            minimumRMS = 0.00004
+            minimumRMS = 0.000020
         default:
-            minimumRMS = 0.00006
+            minimumRMS = 0.000040
         }
         let maxGain: Float
         if config.target == .cloudRealtime {
             maxGain = 6.0
         } else if config.audioSource == .system {
-            maxGain = 7.2
+            maxGain = 8.4
         } else if config.audioSource == .microphone {
-            maxGain = 6.8
+            maxGain = 8.2
         } else {
             maxGain = 3.5
         }
@@ -411,11 +411,11 @@ struct SpeechAudioQualityMonitor: Sendable {
         let significantAudioFloor: Float
         switch buffer.audioSource == .unknown ? source : buffer.audioSource {
         case .system:
-            significantAudioFloor = 0.00018
+            significantAudioFloor = 0.00012
         case .microphone:
-            significantAudioFloor = 0.00022
+            significantAudioFloor = 0.00014
         default:
-            significantAudioFloor = 0.00030
+            significantAudioFloor = 0.00022
         }
         if buffer.rms > significantAudioFloor {
             lastAudioAt = now
@@ -432,7 +432,7 @@ struct SpeechAudioQualityMonitor: Sendable {
             rms: buffer.rms,
             peak: buffer.peak,
             isClipping: buffer.peak >= 0.98,
-            isTooQuiet: buffer.rms < 0.0008,
+            isTooQuiet: buffer.rms < 0.00055,
             noiseFloor: noiseFloor,
             gapCount: gapCount,
             lastAudioAt: lastAudioAt,
@@ -462,12 +462,12 @@ enum SpeechActivityLevel: String, Sendable, Equatable {
 
 struct SpeechActivityPolicy: Sendable, Equatable {
     var preRollDuration: TimeInterval = 2.0
-    var hangoverDuration: TimeInterval = 2.6
-    var absoluteSpeechRMS: Float = 0.00038
-    var likelySpeechRMS: Float = 0.00066
-    var activeSpeechRMS: Float = 0.0032
-    var peakAssistThreshold: Float = 0.0055
-    var noiseFloorLift: Float = 1.42
+    var hangoverDuration: TimeInterval = 3.0
+    var absoluteSpeechRMS: Float = 0.00030
+    var likelySpeechRMS: Float = 0.00054
+    var activeSpeechRMS: Float = 0.0028
+    var peakAssistThreshold: Float = 0.0046
+    var noiseFloorLift: Float = 1.32
 
     func classify(_ snapshot: SpeechAudioQualitySnapshot) -> SpeechActivityLevel {
         let sensitivity = SpeechActivitySourceSensitivity.profile(for: snapshot.source)
@@ -516,9 +516,9 @@ private struct SpeechActivitySourceSensitivity: Sendable, Equatable {
                 peakAssistMultiplier: 0.72,
                 activePeakMultiplier: 0.88,
                 noiseFloorLiftMultiplier: 1.14,
-                lowAudioRMSMultiplier: 0.28,
-                lowAudioNoiseFloorLift: 1.02,
-                lowAudioPeakFloor: 0.00056
+                lowAudioRMSMultiplier: 0.22,
+                lowAudioNoiseFloorLift: 0.96,
+                lowAudioPeakFloor: 0.00042
             )
         case .microphone:
             SpeechActivitySourceSensitivity(
@@ -528,9 +528,9 @@ private struct SpeechActivitySourceSensitivity: Sendable, Equatable {
                 peakAssistMultiplier: 0.78,
                 activePeakMultiplier: 0.92,
                 noiseFloorLiftMultiplier: 1.20,
-                lowAudioRMSMultiplier: 0.32,
-                lowAudioNoiseFloorLift: 1.06,
-                lowAudioPeakFloor: 0.00066
+                lowAudioRMSMultiplier: 0.25,
+                lowAudioNoiseFloorLift: 0.99,
+                lowAudioPeakFloor: 0.00048
             )
         default:
             SpeechActivitySourceSensitivity(

@@ -24,7 +24,7 @@ final class AudioConditioningService: @unchecked Sendable {
     private var lastForwardedSpeechAt: Date?
     private var bridgedNonSpeechDuration: TimeInterval = 0
 
-    init(source: TranscriptAudioSource, preRollDuration: TimeInterval = 1.25) {
+    init(source: TranscriptAudioSource, preRollDuration: TimeInterval = SpeechActivityPolicy().preRollDuration) {
         self.processor = AudioConditioningStreamProcessor(source: source)
         self.preRoll = SpeechPreRollBuffer(duration: preRollDuration)
     }
@@ -180,11 +180,11 @@ final class AudioConditioningService: @unchecked Sendable {
     private static func nonDestructiveSpeechBridgeDuration(for source: TranscriptAudioSource) -> TimeInterval {
         switch source {
         case .system:
-            return 2.30
+            return 2.75
         case .microphone:
-            return 2.05
+            return 2.50
         default:
-            return 1.70
+            return 2.00
         }
     }
 

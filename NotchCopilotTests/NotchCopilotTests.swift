@@ -3956,11 +3956,11 @@ final class NotchCopilotTests: XCTestCase {
         let policy = SpeechActivityPolicy()
         let lowAudio = SpeechAudioQualitySnapshot(
             source: .microphone,
-            rms: 0.00042,
-            peak: 0.0016,
+            rms: 0.00025,
+            peak: 0.0007,
             isClipping: false,
             isTooQuiet: true,
-            noiseFloor: 0.00024,
+            noiseFloor: 0.00022,
             gapCount: 0,
             lastAudioAt: Date()
         )
@@ -3987,6 +3987,32 @@ final class NotchCopilotTests: XCTestCase {
         XCTAssertEqual(systemActivity, .lowAudio)
         XCTAssertFalse(systemActivity.isSignificant)
         XCTAssertTrue(systemActivity.shouldDriveRecognition)
+
+        let verySubtleMicrophoneAudio = SpeechAudioQualitySnapshot(
+            source: .microphone,
+            rms: 0.00023,
+            peak: 0.00055,
+            isClipping: false,
+            isTooQuiet: true,
+            noiseFloor: 0.00018,
+            gapCount: 0,
+            lastAudioAt: Date()
+        )
+
+        XCTAssertEqual(policy.classify(verySubtleMicrophoneAudio), .lowAudio)
+
+        let verySubtleSystemAudio = SpeechAudioQualitySnapshot(
+            source: .system,
+            rms: 0.00018,
+            peak: 0.00048,
+            isClipping: false,
+            isTooQuiet: true,
+            noiseFloor: 0.00015,
+            gapCount: 0,
+            lastAudioAt: Date()
+        )
+
+        XCTAssertEqual(policy.classify(verySubtleSystemAudio), .lowAudio)
     }
 
     func testAppleSpeechWindowControllerPreservesSegmentOnRestartAndRotation() {

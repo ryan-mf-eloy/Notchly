@@ -95,10 +95,13 @@ struct TranscriptLiveView: View {
                 TranscriptInlineActions(
                     isVisible: isHovered,
                     onCopy: { onCopySegment?(segment) },
-                    onDelete: { onDeleteSegment?(segment) }
+                    onDelete: { onDeleteSegment?(segment) },
+                    onHoverChanged: { hovering in
+                        updateHoveredSegment(hovering ? segment.id : nil)
+                    }
                 )
                 .padding(.top, 1)
-                .padding(.trailing, 2)
+                .padding(.trailing, 0)
             }
         }
         .contentShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
@@ -148,6 +151,7 @@ private struct TranscriptInlineActions: View {
     var isVisible: Bool
     var onCopy: () -> Void
     var onDelete: () -> Void
+    var onHoverChanged: (Bool) -> Void
 
     var body: some View {
         HStack(spacing: 0) {
@@ -167,6 +171,7 @@ private struct TranscriptInlineActions: View {
         .opacity(isVisible ? 0.78 : 0.001)
         .allowsHitTesting(isVisible)
         .animation(nil, value: isVisible)
+        .onHover(perform: onHoverChanged)
     }
 }
 
@@ -182,7 +187,7 @@ private struct TranscriptInlineActionButton: View {
         Button(action: action) {
             ZStack {
                 RoundedRectangle(cornerRadius: 4, style: .continuous)
-                    .fill(Color.white.opacity(isHovered ? 0.080 : 0.018))
+                    .fill(Color.white.opacity(isHovered ? 0.065 : 0.010))
                     .frame(width: 14, height: 14)
                 Image(systemName: systemName)
                     .font(.system(size: 5.8, weight: .regular))
