@@ -3772,10 +3772,10 @@ final class NotchCopilotTests: XCTestCase {
     func testSpeechAudioQualityMonitorDetectsClippingQuietGapsAndDeviceChanges() {
         var monitor = SpeechAudioQualityMonitor(source: .microphone)
         let first = NotchCopilot.AudioBuffer(
-            pcmBuffer: Self.makeToneBuffer(seconds: 0.05, amplitude: 0.0002, sampleRate: 16_000),
+            pcmBuffer: Self.makeToneBuffer(seconds: 0.05, amplitude: 0.00005, sampleRate: 16_000),
             time: nil,
-            rms: 0.0002,
-            peak: 0.0004,
+            rms: 0.00005,
+            peak: 0.00009,
             createdAt: Date(timeIntervalSince1970: 1),
             audioSource: .microphone
         )
@@ -3818,7 +3818,7 @@ final class NotchCopilotTests: XCTestCase {
 
             XCTAssertEqual(snapshot.lastAudioAt, buffer.createdAt, "\(testCase.source.displayName) low speech should keep Apple Speech restart recovery warm")
             XCTAssertLessThanOrEqual(snapshot.noiseFloor, testCase.maximumNoiseFloor, "\(testCase.source.displayName) should not bootstrap quiet speech as a high noise floor")
-            XCTAssertTrue(snapshot.isTooQuiet)
+            XCTAssertFalse(snapshot.isTooQuiet, "\(testCase.source.displayName) low speech that can drive ASR should not be penalized as too quiet for Q&A")
         }
     }
 

@@ -427,7 +427,7 @@ struct SpeechAudioQualityMonitor: Sendable {
             rms: buffer.rms,
             peak: buffer.peak,
             isClipping: buffer.peak >= 0.98,
-            isTooQuiet: buffer.rms < 0.00055,
+            isTooQuiet: buffer.rms < Self.significantAudioFloor(for: effectiveSource),
             noiseFloor: noiseFloor,
             gapCount: gapCount,
             lastAudioAt: lastAudioAt,
