@@ -4036,6 +4036,77 @@ final class NotchCopilotTests: XCTestCase {
         )
 
         XCTAssertEqual(policy.classify(verySubtleSystemAudio), .lowAudio)
+
+        let nearFloorMicrophoneAudio = SpeechAudioQualitySnapshot(
+            source: .microphone,
+            rms: 0.00013,
+            peak: 0.00018,
+            isClipping: false,
+            isTooQuiet: true,
+            noiseFloor: 0.00018,
+            gapCount: 0,
+            lastAudioAt: Date()
+        )
+
+        XCTAssertEqual(policy.classify(nearFloorMicrophoneAudio), .lowAudio)
+
+        let nearFloorSystemAudio = SpeechAudioQualitySnapshot(
+            source: .system,
+            rms: 0.00011,
+            peak: 0.00016,
+            isClipping: false,
+            isTooQuiet: true,
+            noiseFloor: 0.00015,
+            gapCount: 0,
+            lastAudioAt: Date()
+        )
+
+        XCTAssertEqual(policy.classify(nearFloorSystemAudio), .lowAudio)
+
+        let silence = SpeechAudioQualitySnapshot(
+            source: .microphone,
+            rms: 0.000018,
+            peak: 0.000030,
+            isClipping: false,
+            isTooQuiet: true,
+            noiseFloor: 0.00016,
+            gapCount: 0,
+            lastAudioAt: nil
+        )
+
+        XCTAssertEqual(policy.classify(silence), .silence)
+    }
+
+    func testSpeechAudioQualityMonitorTracksVeryLowSourceAudioWithoutMarkingSilenceRecent() {
+        var microphoneMonitor = SpeechAudioQualityMonitor(source: .microphone)
+        let lowMicrophone = TranscriptionAudioFixtureGenerator.buffer(
+            samples: Array(repeating: Float(0.000060), count: 1_600),
+            source: .microphone,
+            offset: 0
+        )
+        let microphoneSnapshot = microphoneMonitor.ingest(lowMicrophone)
+        XCTAssertNotNil(microphoneSnapshot.lastAudioAt)
+        XCTAssertFalse(microphoneSnapshot.isTooQuiet)
+
+        var systemMonitor = SpeechAudioQualityMonitor(source: .system)
+        let lowSystem = TranscriptionAudioFixtureGenerator.buffer(
+            samples: Array(repeating: Float(0.000054), count: 1_600),
+            source: .system,
+            offset: 0
+        )
+        let systemSnapshot = systemMonitor.ingest(lowSystem)
+        XCTAssertNotNil(systemSnapshot.lastAudioAt)
+        XCTAssertFalse(systemSnapshot.isTooQuiet)
+
+        var silenceMonitor = SpeechAudioQualityMonitor(source: .microphone)
+        let silence = TranscriptionAudioFixtureGenerator.buffer(
+            samples: Array(repeating: Float(0.000018), count: 1_600),
+            source: .microphone,
+            offset: 0
+        )
+        let silenceSnapshot = silenceMonitor.ingest(silence)
+        XCTAssertNil(silenceSnapshot.lastAudioAt)
+        XCTAssertTrue(silenceSnapshot.isTooQuiet)
     }
 
     func testAppleSpeechWindowControllerPreservesSegmentOnRestartAndRotation() {
@@ -10706,8 +10777,8 @@ final class NotchCopilotTests: XCTestCase {
     }
 
     func testTranscriptInlineActionsReserveCompactNonOverlappingSpace() {
-        XCTAssertEqual(TranscriptInlineActionMetrics.buttonHitSize, 23)
-        XCTAssertEqual(TranscriptInlineActionMetrics.visibleButtonSize, 11)
+        XCTAssertEqual(TranscriptInlineActionMetrics.buttonHitSize, 24)
+        XCTAssertEqual(TranscriptInlineActionMetrics.visibleButtonSize, 10)
         XCTAssertGreaterThan(TranscriptInlineActionMetrics.buttonHitSize, TranscriptInlineActionMetrics.visibleButtonSize)
         XCTAssertGreaterThanOrEqual(
             TranscriptInlineActionMetrics.rowTrailingReserve,

@@ -90,7 +90,7 @@ struct TranscriptLiveView: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(
             RoundedRectangle(cornerRadius: 6, style: .continuous)
-                .fill(Color.white.opacity(isHovered ? 0.088 : 0))
+                .fill(Color.white.opacity(isHovered ? 0.105 : 0))
         )
         .overlay(alignment: .topTrailing) {
             if hasInlineActions {
@@ -150,9 +150,9 @@ struct TranscriptLiveView: View {
 }
 
 enum TranscriptInlineActionMetrics {
-    static let buttonHitSize: CGFloat = 23
-    static let visibleButtonSize: CGFloat = 11
-    static let visibleButtonCornerRadius: CGFloat = 4
+    static let buttonHitSize: CGFloat = 24
+    static let visibleButtonSize: CGFloat = 10
+    static let visibleButtonCornerRadius: CGFloat = 3.5
     static let hitTargetCornerRadius: CGFloat = 5
     static let rowTrailingReserve: CGFloat = buttonHitSize * 2 + 4
 }
@@ -178,8 +178,8 @@ private struct TranscriptInlineActions: View {
                 action: onDelete
             )
         }
-        .opacity(isVisible ? 0.76 : 0.001)
-        .allowsHitTesting(true)
+        .opacity(isVisible ? 0.88 : 0.001)
+        .allowsHitTesting(isVisible)
         .animation(nil, value: isVisible)
         .contentShape(Rectangle())
         .onHover(perform: onHoverChanged)
@@ -201,8 +201,8 @@ private struct TranscriptInlineActionButton: View {
                     .fill(Color.white.opacity(isHovered ? 0.065 : 0.010))
                     .frame(width: TranscriptInlineActionMetrics.visibleButtonSize, height: TranscriptInlineActionMetrics.visibleButtonSize)
                 Image(systemName: systemName)
-                    .font(.system(size: 5.1, weight: .regular))
-                    .foregroundStyle(Color.white.opacity(isHovered ? 0.82 : 0.56))
+                    .font(.system(size: 4.9, weight: .regular))
+                    .foregroundStyle(Color.white.opacity(isHovered ? 0.86 : 0.62))
             }
             .frame(width: TranscriptInlineActionMetrics.buttonHitSize, height: TranscriptInlineActionMetrics.buttonHitSize)
             .background(

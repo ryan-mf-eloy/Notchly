@@ -136,7 +136,7 @@ struct VoiceActivityDetector: Sendable {
             features.dynamicRange > sensitivity.minimumSpeechDynamicRange * 0.72 &&
             features.envelopeVariation > 0.012
         let lowEnergySpeechOnset = onsetSpeechShapeLikely &&
-            features.rms >= max(sensitivity.onsetRMSFloor, adaptiveNoiseFloor * 1.02) &&
+            features.rms >= max(sensitivity.onsetRMSFloor, adaptiveNoiseFloor * 0.92) &&
             features.peak >= sensitivity.onsetPeakFloor
         let continuationWindow = Self.lowAudioContinuationWindow(for: source)
         let recentlyHadSpeech = lastSpeechAtBySource[source].map { timestamp.timeIntervalSince($0) <= continuationWindow } ?? false
@@ -334,10 +334,10 @@ private struct VoiceActivitySourceSensitivity {
                 activePeak: 0.045,
                 activeRMSMultiplier: 1.22,
                 activeRMSFloor: 0.0015,
-                minimumSpeechDynamicRange: 0.00013,
-                onsetRMSFloor: 0.000055,
-                onsetPeakFloor: 0.00018,
-                hangoverRMSFloor: 0.000075,
+                minimumSpeechDynamicRange: 0.000105,
+                onsetRMSFloor: 0.000046,
+                onsetPeakFloor: 0.000135,
+                hangoverRMSFloor: 0.000060,
                 silenceRMSFloor: 0.000026,
                 silencePeakFloor: 0.000040,
                 minimumNoiseFloor: 0.000075
@@ -350,10 +350,10 @@ private struct VoiceActivitySourceSensitivity {
                 activePeak: 0.052,
                 activeRMSMultiplier: 1.26,
                 activeRMSFloor: 0.00165,
-                minimumSpeechDynamicRange: 0.000145,
-                onsetRMSFloor: 0.000062,
-                onsetPeakFloor: 0.00020,
-                hangoverRMSFloor: 0.000085,
+                minimumSpeechDynamicRange: 0.000115,
+                onsetRMSFloor: 0.000052,
+                onsetPeakFloor: 0.000150,
+                hangoverRMSFloor: 0.000068,
                 silenceRMSFloor: 0.000030,
                 silencePeakFloor: 0.000046,
                 minimumNoiseFloor: 0.000085

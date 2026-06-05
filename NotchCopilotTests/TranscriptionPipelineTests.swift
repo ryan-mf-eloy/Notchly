@@ -715,8 +715,8 @@ final class TranscriptionPipelineTests: XCTestCase {
         let flags = TranscriptionFeatureFlags(vadGatingEnabled: true)
 
         for testCase in [
-            (source: TranscriptAudioSource.microphone, speechAmplitude: Float(0.000012), noiseAmplitude: Float(0.000050)),
-            (source: TranscriptAudioSource.system, speechAmplitude: Float(0.000010), noiseAmplitude: Float(0.000045))
+            (source: TranscriptAudioSource.microphone, speechAmplitude: Float(0.000007), noiseAmplitude: Float(0.000050)),
+            (source: TranscriptAudioSource.system, speechAmplitude: Float(0.000006), noiseAmplitude: Float(0.000045))
         ] {
             let config = AudioConditioningConfig(accuracyMode: .highAccuracy, target: .nativeSpeech, audioSource: testCase.source)
             let service = AudioConditioningService(source: testCase.source, preRollDuration: 0.4)
@@ -741,7 +741,7 @@ final class TranscriptionPipelineTests: XCTestCase {
                 "\(testCase.source.displayName) should start ASR for very low speech within the first few chunks: \(speechTraces.map(\.vadDecision))"
             )
             XCTAssertTrue(
-                speechTraces.contains { $0.conditionedBuffer.rms > $0.inputBuffer.rms * 9.0 },
+                speechTraces.contains { $0.conditionedBuffer.rms > $0.inputBuffer.rms * 12.0 },
                 "\(testCase.source.displayName) should apply enough native gain to expose very low speech"
             )
 

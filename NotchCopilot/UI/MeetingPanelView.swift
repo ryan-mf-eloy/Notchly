@@ -2203,14 +2203,14 @@ private final class TranscriptRowView: NSView {
     override var isFlipped: Bool { true }
 
     private enum LayoutMetrics {
-        static let actionHitSize: CGFloat = 23
+        static let actionHitSize: CGFloat = 24
         static let actionGap: CGFloat = 0
         static let actionRightInset: CGFloat = 2
         static let textLeftInset: CGFloat = 4
         static let verticalInset: CGFloat = 1
-        static let hoverInset: CGFloat = -14
-        static let rowHoverAlpha: CGFloat = 0.082
-        static let actionGlyphPointSize: CGFloat = 5.1
+        static let hoverInset: CGFloat = -18
+        static let rowHoverAlpha: CGFloat = 0.108
+        static let actionGlyphPointSize: CGFloat = 4.9
     }
 
     private let label = NSTextField(labelWithString: "")
@@ -2428,9 +2428,9 @@ private final class TranscriptRowActionButton: NSButton {
     var onPointerHoverChanged: ((Bool) -> Void)?
     private enum Appearance {
         static let idleAlpha: CGFloat = 0.001
-        static let rowHoverAlpha: CGFloat = 0.78
-        static let pointerHoverBackgroundAlpha: CGFloat = 0.070
-        static let rowHoverBackgroundAlpha: CGFloat = 0.012
+        static let rowHoverAlpha: CGFloat = 0.90
+        static let pointerHoverBackgroundAlpha: CGFloat = 0.105
+        static let rowHoverBackgroundAlpha: CGFloat = 0.018
     }
 
     private var trackingArea: NSTrackingArea?
@@ -2600,8 +2600,8 @@ private enum TranscriptLayout {
         let rowWidth = max(1, min(width - 24, showTranslatedText ? 492 : 520))
         let rowHorizontalInset: CGFloat = 5
         let rowVerticalInset: CGFloat = 2
-        let minInteractiveRowHeight: CGFloat = 23
-        let actionReserve: CGFloat = 48
+        let minInteractiveRowHeight: CGFloat = 24
+        let actionReserve: CGFloat = 52
         let measuredTextWidth = max(1, rowWidth - actionReserve)
         let rowX = max(0, (width - rowWidth) / 2)
         let verticalPadding: CGFloat = 0

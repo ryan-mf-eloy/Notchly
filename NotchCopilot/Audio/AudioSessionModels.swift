@@ -160,9 +160,9 @@ struct AudioConditioningPipeline: Sendable {
         let minimumRMS: Float
         switch config.audioSource {
         case .system:
-            minimumRMS = 0.000004
+            minimumRMS = 0.000003
         case .microphone:
-            minimumRMS = 0.000005
+            minimumRMS = 0.0000035
         default:
             minimumRMS = 0.000040
         }
@@ -170,9 +170,9 @@ struct AudioConditioningPipeline: Sendable {
         if config.target == .cloudRealtime {
             maxGain = 6.0
         } else if config.audioSource == .system {
-            maxGain = 14.0
+            maxGain = 18.0
         } else if config.audioSource == .microphone {
-            maxGain = 14.0
+            maxGain = 18.0
         } else {
             maxGain = 3.5
         }
@@ -442,9 +442,9 @@ struct SpeechAudioQualityMonitor: Sendable {
     private static func significantAudioFloor(for source: TranscriptAudioSource) -> Float {
         switch source {
         case .system:
-            0.000078
+            0.000050
         case .microphone:
-            0.000088
+            0.000055
         default:
             0.00020
         }
@@ -533,9 +533,9 @@ private struct SpeechActivitySourceSensitivity: Sendable, Equatable {
                 peakAssistMultiplier: 0.72,
                 activePeakMultiplier: 0.88,
                 noiseFloorLiftMultiplier: 1.14,
-                lowAudioRMSMultiplier: 0.22,
-                lowAudioNoiseFloorLift: 0.96,
-                lowAudioPeakFloor: 0.00042
+                lowAudioRMSMultiplier: 0.18,
+                lowAudioNoiseFloorLift: 0.68,
+                lowAudioPeakFloor: 0.00028
             )
         case .microphone:
             SpeechActivitySourceSensitivity(
@@ -545,9 +545,9 @@ private struct SpeechActivitySourceSensitivity: Sendable, Equatable {
                 peakAssistMultiplier: 0.78,
                 activePeakMultiplier: 0.92,
                 noiseFloorLiftMultiplier: 1.20,
-                lowAudioRMSMultiplier: 0.25,
-                lowAudioNoiseFloorLift: 0.99,
-                lowAudioPeakFloor: 0.00048
+                lowAudioRMSMultiplier: 0.20,
+                lowAudioNoiseFloorLift: 0.72,
+                lowAudioPeakFloor: 0.00032
             )
         default:
             SpeechActivitySourceSensitivity(
