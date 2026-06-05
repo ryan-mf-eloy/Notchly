@@ -199,7 +199,7 @@ final class RecentAudioWindowStore: @unchecked Sendable {
 
     func append(_ buffer: AudioBuffer) {
         lock.lock()
-        if firstAudioDate == nil, buffer.rms > 0.0004 {
+        if firstAudioDate == nil, buffer.rms > Self.firstAudioRMSFloor(for: buffer.audioSource) {
             firstAudioDate = buffer.createdAt
         }
         lastRMSValue = buffer.rms
@@ -267,5 +267,16 @@ final class RecentAudioWindowStore: @unchecked Sendable {
     private static func duration(of buffer: AudioBuffer) -> TimeInterval {
         guard let pcmBuffer = buffer.pcmBuffer, pcmBuffer.format.sampleRate > 0 else { return 0.02 }
         return Double(pcmBuffer.frameLength) / pcmBuffer.format.sampleRate
+    }
+
+    private static func firstAudioRMSFloor(for source: TranscriptAudioSource) -> Float {
+        switch source {
+        case .system:
+            return 0.00020
+        case .microphone:
+            return 0.00024
+        default:
+            return 0.00028
+        }
     }
 }

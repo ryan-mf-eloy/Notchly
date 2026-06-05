@@ -2229,8 +2229,20 @@ private final class TranscriptRowView: NSView {
         label.lineBreakMode = .byWordWrapping
         addSubview(label)
 
-        configureButton(copyButton, systemName: "doc.on.doc", tooltip: "Copy transcript", action: #selector(copyTranscriptBlock))
-        configureButton(deleteButton, systemName: "trash", tooltip: "Delete transcript", action: #selector(deleteTranscriptSegment))
+        configureButton(
+            copyButton,
+            systemName: "doc.on.doc",
+            tooltip: "Copy transcript",
+            accessibilityIdentifier: "transcript-inline-copy",
+            action: #selector(copyTranscriptBlock)
+        )
+        configureButton(
+            deleteButton,
+            systemName: "trash",
+            tooltip: "Delete transcript",
+            accessibilityIdentifier: "transcript-inline-delete",
+            action: #selector(deleteTranscriptSegment)
+        )
         addSubview(copyButton)
         addSubview(deleteButton)
         setHovered(false)
@@ -2253,7 +2265,13 @@ private final class TranscriptRowView: NSView {
         needsLayout = true
     }
 
-    private func configureButton(_ button: NSButton, systemName: String, tooltip: String, action: Selector) {
+    private func configureButton(
+        _ button: NSButton,
+        systemName: String,
+        tooltip: String,
+        accessibilityIdentifier: String,
+        action: Selector
+    ) {
         button.isBordered = false
         button.bezelStyle = .regularSquare
         button.imagePosition = .imageOnly
@@ -2261,6 +2279,9 @@ private final class TranscriptRowView: NSView {
         button.target = self
         button.action = action
         button.toolTip = tooltip
+        button.setAccessibilityIdentifier(accessibilityIdentifier)
+        button.setAccessibilityLabel(tooltip)
+        button.setAccessibilityHelp(tooltip)
         button.contentTintColor = NSColor.white.withAlphaComponent(0.58)
         button.wantsLayer = true
         button.layer?.cornerRadius = 3.5

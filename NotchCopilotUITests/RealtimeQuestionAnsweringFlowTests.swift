@@ -41,6 +41,39 @@ final class RealtimeQuestionAnsweringFlowTests: XCTestCase {
     }
 
     @MainActor
+    func testQuestionAnswerHarnessExposesTranscriptInlineActions() {
+        setenv("XCTDisableRuntimeIssues", "YES", 1)
+        addTeardownBlock {
+            unsetenv("XCTDisableRuntimeIssues")
+        }
+
+        let app = XCUIApplication()
+        app.launchArguments = ["--qa-ui-harness"]
+        app.launchEnvironment["NOTCHCOPILOT_QA_UI_HARNESS"] = "1"
+        app.launch()
+        addTeardownBlock {
+            app.terminate()
+        }
+
+        let harness = app.windows["Notchly QA UI Harness"]
+        XCTAssertTrue(harness.waitForExistence(timeout: 8))
+        let transcriptToggle = anyElement(in: harness, "qa-toggle-transcript")
+        XCTAssertTrue(transcriptToggle.waitForExistence(timeout: 3))
+
+        transcriptToggle.click()
+        XCTAssertTrue(anyElement(in: harness, "qa-transcript-stream").waitForExistence(timeout: 3))
+
+        let copyButton = anyElement(in: harness, "transcript-inline-copy")
+        let deleteButton = anyElement(in: harness, "transcript-inline-delete")
+        XCTAssertTrue(copyButton.waitForExistence(timeout: 3))
+        XCTAssertTrue(deleteButton.waitForExistence(timeout: 3))
+        XCTAssertTrue(copyButton.isEnabled)
+        XCTAssertTrue(deleteButton.isEnabled)
+
+        copyButton.click()
+    }
+
+    @MainActor
     private func anyElement(in element: XCUIElement, _ identifier: String) -> XCUIElement {
         element.descendants(matching: .any).matching(identifier: identifier).firstMatch
     }

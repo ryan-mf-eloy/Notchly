@@ -131,8 +131,18 @@ private struct TranscriptInlineActions: View {
 
     var body: some View {
         HStack(spacing: 2) {
-            TranscriptInlineActionButton(systemName: "doc.on.doc", accessibilityLabel: "Copy transcript", action: onCopy)
-            TranscriptInlineActionButton(systemName: "trash", accessibilityLabel: "Delete transcript", action: onDelete)
+            TranscriptInlineActionButton(
+                systemName: "doc.on.doc",
+                accessibilityLabel: "Copy transcript",
+                accessibilityIdentifier: "transcript-inline-copy",
+                action: onCopy
+            )
+            TranscriptInlineActionButton(
+                systemName: "trash",
+                accessibilityLabel: "Delete transcript",
+                accessibilityIdentifier: "transcript-inline-delete",
+                action: onDelete
+            )
         }
         .opacity(isVisible ? 0.90 : 0.20)
         .allowsHitTesting(true)
@@ -143,6 +153,7 @@ private struct TranscriptInlineActions: View {
 private struct TranscriptInlineActionButton: View {
     var systemName: String
     var accessibilityLabel: String
+    var accessibilityIdentifier: String
     var action: () -> Void
 
     @State private var isHovered = false
@@ -161,6 +172,7 @@ private struct TranscriptInlineActionButton: View {
         .buttonStyle(.plain)
         .help(accessibilityLabel)
         .accessibilityLabel(accessibilityLabel)
+        .accessibilityIdentifier(accessibilityIdentifier)
         .onHover { isHovered = $0 }
     }
 }

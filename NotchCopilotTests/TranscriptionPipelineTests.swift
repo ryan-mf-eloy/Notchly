@@ -784,6 +784,26 @@ final class TranscriptionPipelineTests: XCTestCase {
         XCTAssertTrue(store.recentBuffers(overlapping: expired, padding: 0.02).isEmpty)
     }
 
+    func testRecentAudioWindowStoreMarksLowSourceAudioAsFirstAudio() {
+        let systemStore = RecentAudioWindowStore(maxDuration: 9)
+        systemStore.append(TranscriptionAudioFixtureGenerator.buffers(profile: .silence, source: .system, chunks: 1).first!)
+        XCTAssertNil(systemStore.firstAudioAt())
+
+        let lowSystemSamples = Array(repeating: Float(0.00021), count: 1_600)
+        let lowSystem = TranscriptionAudioFixtureGenerator.buffer(samples: lowSystemSamples, source: .system, offset: 1)
+        systemStore.append(lowSystem)
+        XCTAssertEqual(systemStore.firstAudioAt(), lowSystem.createdAt)
+
+        let microphoneStore = RecentAudioWindowStore(maxDuration: 9)
+        microphoneStore.append(TranscriptionAudioFixtureGenerator.buffers(profile: .silence, source: .microphone, chunks: 1).first!)
+        XCTAssertNil(microphoneStore.firstAudioAt())
+
+        let lowMicrophoneSamples = Array(repeating: Float(0.00025), count: 1_600)
+        let lowMicrophone = TranscriptionAudioFixtureGenerator.buffer(samples: lowMicrophoneSamples, source: .microphone, offset: 2)
+        microphoneStore.append(lowMicrophone)
+        XCTAssertEqual(microphoneStore.firstAudioAt(), lowMicrophone.createdAt)
+    }
+
     func testSpeechVocabularyBiasProviderBuildsRankedAppleAndWhisperContext() {
         var preferences = AppPreferences()
         preferences.userDisplayName = "Larissa"
