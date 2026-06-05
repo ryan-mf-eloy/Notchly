@@ -4660,6 +4660,27 @@ final class NotchCopilotTests: XCTestCase {
         XCTAssertEqual(buffer.buffers.last?.createdAt, current.createdAt)
     }
 
+    func testPreRollBufferPreservesConfiguredWindowForSmallAudioChunks() {
+        var buffer = SpeechPreRollBuffer(duration: 2.0)
+        let start = Date(timeIntervalSince1970: 20)
+
+        for index in 0..<210 {
+            buffer.append(NotchCopilot.AudioBuffer(
+                pcmBuffer: Self.makeToneBuffer(seconds: 0.01, amplitude: 0.02),
+                time: nil,
+                rms: 0.02,
+                peak: 0.03,
+                createdAt: start.addingTimeInterval(Double(index) * 0.01),
+                audioSource: .system
+            ))
+        }
+
+        XCTAssertGreaterThanOrEqual(buffer.buffers.count, 190)
+        XCTAssertLessThanOrEqual(buffer.buffers.count, 212)
+        XCTAssertLessThanOrEqual(buffer.buffers.last!.createdAt.timeIntervalSince(buffer.buffers.first!.createdAt), 2.0)
+        XCTAssertGreaterThan(buffer.buffers.first!.createdAt.timeIntervalSince(start), 0)
+    }
+
     func testTranscriptionEngineModeDecodesLegacyModesAsAppleSpeech() throws {
         for legacyValue in ["hybrid", "whisperCpp", "legacyLocalEngine", "legacyParallelMode", "legacyCloudMode"] {
             let data = #"{ "transcriptionEngineMode": "\#(legacyValue)" }"#.data(using: .utf8)!

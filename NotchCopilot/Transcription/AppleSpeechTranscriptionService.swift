@@ -1854,8 +1854,9 @@ struct SpeechPreRollBuffer {
         let referenceDate = buffers.map(\.createdAt).max() ?? Date()
         let cutoff = referenceDate.addingTimeInterval(-duration)
         buffers.removeAll { $0.createdAt < cutoff }
-        if buffers.count > 120 {
-            buffers.removeFirst(buffers.count - 120)
+        let maximumBufferCount = max(120, Int(ceil(duration / 0.01)) + 12)
+        if buffers.count > maximumBufferCount {
+            buffers.removeFirst(buffers.count - maximumBufferCount)
         }
     }
 }
