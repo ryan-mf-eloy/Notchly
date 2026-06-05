@@ -5065,6 +5065,48 @@ final class TranscriptionPipelineTests: XCTestCase {
         XCTAssertEqual(segments.first?.text, "heard Core ML")
     }
 
+    func testStreamingASRRouterLetsVeryLowMicrophoneAndSystemSpeechReachASR() async throws {
+        let cases: [(source: TranscriptAudioSource, amplitude: Float, speaker: String)] = [
+            (.microphone, 0.00045, "You"),
+            (.system, 0.00036, "System")
+        ]
+
+        for testCase in cases {
+            let buffers = (0..<3).map {
+                TranscriptionAudioFixtureGenerator.speechLikeBuffer(
+                    amplitude: testCase.amplitude,
+                    source: testCase.source,
+                    offset: $0
+                )
+            }
+            let router = StreamingASRRouter(
+                sources: [StreamingASRRouter.Source(speakerLabel: testCase.speaker, audioSource: testCase.source, audioStream: Self.stream(buffers))],
+                serviceFactory: { _ in EchoOnAudioTranscriptionService() }
+            )
+            let collector = SegmentCollector()
+            let collectTask = Task {
+                for await segment in router.segments {
+                    await collector.append(segment)
+                }
+            }
+
+            try await router.startTranscription(audioStream: Self.emptyStream(), config: Self.makeConfig(featureFlags: TranscriptionFeatureFlags()))
+            try? await Task.sleep(nanoseconds: 300_000_000)
+            await router.stop()
+            collectTask.cancel()
+
+            let values = await collector.values
+            let segment = try XCTUnwrap(
+                values.first,
+                "Very low \(testCase.source.displayName) speech should be normalized and forwarded into ASR."
+            )
+            XCTAssertEqual(segment.audioSource, testCase.source)
+            XCTAssertEqual(segment.speakerLabel, testCase.speaker)
+            XCTAssertEqual(segment.text, "heard Core ML")
+            XCTAssertGreaterThan(segment.audioEnergy ?? 0, 0.001)
+        }
+    }
+
     func testStreamingASRRouterReplaysEarlySegmentsForLateSubscriber() async throws {
         let buffers = TranscriptionAudioFixtureGenerator.buffers(profile: TranscriptionAudioFixtureProfile.clean, chunks: 2)
         let router = StreamingASRRouter(

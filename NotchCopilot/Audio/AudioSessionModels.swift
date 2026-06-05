@@ -170,7 +170,7 @@ struct AudioConditioningPipeline: Sendable {
         if config.target == .cloudRealtime {
             maxGain = 5.0
         } else if config.audioSource == .system {
-            maxGain = 3.2
+            maxGain = 4.8
         } else if config.audioSource == .microphone {
             maxGain = 4.2
         } else {
