@@ -3799,6 +3799,29 @@ final class NotchCopilotTests: XCTestCase {
         XCTAssertEqual(secondSnapshot.channelCount, 1)
     }
 
+    func testSpeechAudioQualityMonitorKeepsLowSpeechVisibleWithSourceSpecificFloors() {
+        for testCase in [
+            (source: TranscriptAudioSource.microphone, rms: Float(0.00012), peak: Float(0.00026), maximumNoiseFloor: Float(0.000095)),
+            (source: TranscriptAudioSource.system, rms: Float(0.000105), peak: Float(0.00023), maximumNoiseFloor: Float(0.000085))
+        ] {
+            var monitor = SpeechAudioQualityMonitor(source: testCase.source)
+            let buffer = NotchCopilot.AudioBuffer(
+                pcmBuffer: Self.makeToneBuffer(seconds: 0.05, amplitude: testCase.rms, sampleRate: 16_000),
+                time: nil,
+                rms: testCase.rms,
+                peak: testCase.peak,
+                createdAt: Date(timeIntervalSince1970: 8),
+                audioSource: testCase.source
+            )
+
+            let snapshot = monitor.ingest(buffer)
+
+            XCTAssertEqual(snapshot.lastAudioAt, buffer.createdAt, "\(testCase.source.displayName) low speech should keep Apple Speech restart recovery warm")
+            XCTAssertLessThanOrEqual(snapshot.noiseFloor, testCase.maximumNoiseFloor, "\(testCase.source.displayName) should not bootstrap quiet speech as a high noise floor")
+            XCTAssertTrue(snapshot.isTooQuiet)
+        }
+    }
+
     func testAudioConditioningHighAccuracyConvertsCloudAudioToMono16kAndNormalizes() {
         let sampleRate = 48_000.0
         let frameCount = AVAudioFrameCount(0.12 * sampleRate)

@@ -2075,7 +2075,7 @@ private final class FlippedTranscriptDocumentView: NSView {
                     onCopyBlock: onCopyBlock,
                     onDeleteSegment: onDeleteSegment,
                     onHoverChanged: { [weak self] rowID in
-                        self?.setHoveredRow(rowID)
+                        self?.updateHoverFromRow(rowID)
                     }
                 )
             } else {
@@ -2084,7 +2084,7 @@ private final class FlippedTranscriptDocumentView: NSView {
                     onCopyBlock: onCopyBlock,
                     onDeleteSegment: onDeleteSegment,
                     onHoverChanged: { [weak self] rowID in
-                        self?.setHoveredRow(rowID)
+                        self?.updateHoverFromRow(rowID)
                     }
                 )
                 rowViewsByID[row.id] = rowView
@@ -2095,6 +2095,14 @@ private final class FlippedTranscriptDocumentView: NSView {
         }
 
         updateHoveredRowFromCurrentMouse()
+    }
+
+    private func updateHoverFromRow(_ rowID: String?) {
+        if let rowID {
+            setHoveredRow(rowID)
+        } else {
+            clearHoveredRowAfterGracePeriod()
+        }
     }
 
     override func updateTrackingAreas() {

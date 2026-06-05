@@ -408,21 +408,16 @@ struct SpeechAudioQualityMonitor: Sendable {
             lastChannelCount = channelCount
         }
 
-        let significantAudioFloor: Float
-        switch buffer.audioSource == .unknown ? source : buffer.audioSource {
-        case .system:
-            significantAudioFloor = 0.00012
-        case .microphone:
-            significantAudioFloor = 0.00014
-        default:
-            significantAudioFloor = 0.00022
-        }
+        let effectiveSource = buffer.audioSource == .unknown ? source : buffer.audioSource
+        let significantAudioFloor = Self.significantAudioFloor(for: effectiveSource)
         if buffer.rms > significantAudioFloor {
             lastAudioAt = now
         }
 
         if noiseFloor == 0 {
-            noiseFloor = buffer.rms > 0 ? min(buffer.rms, max(buffer.rms * 0.35, 0.0002)) : 0
+            noiseFloor = buffer.rms > 0
+                ? min(buffer.rms, max(buffer.rms * 0.35, Self.noiseBootstrapFloor(for: effectiveSource)))
+                : 0
         } else if buffer.rms < 0.012 {
             noiseFloor = noiseFloor * 0.94 + buffer.rms * 0.06
         }
@@ -442,6 +437,28 @@ struct SpeechAudioQualityMonitor: Sendable {
         )
         lastSnapshot = snapshot
         return snapshot
+    }
+
+    private static func significantAudioFloor(for source: TranscriptAudioSource) -> Float {
+        switch source {
+        case .system:
+            0.000095
+        case .microphone:
+            0.00011
+        default:
+            0.00020
+        }
+    }
+
+    private static func noiseBootstrapFloor(for source: TranscriptAudioSource) -> Float {
+        switch source {
+        case .system:
+            0.000075
+        case .microphone:
+            0.000085
+        default:
+            0.00016
+        }
     }
 }
 
