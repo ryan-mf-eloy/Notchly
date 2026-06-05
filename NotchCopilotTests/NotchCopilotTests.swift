@@ -10684,6 +10684,17 @@ final class NotchCopilotTests: XCTestCase {
         XCTAssertTrue(translationChunks.allSatisfy { $0.count <= TranscriptReadableChunker.defaultMaxLength })
     }
 
+    func testTranscriptInlineActionsReserveCompactNonOverlappingSpace() {
+        XCTAssertEqual(TranscriptInlineActionMetrics.buttonHitSize, 24)
+        XCTAssertEqual(TranscriptInlineActionMetrics.visibleButtonSize, 14)
+        XCTAssertGreaterThan(TranscriptInlineActionMetrics.buttonHitSize, TranscriptInlineActionMetrics.visibleButtonSize)
+        XCTAssertGreaterThanOrEqual(
+            TranscriptInlineActionMetrics.rowTrailingReserve,
+            TranscriptInlineActionMetrics.buttonHitSize * 2
+        )
+        XCTAssertLessThanOrEqual(TranscriptInlineActionMetrics.rowTrailingReserve, 56)
+    }
+
     func testMeetingDetectedIslandUsesNotchWidthAndTightCanvas() {
         let appState = AppState()
         let now = Date(timeIntervalSince1970: 100)

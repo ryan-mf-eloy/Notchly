@@ -42,6 +42,7 @@ struct TranscriptLiveView: View {
 
     private func segmentRow(_ segment: TranscriptSegment) -> some View {
         let isHovered = hoveredSegmentID == segment.id
+        let hasInlineActions = onCopySegment != nil || onDeleteSegment != nil
         return VStack(alignment: .leading, spacing: 4) {
             HStack(spacing: 6) {
                 Text(DateFormatting.duration(segment.startTime))
@@ -84,14 +85,15 @@ struct TranscriptLiveView: View {
             }
         }
         .padding(.vertical, 2)
-        .padding(.horizontal, 4)
+        .padding(.leading, 4)
+        .padding(.trailing, hasInlineActions ? TranscriptInlineActionMetrics.rowTrailingReserve : 4)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(
             RoundedRectangle(cornerRadius: 6, style: .continuous)
                 .fill(Color.white.opacity(isHovered ? 0.088 : 0))
         )
         .overlay(alignment: .topTrailing) {
-            if onCopySegment != nil || onDeleteSegment != nil {
+            if hasInlineActions {
                 TranscriptInlineActions(
                     isVisible: isHovered,
                     onCopy: { onCopySegment?(segment) },
@@ -147,6 +149,14 @@ struct TranscriptLiveView: View {
     }
 }
 
+enum TranscriptInlineActionMetrics {
+    static let buttonHitSize: CGFloat = 24
+    static let visibleButtonSize: CGFloat = 14
+    static let visibleButtonCornerRadius: CGFloat = 4
+    static let hitTargetCornerRadius: CGFloat = 5
+    static let rowTrailingReserve: CGFloat = buttonHitSize * 2 + 4
+}
+
 private struct TranscriptInlineActions: View {
     var isVisible: Bool
     var onCopy: () -> Void
@@ -186,22 +196,22 @@ private struct TranscriptInlineActionButton: View {
     var body: some View {
         Button(action: action) {
             ZStack {
-                RoundedRectangle(cornerRadius: 4, style: .continuous)
+                RoundedRectangle(cornerRadius: TranscriptInlineActionMetrics.visibleButtonCornerRadius, style: .continuous)
                     .fill(Color.white.opacity(isHovered ? 0.065 : 0.010))
-                    .frame(width: 14, height: 14)
+                    .frame(width: TranscriptInlineActionMetrics.visibleButtonSize, height: TranscriptInlineActionMetrics.visibleButtonSize)
                 Image(systemName: systemName)
                     .font(.system(size: 5.8, weight: .regular))
                     .foregroundStyle(Color.white.opacity(isHovered ? 0.84 : 0.58))
             }
-            .frame(width: 24, height: 24)
+            .frame(width: TranscriptInlineActionMetrics.buttonHitSize, height: TranscriptInlineActionMetrics.buttonHitSize)
             .background(
-                RoundedRectangle(cornerRadius: 5, style: .continuous)
+                RoundedRectangle(cornerRadius: TranscriptInlineActionMetrics.hitTargetCornerRadius, style: .continuous)
                     .fill(Color.clear)
             )
         }
         .buttonStyle(.plain)
         .contentShape(
-            RoundedRectangle(cornerRadius: 5, style: .continuous)
+            RoundedRectangle(cornerRadius: TranscriptInlineActionMetrics.hitTargetCornerRadius, style: .continuous)
         )
         .help(accessibilityLabel)
         .accessibilityLabel(accessibilityLabel)
