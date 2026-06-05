@@ -458,6 +458,30 @@ final class TranscriptionPipelineTests: XCTestCase {
         XCTAssertEqual(speechDecision.detectionEngine, .heuristicEnergy)
     }
 
+    func testVoiceActivityDetectorForwardsLowVolumeMicrophoneAndSystemSpeech() {
+        var microphoneDetector = VoiceActivityDetector()
+        let quietMicrophoneSpeech = TranscriptionAudioFixtureGenerator.speechLikeBuffer(
+            amplitude: 0.0025,
+            source: .microphone,
+            offset: 5
+        )
+        let microphoneDecision = microphoneDetector.analyze(quietMicrophoneSpeech)
+        XCTAssertTrue(microphoneDecision.shouldForwardToASR)
+        XCTAssertTrue(microphoneDecision.state == .speechLikely || microphoneDecision.state == .speechActive)
+        XCTAssertGreaterThan(microphoneDecision.speechProbability, 0.5)
+
+        var systemDetector = VoiceActivityDetector()
+        let quietSystemSpeech = TranscriptionAudioFixtureGenerator.speechLikeBuffer(
+            amplitude: 0.0019,
+            source: .system,
+            offset: 6
+        )
+        let systemDecision = systemDetector.analyze(quietSystemSpeech)
+        XCTAssertTrue(systemDecision.shouldForwardToASR)
+        XCTAssertTrue(systemDecision.state == .speechLikely || systemDecision.state == .speechActive)
+        XCTAssertGreaterThan(systemDecision.speechProbability, 0.5)
+    }
+
     func testVoiceActivityDetectorRejectsBreathingDuringSpeechHangover() {
         var detector = VoiceActivityDetector()
         let speech = TranscriptionAudioFixtureGenerator.speechLikeBuffer(offset: 0)
@@ -483,6 +507,23 @@ final class TranscriptionPipelineTests: XCTestCase {
         let frames = service.condition(speech, config: config, featureFlags: flags)
         XCTAssertGreaterThanOrEqual(frames.count, 1)
         XCTAssertTrue(frames.contains { $0.buffer.rms > 0.001 })
+    }
+
+    func testAudioConditioningServiceKeepsQuietLeadInPreRollBeforeSpeech() {
+        let service = AudioConditioningService(source: .microphone, preRollDuration: 0.95)
+        let config = AudioConditioningConfig(accuracyMode: .highAccuracy, target: .nativeSpeech, audioSource: .microphone)
+        let flags = TranscriptionFeatureFlags(vadGatingEnabled: true)
+
+        let quietLead = TranscriptionAudioFixtureGenerator.speechLikeBuffer(amplitude: 0.00045, source: .microphone, offset: 0)
+        let leadTrace = service.conditionWithTrace(quietLead, config: config, featureFlags: flags)
+        XCTAssertFalse(leadTrace.vadDecision.shouldForwardToASR)
+        XCTAssertTrue(leadTrace.frames.isEmpty)
+
+        let speech = TranscriptionAudioFixtureGenerator.speechLikeBuffer(amplitude: 0.004, source: .microphone, offset: 1)
+        let speechTrace = service.conditionWithTrace(speech, config: config, featureFlags: flags)
+        XCTAssertTrue(speechTrace.vadDecision.shouldForwardToASR)
+        XCTAssertTrue(speechTrace.frames.contains { $0.isPreRollReplay })
+        XCTAssertTrue(speechTrace.frames.contains { !$0.isPreRollReplay })
     }
 
     func testLanguageContinuityResolverKeepsTechnicalCodeSwitchFromChangingGlobalSourceLanguage() {

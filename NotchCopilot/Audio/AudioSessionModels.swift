@@ -384,7 +384,7 @@ struct SpeechAudioQualityMonitor: Sendable {
             lastChannelCount = channelCount
         }
 
-        if buffer.rms > 0.002 {
+        if buffer.rms > 0.0012 {
             lastAudioAt = now
         }
 
@@ -399,7 +399,7 @@ struct SpeechAudioQualityMonitor: Sendable {
             rms: buffer.rms,
             peak: buffer.peak,
             isClipping: buffer.peak >= 0.98,
-            isTooQuiet: buffer.rms < 0.0018,
+            isTooQuiet: buffer.rms < 0.0010,
             noiseFloor: noiseFloor,
             gapCount: gapCount,
             lastAudioAt: lastAudioAt,
@@ -424,13 +424,13 @@ enum SpeechActivityLevel: String, Sendable, Equatable {
 }
 
 struct SpeechActivityPolicy: Sendable, Equatable {
-    var preRollDuration: TimeInterval = 1.2
-    var hangoverDuration: TimeInterval = 1.5
-    var absoluteSpeechRMS: Float = 0.0012
-    var likelySpeechRMS: Float = 0.0020
-    var activeSpeechRMS: Float = 0.0060
-    var peakAssistThreshold: Float = 0.018
-    var noiseFloorLift: Float = 2.4
+    var preRollDuration: TimeInterval = 1.45
+    var hangoverDuration: TimeInterval = 1.9
+    var absoluteSpeechRMS: Float = 0.0008
+    var likelySpeechRMS: Float = 0.0014
+    var activeSpeechRMS: Float = 0.0048
+    var peakAssistThreshold: Float = 0.012
+    var noiseFloorLift: Float = 1.85
 
     func classify(_ snapshot: SpeechAudioQualitySnapshot) -> SpeechActivityLevel {
         let rms = max(snapshot.rms, 0)

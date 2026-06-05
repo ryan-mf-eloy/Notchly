@@ -70,7 +70,7 @@ enum AppleSpeechAssetPreparer {
         let locale = Locale(identifier: SupportedLanguage.normalizedCode(languageCode))
         guard let supportedLocale = await SpeechTranscriber.supportedLocale(equivalentTo: locale) else { return .unsupportedLanguage }
         let transcriber = SpeechTranscriber(locale: supportedLocale, preset: .progressiveTranscription)
-        let detector = SpeechDetector(detectionOptions: .init(sensitivityLevel: .medium), reportResults: true)
+        let detector = SpeechDetector(detectionOptions: .init(sensitivityLevel: .high), reportResults: true)
         let modules: [any SpeechModule] = [detector, transcriber]
         do {
             _ = try await AssetInventory.reserve(locale: supportedLocale)
@@ -291,7 +291,7 @@ final class SpeechAnalyzerTranscriptionService: TranscriptionService {
 
     private static func speechDetectorIfEnabled(config: TranscriptionConfig) -> SpeechDetector? {
         guard config.featureFlags.vadGatingEnabled else { return nil }
-        return SpeechDetector(detectionOptions: .init(sensitivityLevel: .medium), reportResults: true)
+        return SpeechDetector(detectionOptions: .init(sensitivityLevel: .high), reportResults: true)
     }
 
     private func preparedSetup(
@@ -657,7 +657,7 @@ struct SpeechDetectionTimeline: Sendable, Equatable {
             return .speech
         }
         let covered = speechOverlap + nonSpeechOverlap
-        if covered >= max(0.08, duration * 0.55), nonSpeechOverlap >= covered * 0.80 {
+        if covered >= max(0.12, duration * 0.70), nonSpeechOverlap >= covered * 0.92 {
             return .nonSpeech
         }
         return .unknown

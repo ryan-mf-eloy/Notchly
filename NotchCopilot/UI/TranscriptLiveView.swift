@@ -41,7 +41,7 @@ struct TranscriptLiveView: View {
 
     private func segmentRow(_ segment: TranscriptSegment) -> some View {
         let isHovered = hoveredSegmentID == segment.id
-        return VStack(alignment: .leading, spacing: 9) {
+        return VStack(alignment: .leading, spacing: 7) {
             HStack(spacing: 8) {
                 Text(DateFormatting.duration(segment.startTime))
                     .font(.system(size: 10, weight: .medium, design: .monospaced))
@@ -82,12 +82,12 @@ struct TranscriptLiveView: View {
                     .textSelection(.enabled)
             }
         }
-        .padding(.vertical, 13)
-        .padding(.horizontal, 8)
+        .padding(.vertical, 10)
+        .padding(.horizontal, 6)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(
-            RoundedRectangle(cornerRadius: 8, style: .continuous)
-                .fill(Color.white.opacity(isHovered ? 0.045 : 0))
+            RoundedRectangle(cornerRadius: 6, style: .continuous)
+                .fill(Color.white.opacity(isHovered ? 0.055 : 0))
         )
         .overlay(alignment: .topTrailing) {
             if onCopySegment != nil || onDeleteSegment != nil {
@@ -96,11 +96,11 @@ struct TranscriptLiveView: View {
                     onCopy: { onCopySegment?(segment) },
                     onDelete: { onDeleteSegment?(segment) }
                 )
-                .padding(.top, 7)
-                .padding(.trailing, 7)
+                .padding(.top, 5)
+                .padding(.trailing, 5)
             }
         }
-        .contentShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+        .contentShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
         .onHover { hovering in
             hoveredSegmentID = hovering ? segment.id : (hoveredSegmentID == segment.id ? nil : hoveredSegmentID)
         }
@@ -136,7 +136,7 @@ private struct TranscriptInlineActions: View {
         }
         .opacity(isVisible ? 1 : 0)
         .allowsHitTesting(isVisible)
-        .animation(.easeOut(duration: 0.10), value: isVisible)
+        .animation(.easeOut(duration: 0.08), value: isVisible)
     }
 }
 
@@ -152,10 +152,10 @@ private struct TranscriptInlineActionButton: View {
             Image(systemName: systemName)
                 .font(.system(size: 10.5, weight: .medium))
                 .foregroundStyle(Color.white.opacity(isHovered ? 0.84 : 0.60))
-                .frame(width: 19, height: 19)
+                .frame(width: 17, height: 17)
                 .background(
-                    RoundedRectangle(cornerRadius: 5, style: .continuous)
-                        .fill(Color.white.opacity(isHovered ? 0.105 : 0.050))
+                    RoundedRectangle(cornerRadius: 4, style: .continuous)
+                        .fill(Color.white.opacity(isHovered ? 0.095 : 0.038))
                 )
         }
         .buttonStyle(.plain)
