@@ -3925,6 +3925,19 @@ final class NotchCopilotTests: XCTestCase {
         )
 
         XCTAssertTrue(policy.classify(snapshot).isSignificant)
+
+        let subtleSnapshot = SpeechAudioQualitySnapshot(
+            source: .system,
+            rms: 0.0011,
+            peak: 0.010,
+            isClipping: false,
+            isTooQuiet: true,
+            noiseFloor: 0.00028,
+            gapCount: 0,
+            lastAudioAt: Date()
+        )
+
+        XCTAssertTrue(policy.classify(subtleSnapshot).isSignificant)
     }
 
     func testAppleSpeechWindowControllerPreservesSegmentOnRestartAndRotation() {

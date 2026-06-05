@@ -480,6 +480,26 @@ final class TranscriptionPipelineTests: XCTestCase {
         XCTAssertTrue(systemDecision.shouldForwardToASR)
         XCTAssertTrue(systemDecision.state == .speechLikely || systemDecision.state == .speechActive)
         XCTAssertGreaterThan(systemDecision.speechProbability, 0.5)
+
+        var subtleMicrophoneDetector = VoiceActivityDetector()
+        let subtleMicrophoneSpeech = TranscriptionAudioFixtureGenerator.speechLikeBuffer(
+            amplitude: 0.0014,
+            source: .microphone,
+            offset: 7
+        )
+        let subtleMicrophoneDecision = subtleMicrophoneDetector.analyze(subtleMicrophoneSpeech)
+        XCTAssertTrue(subtleMicrophoneDecision.shouldForwardToASR)
+        XCTAssertEqual(subtleMicrophoneDecision.state, .speechLikely)
+
+        var subtleSystemDetector = VoiceActivityDetector()
+        let subtleSystemSpeech = TranscriptionAudioFixtureGenerator.speechLikeBuffer(
+            amplitude: 0.0011,
+            source: .system,
+            offset: 8
+        )
+        let subtleSystemDecision = subtleSystemDetector.analyze(subtleSystemSpeech)
+        XCTAssertTrue(subtleSystemDecision.shouldForwardToASR)
+        XCTAssertEqual(subtleSystemDecision.state, .speechLikely)
     }
 
     func testVoiceActivityDetectorRejectsBreathingDuringSpeechHangover() {

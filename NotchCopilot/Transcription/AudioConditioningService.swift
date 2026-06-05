@@ -22,7 +22,7 @@ final class AudioConditioningService: @unchecked Sendable {
     private var preRoll: SpeechPreRollBuffer
     private var wasForwardingSpeech = false
 
-    init(source: TranscriptAudioSource, preRollDuration: TimeInterval = 0.95) {
+    init(source: TranscriptAudioSource, preRollDuration: TimeInterval = 1.25) {
         self.processor = AudioConditioningStreamProcessor(source: source)
         self.preRoll = SpeechPreRollBuffer(duration: preRollDuration)
     }

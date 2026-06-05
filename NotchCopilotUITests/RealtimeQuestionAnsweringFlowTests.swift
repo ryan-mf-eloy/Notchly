@@ -2,7 +2,7 @@ import XCTest
 
 final class RealtimeQuestionAnsweringFlowTests: XCTestCase {
     @MainActor
-    func testQuestionAnswerHarnessSupportsAnswerTranscriptCopySaveAndDismiss() {
+    func testQuestionAnswerHarnessSupportsAnswerTranscriptModeSwitching() {
         setenv("XCTDisableRuntimeIssues", "YES", 1)
         addTeardownBlock {
             unsetenv("XCTDisableRuntimeIssues")
@@ -34,21 +34,14 @@ final class RealtimeQuestionAnsweringFlowTests: XCTestCase {
         answerToggle.click()
         XCTAssertTrue(anyElement(in: harness, "qa-answer-scroll").waitForExistence(timeout: 3))
 
-        tap(anyElement(in: harness, "qa-action-copy"))
-        tap(anyElement(in: harness, "qa-action-save"))
-        tap(anyElement(in: harness, "qa-action-dismiss"))
-
-        XCTAssertFalse(anyElement(in: harness, "qa-question-title").waitForExistence(timeout: 2))
+        XCTAssertFalse(anyElement(in: harness, "qa-action-copy").exists)
+        XCTAssertFalse(anyElement(in: harness, "qa-action-save").exists)
+        XCTAssertFalse(anyElement(in: harness, "qa-action-dismiss").exists)
+        XCTAssertTrue(anyElement(in: harness, "qa-question-title").waitForExistence(timeout: 2))
     }
 
     @MainActor
     private func anyElement(in element: XCUIElement, _ identifier: String) -> XCUIElement {
         element.descendants(matching: .any).matching(identifier: identifier).firstMatch
-    }
-
-    @MainActor
-    private func tap(_ element: XCUIElement, timeout: TimeInterval = 3) {
-        XCTAssertTrue(element.waitForExistence(timeout: timeout))
-        element.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).click()
     }
 }

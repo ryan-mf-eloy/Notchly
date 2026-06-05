@@ -127,6 +127,13 @@ struct VoiceActivityDetector: Sendable {
             features.zeroCrossingRate < 0.48 &&
             features.dynamicRange > sensitivity.minimumSpeechDynamicRange &&
             features.envelopeVariation > 0.030
+        let onsetSpeechShapeLikely = features.zeroCrossingRate > 0.010 &&
+            features.zeroCrossingRate < 0.48 &&
+            features.dynamicRange > sensitivity.minimumSpeechDynamicRange * 0.72 &&
+            features.envelopeVariation > 0.012
+        let lowEnergySpeechOnset = onsetSpeechShapeLikely &&
+            features.rms >= max(sensitivity.onsetRMSFloor, adaptiveNoiseFloor * 1.02) &&
+            features.peak >= sensitivity.onsetPeakFloor
 
         let state: VoiceActivityState
         let probability: Double
@@ -156,10 +163,12 @@ struct VoiceActivityDetector: Sendable {
             probability = min(0.99, max(0.75, 0.70 + snrDb / 55.0))
             reason = isClipping ? "speech_active_clipping_guard" : "speech_active"
             lastSpeechAtBySource[source] = timestamp
-        } else if likelyByEnergy && (snrDb >= configuration.likelySpeechSNRDb || speechShapeLikely) {
+        } else if (likelyByEnergy && (snrDb >= configuration.likelySpeechSNRDb || speechShapeLikely)) || lowEnergySpeechOnset {
             state = .speechLikely
-            probability = min(0.88, max(0.52, 0.48 + snrDb / 60.0))
-            reason = "speech_likely"
+            probability = lowEnergySpeechOnset
+                ? min(0.78, max(0.56, 0.54 + snrDb / 80.0))
+                : min(0.88, max(0.52, 0.48 + snrDb / 60.0))
+            reason = lowEnergySpeechOnset ? "low_energy_speech_onset" : "speech_likely"
             lastSpeechAtBySource[source] = timestamp
         } else if let lastSpeechAt = lastSpeechAtBySource[source],
                   timestamp.timeIntervalSince(lastSpeechAt) <= configuration.hangoverDuration,
@@ -278,6 +287,8 @@ private struct VoiceActivitySourceSensitivity {
     var activeRMSMultiplier: Float
     var activeRMSFloor: Float
     var minimumSpeechDynamicRange: Float
+    var onsetRMSFloor: Float
+    var onsetPeakFloor: Float
     var hangoverRMSFloor: Float
     var silenceRMSFloor: Float
     var silencePeakFloor: Float
@@ -293,6 +304,8 @@ private struct VoiceActivitySourceSensitivity {
                 activeRMSMultiplier: 1.45,
                 activeRMSFloor: 0.0026,
                 minimumSpeechDynamicRange: 0.00035,
+                onsetRMSFloor: 0.00016,
+                onsetPeakFloor: 0.00070,
                 hangoverRMSFloor: 0.00022,
                 silenceRMSFloor: 0.000065,
                 silencePeakFloor: 0.00010
@@ -306,6 +319,8 @@ private struct VoiceActivitySourceSensitivity {
                 activeRMSMultiplier: 1.55,
                 activeRMSFloor: 0.0032,
                 minimumSpeechDynamicRange: 0.00045,
+                onsetRMSFloor: 0.00018,
+                onsetPeakFloor: 0.00090,
                 hangoverRMSFloor: 0.00028,
                 silenceRMSFloor: 0.000080,
                 silencePeakFloor: 0.00012
@@ -319,6 +334,8 @@ private struct VoiceActivitySourceSensitivity {
                 activeRMSMultiplier: 1.50,
                 activeRMSFloor: 0.0029,
                 minimumSpeechDynamicRange: 0.00040,
+                onsetRMSFloor: 0.00017,
+                onsetPeakFloor: 0.00080,
                 hangoverRMSFloor: 0.00025,
                 silenceRMSFloor: 0.000075,
                 silencePeakFloor: 0.00011

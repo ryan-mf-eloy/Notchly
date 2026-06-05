@@ -424,13 +424,13 @@ enum SpeechActivityLevel: String, Sendable, Equatable {
 }
 
 struct SpeechActivityPolicy: Sendable, Equatable {
-    var preRollDuration: TimeInterval = 1.45
-    var hangoverDuration: TimeInterval = 1.9
-    var absoluteSpeechRMS: Float = 0.0008
-    var likelySpeechRMS: Float = 0.0014
-    var activeSpeechRMS: Float = 0.0048
-    var peakAssistThreshold: Float = 0.012
-    var noiseFloorLift: Float = 1.85
+    var preRollDuration: TimeInterval = 1.7
+    var hangoverDuration: TimeInterval = 2.2
+    var absoluteSpeechRMS: Float = 0.00065
+    var likelySpeechRMS: Float = 0.00105
+    var activeSpeechRMS: Float = 0.0042
+    var peakAssistThreshold: Float = 0.009
+    var noiseFloorLift: Float = 1.70
 
     func classify(_ snapshot: SpeechAudioQualitySnapshot) -> SpeechActivityLevel {
         let rms = max(snapshot.rms, 0)

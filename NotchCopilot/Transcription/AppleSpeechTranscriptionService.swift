@@ -117,7 +117,7 @@ final class SpeechAnalyzerTranscriptionService: TranscriptionService {
     private var analysisStartedAt = Date()
     private var timelineClock = SpeechAudioTimelineClock()
     private let activityPolicy = SpeechActivityPolicy()
-    private var fallbackPreRollBuffer = SpeechPreRollBuffer(duration: 1.4)
+    private var fallbackPreRollBuffer = SpeechPreRollBuffer(duration: SpeechActivityPolicy().preRollDuration)
     private var lastSignificantAudioAt = Date.distantPast
     private var lastSegmentEmittedAt = Date.distantPast
     private var lastWatchdogNudgeAt = Date.distantPast
@@ -767,7 +767,7 @@ final class AppleSpeechTranscriptionService: NSObject, TranscriptionService {
     private let restartPolicy = SpeechRestartPolicy()
     private let watchdogPolicy = SpeechRecognitionWatchdogPolicy()
     private let activityPolicy = SpeechActivityPolicy()
-    private var preRollBuffer = SpeechPreRollBuffer(duration: 1.2)
+    private var preRollBuffer = SpeechPreRollBuffer(duration: SpeechActivityPolicy().preRollDuration)
     private var qualityMonitor = SpeechAudioQualityMonitor(source: .unknown)
     private var segmentAssembler = AppleSpeechSegmentAssembler()
 

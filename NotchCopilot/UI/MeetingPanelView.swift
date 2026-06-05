@@ -2087,6 +2087,15 @@ private final class FlippedTranscriptDocumentView: NSView {
 private final class TranscriptRowView: NSView {
     override var isFlipped: Bool { true }
 
+    private enum LayoutMetrics {
+        static let actionSize: CGFloat = 16
+        static let actionGap: CGFloat = 2
+        static let actionRightInset: CGFloat = 5
+        static let textLeftInset: CGFloat = 6
+        static let verticalInset: CGFloat = 3
+        static let hoverInset: CGFloat = -8
+    }
+
     private let label = NSTextField(labelWithString: "")
     private let copyButton = NSButton()
     private let deleteButton = NSButton()
@@ -2118,29 +2127,24 @@ private final class TranscriptRowView: NSView {
 
     override func layout() {
         super.layout()
-        let actionSize: CGFloat = 17
-        let actionGap: CGFloat = 2
-        let actionRightInset: CGFloat = 5
-        let textLeftInset: CGFloat = 6
-        let verticalInset: CGFloat = 3
-        let actionsWidth = actionSize * 2 + actionGap + actionRightInset + 4
+        let actionsWidth = LayoutMetrics.actionSize * 2 + LayoutMetrics.actionGap + LayoutMetrics.actionRightInset + 4
         label.frame = CGRect(
-            x: textLeftInset,
-            y: verticalInset,
-            width: max(1, bounds.width - textLeftInset - actionsWidth),
-            height: max(1, bounds.height - verticalInset * 2)
+            x: LayoutMetrics.textLeftInset,
+            y: LayoutMetrics.verticalInset,
+            width: max(1, bounds.width - LayoutMetrics.textLeftInset - actionsWidth),
+            height: max(1, bounds.height - LayoutMetrics.verticalInset * 2)
         )
         deleteButton.frame = CGRect(
-            x: bounds.width - actionRightInset - actionSize,
-            y: verticalInset,
-            width: actionSize,
-            height: actionSize
+            x: bounds.width - LayoutMetrics.actionRightInset - LayoutMetrics.actionSize,
+            y: LayoutMetrics.verticalInset,
+            width: LayoutMetrics.actionSize,
+            height: LayoutMetrics.actionSize
         )
         copyButton.frame = CGRect(
-            x: deleteButton.frame.minX - actionGap - actionSize,
-            y: verticalInset,
-            width: actionSize,
-            height: actionSize
+            x: deleteButton.frame.minX - LayoutMetrics.actionGap - LayoutMetrics.actionSize,
+            y: LayoutMetrics.verticalInset,
+            width: LayoutMetrics.actionSize,
+            height: LayoutMetrics.actionSize
         )
     }
 
@@ -2169,7 +2173,7 @@ private final class TranscriptRowView: NSView {
 
     override func mouseExited(with event: NSEvent) {
         let point = convert(event.locationInWindow, from: nil)
-        if bounds.insetBy(dx: -2, dy: -2).contains(point) {
+        if bounds.insetBy(dx: LayoutMetrics.hoverInset, dy: LayoutMetrics.hoverInset).contains(point) {
             return
         }
         setHovered(false)
@@ -2223,9 +2227,9 @@ private final class TranscriptRowView: NSView {
         button.contentTintColor = NSColor.white.withAlphaComponent(0.58)
         button.wantsLayer = true
         button.layer?.cornerRadius = 4
-        button.layer?.backgroundColor = NSColor.white.withAlphaComponent(0.035).cgColor
+        button.layer?.backgroundColor = NSColor.white.withAlphaComponent(0.050).cgColor
         if let image = NSImage(systemSymbolName: systemName, accessibilityDescription: tooltip) {
-            button.image = image.withSymbolConfiguration(.init(pointSize: 9.5, weight: .regular))
+            button.image = image.withSymbolConfiguration(.init(pointSize: 9.0, weight: .regular))
         }
     }
 
@@ -2234,9 +2238,9 @@ private final class TranscriptRowView: NSView {
         isHovered = hovered
         copyButton.isEnabled = hovered
         deleteButton.isEnabled = hovered
-        layer?.backgroundColor = NSColor.white.withAlphaComponent(hovered ? 0.058 : 0).cgColor
-        copyButton.alphaValue = hovered ? 0.86 : 0
-        deleteButton.alphaValue = hovered ? 0.86 : 0
+        layer?.backgroundColor = NSColor.white.withAlphaComponent(hovered ? 0.070 : 0).cgColor
+        copyButton.alphaValue = hovered ? 0.90 : 0.001
+        deleteButton.alphaValue = hovered ? 0.90 : 0.001
     }
 
     @objc private func copyTranscriptBlock() {
