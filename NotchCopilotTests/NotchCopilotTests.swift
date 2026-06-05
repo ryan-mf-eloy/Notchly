@@ -5933,6 +5933,22 @@ final class NotchCopilotTests: XCTestCase {
         XCTAssertFalse(decision.shouldLogAsError)
     }
 
+    func testSpeechRestartPolicyKeepsRecoveringForLowAudioTailWindow() {
+        let policy = SpeechRestartPolicy(recentAudioWindow: 2.5)
+        let now = Date()
+        let decision = policy.decision(
+            errorDescription: "No speech detected",
+            now: now,
+            lastSignificantAudioAt: now.addingTimeInterval(-2.3),
+            lastRestartAt: now.addingTimeInterval(-10)
+        )
+
+        XCTAssertTrue(decision.shouldRestart)
+        XCTAssertEqual(decision.delayMilliseconds, 0)
+        XCTAssertFalse(decision.shouldParkUntilAudio)
+        XCTAssertFalse(decision.shouldLogAsError)
+    }
+
     func testSpeechRestartPolicyIgnoresControlledCancellation() {
         let now = Date()
         let decision = SpeechRestartPolicy().decision(

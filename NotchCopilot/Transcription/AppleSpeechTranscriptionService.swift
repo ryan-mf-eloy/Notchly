@@ -1171,7 +1171,7 @@ final class AppleSpeechTranscriptionService: NSObject, TranscriptionService {
     private func scheduleLanguageFallbackIfNeeded(for errorDescription: String, now: Date) {
         guard allowsAutomaticLanguageSwitching else { return }
         guard errorDescription.localizedCaseInsensitiveContains("no speech") else { return }
-        guard now.timeIntervalSince(lastSignificantAudioAt) <= 1.4 else {
+        guard now.timeIntervalSince(lastSignificantAudioAt) <= restartPolicy.recentAudioWindow else {
             noSpeechWithAudioCount = 0
             return
         }
@@ -1255,8 +1255,8 @@ final class AppleSpeechTranscriptionService: NSObject, TranscriptionService {
     private func resolvedAudioSource(for config: TranscriptionConfig) -> TranscriptAudioSource {
         guard config.audioSource == .mixed else { return config.audioSource }
         let now = Date()
-        let systemIsRecent = now.timeIntervalSince(lastSystemActivity) < 1.4
-        let micIsRecent = now.timeIntervalSince(lastMicActivity) < 1.4
+        let systemIsRecent = now.timeIntervalSince(lastSystemActivity) < restartPolicy.recentAudioWindow
+        let micIsRecent = now.timeIntervalSince(lastMicActivity) < restartPolicy.recentAudioWindow
         if systemIsRecent, (!micIsRecent || recentSystemLevel >= recentMicLevel * 0.18 || recentSystemLevel > 0.012) {
             return .system
         }
