@@ -2060,6 +2060,28 @@ enum TranscriptRowInteractionMetrics {
     static let actionRowHoverBackgroundAlpha: CGFloat = 0.045
 }
 
+struct TranscriptRowHoverCandidate: Equatable {
+    var id: String
+    var frame: CGRect
+}
+
+enum TranscriptRowHoverResolver {
+    static func hoveredRowID(
+        at point: CGPoint,
+        candidates: [TranscriptRowHoverCandidate],
+        horizontalOutset: CGFloat = TranscriptRowInteractionMetrics.hoverHorizontalOutset,
+        verticalOutset: CGFloat = TranscriptRowInteractionMetrics.hoverVerticalOutset
+    ) -> String? {
+        let visibleRows = candidates.sorted { $0.frame.minY < $1.frame.minY }
+        if let exact = visibleRows.first(where: { $0.frame.contains(point) }) {
+            return exact.id
+        }
+        return visibleRows.first {
+            $0.frame.insetBy(dx: -horizontalOutset, dy: -verticalOutset).contains(point)
+        }?.id
+    }
+}
+
 private final class FlippedTranscriptDocumentView: NSView {
     override var isFlipped: Bool { true }
     private var rowViewsByID: [String: TranscriptRowView] = [:]
@@ -2216,7 +2238,9 @@ private final class FlippedTranscriptDocumentView: NSView {
 
     private func hoveredRow(at point: CGPoint) -> TranscriptRowView? {
         let rows = visibleRowsInVisualOrder()
-        return rows.first { $0.frame.contains(point) } ?? rows.first { $0.hoverFrameInDocument.contains(point) }
+        let candidates = rows.map { TranscriptRowHoverCandidate(id: $0.rowID, frame: $0.frame) }
+        guard let rowID = TranscriptRowHoverResolver.hoveredRowID(at: point, candidates: candidates) else { return nil }
+        return rowViewsByID[rowID]
     }
 }
 
@@ -2499,7 +2523,6 @@ private final class TranscriptRowActionButton: NSButton {
     override func mouseExited(with event: NSEvent) {
         isPointerInside = false
         updateAppearance(rowHovered: rowHovered)
-        onPointerHoverChanged?(false)
         super.mouseExited(with: event)
     }
 

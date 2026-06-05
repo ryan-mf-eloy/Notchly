@@ -212,11 +212,11 @@ final class AudioConditioningService: @unchecked Sendable {
     private static func nonDestructiveSpeechBridgeDuration(for source: TranscriptAudioSource) -> TimeInterval {
         switch source {
         case .system:
-            return 2.75
+            return 3.25
         case .microphone:
-            return 2.50
+            return 3.00
         default:
-            return 2.00
+            return 2.15
         }
     }
 

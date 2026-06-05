@@ -10908,6 +10908,25 @@ final class NotchCopilotTests: XCTestCase {
         XCTAssertLessThanOrEqual(TranscriptRowInteractionMetrics.hoverVerticalOutset, 2)
     }
 
+    func testTranscriptRowHoverResolverPrefersExactRowOverExpandedNeighbor() {
+        let rows = [
+            TranscriptRowHoverCandidate(id: "first", frame: CGRect(x: 0, y: 0, width: 220, height: 30)),
+            TranscriptRowHoverCandidate(id: "second", frame: CGRect(x: 0, y: 31, width: 220, height: 30))
+        ]
+
+        XCTAssertEqual(
+            TranscriptRowHoverResolver.hoveredRowID(at: CGPoint(x: 20, y: 31.5), candidates: rows),
+            "second"
+        )
+        XCTAssertEqual(
+            TranscriptRowHoverResolver.hoveredRowID(at: CGPoint(x: 228, y: 12), candidates: rows),
+            "first"
+        )
+        XCTAssertNil(
+            TranscriptRowHoverResolver.hoveredRowID(at: CGPoint(x: 20, y: 70), candidates: rows)
+        )
+    }
+
     func testMeetingDetectedIslandUsesNotchWidthAndTightCanvas() {
         let appState = AppState()
         let now = Date(timeIntervalSince1970: 100)

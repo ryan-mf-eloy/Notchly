@@ -791,8 +791,8 @@ final class TranscriptionPipelineTests: XCTestCase {
         let flags = TranscriptionFeatureFlags(vadGatingEnabled: true)
 
         for testCase in [
-            (source: TranscriptAudioSource.microphone, bridgedOffsets: 1...25, blockedOffset: 26),
-            (source: TranscriptAudioSource.system, bridgedOffsets: 1...28, blockedOffset: 29)
+            (source: TranscriptAudioSource.microphone, bridgedOffsets: 1...30, blockedOffset: 31),
+            (source: TranscriptAudioSource.system, bridgedOffsets: 1...33, blockedOffset: 34)
         ] {
             let isolatedService = AudioConditioningService(source: testCase.source, preRollDuration: 0.4)
             let config = AudioConditioningConfig(accuracyMode: .highAccuracy, target: .nativeSpeech, audioSource: testCase.source)
@@ -870,7 +870,7 @@ final class TranscriptionPipelineTests: XCTestCase {
 
             let silenceService = AudioConditioningService(source: testCase.source, preRollDuration: 0.4)
             XCTAssertFalse(silenceService.conditionWithTrace(firstSpeech, config: config, featureFlags: flags).frames.isEmpty)
-            let blockedOffset = testCase.source == .system ? 29 : 26
+            let blockedOffset = testCase.source == .system ? 34 : 31
             for offset in 1...blockedOffset {
                 let silence = TranscriptionAudioFixtureGenerator.buffer(
                     samples: Array(repeating: 0, count: 1_600),
@@ -5545,6 +5545,56 @@ final class TranscriptionPipelineTests: XCTestCase {
         }
     }
 
+    func testStreamingASRRouterKeepsUltraLowVariablePhraseChunksTogether() async throws {
+        let cases: [(source: TranscriptAudioSource, amplitudes: [Float], speaker: String)] = [
+            (
+                .microphone,
+                [0.0000012, 0.0000030, 0.0000006, 0.0000027, 0.0000005, 0.0000024, 0.0000010, 0.0000028],
+                "You"
+            ),
+            (
+                .system,
+                [0.0000010, 0.0000026, 0.0000005, 0.0000023, 0.00000045, 0.0000021, 0.0000009, 0.0000024],
+                "System"
+            )
+        ]
+
+        for testCase in cases {
+            let buffers = testCase.amplitudes.enumerated().map { offset, amplitude in
+                TranscriptionAudioFixtureGenerator.speechLikeBuffer(
+                    amplitude: amplitude,
+                    source: testCase.source,
+                    offset: offset
+                )
+            }
+            let router = StreamingASRRouter(
+                sources: [StreamingASRRouter.Source(speakerLabel: testCase.speaker, audioSource: testCase.source, audioStream: Self.stream(buffers))],
+                serviceFactory: { _ in CountingForwardedBufferTranscriptionService() }
+            )
+            let collector = SegmentCollector()
+            let collectTask = Task {
+                for await segment in router.segments {
+                    await collector.append(segment)
+                }
+            }
+
+            try await router.startTranscription(audioStream: Self.emptyStream(), config: Self.makeConfig(featureFlags: TranscriptionFeatureFlags()))
+            try? await Task.sleep(nanoseconds: 450_000_000)
+            await router.stop()
+            collectTask.cancel()
+
+            let values = await collector.values
+            let segment = try XCTUnwrap(
+                values.first,
+                "\(testCase.source.displayName) should deliver a counted final segment after variable ultra-low speech."
+            )
+            XCTAssertEqual(segment.audioSource, testCase.source)
+            XCTAssertEqual(segment.speakerLabel, testCase.speaker)
+            XCTAssertEqual(segment.text, "received \(testCase.amplitudes.count) conditioned buffers")
+            XCTAssertGreaterThan(segment.audioEnergy ?? 0, 0.00001)
+        }
+    }
+
     func testStreamingASRRouterReplaysEarlySegmentsForLateSubscriber() async throws {
         let buffers = TranscriptionAudioFixtureGenerator.buffers(profile: TranscriptionAudioFixtureProfile.clean, chunks: 2)
         let router = StreamingASRRouter(
@@ -6354,6 +6404,52 @@ private final class EchoOnAudioTranscriptionService: TranscriptionService {
                 break
             }
             self?.continuation?.finish()
+        }
+    }
+
+    func stop() async {
+        task?.cancel()
+        task = nil
+        continuation?.finish()
+        continuation = nil
+    }
+}
+
+@MainActor
+private final class CountingForwardedBufferTranscriptionService: TranscriptionService {
+    private var continuation: AsyncStream<TranscriptSegment>.Continuation?
+    private var task: Task<Void, Never>?
+
+    var segments: AsyncStream<TranscriptSegment> {
+        AsyncStream { continuation in
+            self.continuation = continuation
+        }
+    }
+
+    func startTranscription(audioStream: AsyncStream<NotchCopilot.AudioBuffer>, config: TranscriptionConfig) async throws {
+        task = Task { @MainActor [weak self] in
+            guard let self else { return }
+            var count = 0
+            var maxRMS: Float = 0
+            for await buffer in audioStream where buffer.rms > 0 {
+                count += 1
+                maxRMS = max(maxRMS, buffer.rms)
+            }
+            self.continuation?.yield(TranscriptSegment(
+                meetingId: config.meetingId,
+                speakerLabel: "Counter",
+                audioSource: config.audioSource,
+                text: "received \(count) conditioned buffers",
+                originalLanguage: config.languageCode,
+                transcriptionPhase: .final,
+                transcriptionEngine: .appleSpeech,
+                audioEnergy: Double(maxRMS),
+                startTime: 0,
+                endTime: 1,
+                confidence: 0.80,
+                isFinal: true
+            ))
+            self.continuation?.finish()
         }
     }
 

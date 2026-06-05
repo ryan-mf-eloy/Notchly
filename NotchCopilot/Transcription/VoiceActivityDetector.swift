@@ -124,6 +124,9 @@ struct VoiceActivityDetector: Sendable {
             features.zeroCrossingRate >= configuration.broadbandNoiseZeroCrossingThreshold &&
             features.envelopeVariation <= configuration.broadbandNoiseEnvelopeVariationThreshold &&
             impulseDominance <= 8
+        let isFlatNonSpeechSignal = features.dynamicRange <= sensitivity.minimumSpeechDynamicRange * 0.40 &&
+            features.envelopeVariation <= 0.006 &&
+            features.zeroCrossingRate < 0.006
         let adaptiveSpeechRMS = max(configuration.absoluteSpeechRMS * sensitivity.absoluteRMSMultiplier, adaptiveNoiseFloor * sensitivity.noiseFloorLift)
         let likelyByEnergy = features.rms >= adaptiveSpeechRMS || features.peak >= sensitivity.likelyPeak
         let activeByEnergy = features.rms >= max(adaptiveSpeechRMS * sensitivity.activeRMSMultiplier, sensitivity.activeRMSFloor) || features.peak >= sensitivity.activePeak
@@ -170,6 +173,11 @@ struct VoiceActivityDetector: Sendable {
             state = .noise
             probability = 0.06
             reason = "sustained_broadband_non_speech"
+            updateNoiseFloor(source: source, rms: min(features.rms, adaptiveNoiseFloor))
+        } else if isFlatNonSpeechSignal {
+            state = .silence
+            probability = 0.0
+            reason = "flat_non_speech"
             updateNoiseFloor(source: source, rms: min(features.rms, adaptiveNoiseFloor))
         } else if activeByEnergy && (snrDb >= configuration.activeSpeechSNRDb || speechShapeLikely) {
             state = .speechActive
@@ -230,11 +238,11 @@ struct VoiceActivityDetector: Sendable {
     private static func lowAudioContinuationWindow(for source: TranscriptAudioSource) -> TimeInterval {
         switch source {
         case .system:
-            return 2.75
+            return 3.25
         case .microphone:
-            return 2.50
+            return 3.00
         default:
-            return 2.10
+            return 2.25
         }
     }
 
