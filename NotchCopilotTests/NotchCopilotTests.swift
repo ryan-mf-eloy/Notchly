@@ -10904,6 +10904,8 @@ final class NotchCopilotTests: XCTestCase {
         XCTAssertLessThanOrEqual(TranscriptRowInteractionMetrics.actionGlyphPointSize, 6.5)
         XCTAssertGreaterThan(TranscriptRowInteractionMetrics.rowHoverAlpha, 0.14)
         XCTAssertGreaterThan(TranscriptRowInteractionMetrics.actionRowHoverAlpha, TranscriptRowInteractionMetrics.actionIdleAlpha)
+        XCTAssertGreaterThanOrEqual(TranscriptRowInteractionMetrics.hoverHorizontalOutset, 12)
+        XCTAssertLessThanOrEqual(TranscriptRowInteractionMetrics.hoverVerticalOutset, 2)
     }
 
     func testMeetingDetectedIslandUsesNotchWidthAndTightCanvas() {

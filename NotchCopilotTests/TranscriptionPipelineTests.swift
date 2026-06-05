@@ -982,6 +982,63 @@ final class TranscriptionPipelineTests: XCTestCase {
         }
     }
 
+    func testAudioConditioningServiceMaintainsUltraLowPhraseAcrossSpeechDips() {
+        let flags = TranscriptionFeatureFlags(vadGatingEnabled: true)
+
+        for testCase in [
+            (
+                source: TranscriptAudioSource.microphone,
+                amplitudes: [Float(0.0000030), 0.0000010, 0.0000027, 0.0000008, 0.0000029, 0.0000011],
+                flatAmplitude: Float(0.0000030)
+            ),
+            (
+                source: TranscriptAudioSource.system,
+                amplitudes: [Float(0.0000026), 0.0000009, 0.0000023, 0.0000007, 0.0000024, 0.0000010],
+                flatAmplitude: Float(0.0000026)
+            )
+        ] {
+            let config = AudioConditioningConfig(accuracyMode: .highAccuracy, target: .nativeSpeech, audioSource: testCase.source)
+            let speechService = AudioConditioningService(source: testCase.source, preRollDuration: 0.4)
+            var speechTraces: [AudioConditioningTrace] = []
+
+            for (offset, amplitude) in testCase.amplitudes.enumerated() {
+                let buffer = TranscriptionAudioFixtureGenerator.speechLikeBuffer(
+                    amplitude: amplitude,
+                    source: testCase.source,
+                    offset: offset
+                )
+                speechTraces.append(speechService.conditionWithTrace(buffer, config: config, featureFlags: flags))
+            }
+
+            XCTAssertTrue(
+                speechTraces.prefix(2).contains { !$0.frames.isEmpty },
+                "\(testCase.source.displayName) should start ASR before quiet phrase words are lost: \(speechTraces.map(\.vadDecision))"
+            )
+            XCTAssertEqual(
+                speechTraces.filter { !$0.frames.isEmpty }.count,
+                testCase.amplitudes.count,
+                "\(testCase.source.displayName) should keep every quiet phrase chunk connected through short speech-shaped dips: \(speechTraces.map(\.vadDecision))"
+            )
+
+            let flatService = AudioConditioningService(source: testCase.source, preRollDuration: 0.4)
+            let flatTraces = (0..<testCase.amplitudes.count).map { offset in
+                flatService.conditionWithTrace(
+                    TranscriptionAudioFixtureGenerator.buffer(
+                        samples: Array(repeating: testCase.flatAmplitude, count: 1_600),
+                        source: testCase.source,
+                        offset: offset
+                    ),
+                    config: config,
+                    featureFlags: flags
+                )
+            }
+            XCTAssertTrue(
+                flatTraces.allSatisfy { !$0.vadDecision.shouldForwardToASR && $0.frames.isEmpty },
+                "\(testCase.source.displayName) flat low-level signal should stay gated even at speech-sensitive thresholds: \(flatTraces.map(\.vadDecision))"
+            )
+        }
+    }
+
     func testLanguageContinuityResolverKeepsTechnicalCodeSwitchFromChangingGlobalSourceLanguage() {
         var resolver = LanguageContinuityResolver()
         let first = resolver.resolve(

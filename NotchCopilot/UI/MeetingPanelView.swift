@@ -2050,7 +2050,8 @@ enum TranscriptRowInteractionMetrics {
     static let actionRightInset: CGFloat = 1
     static let textLeftInset: CGFloat = 4
     static let verticalInset: CGFloat = 1
-    static let hoverOutset: CGFloat = 14
+    static let hoverHorizontalOutset: CGFloat = 14
+    static let hoverVerticalOutset: CGFloat = 2
     static let rowHoverAlpha: CGFloat = 0.16
     static let actionGlyphPointSize: CGFloat = 6.2
     static let actionIdleAlpha: CGFloat = 0.20
@@ -2165,10 +2166,7 @@ private final class FlippedTranscriptDocumentView: NSView {
             clearHoveredRowAfterGracePeriod()
             return
         }
-        let hovered = rowViewsByID.values
-            .filter { !$0.isHidden && $0.alphaValue > 0 }
-            .sorted { $0.frame.minY < $1.frame.minY }
-            .first { $0.hoverFrameInDocument.contains(point) }
+        let hovered = hoveredRow(at: point)
         if let hovered {
             setHoveredRow(hovered.rowID)
         } else {
@@ -2207,10 +2205,18 @@ private final class FlippedTranscriptDocumentView: NSView {
         guard let window else { return nil }
         let point = convert(window.mouseLocationOutsideOfEventStream, from: nil)
         guard bounds.contains(point) else { return nil }
-        return rowViewsByID.values
+        return hoveredRow(at: point)
+    }
+
+    private func visibleRowsInVisualOrder() -> [TranscriptRowView] {
+        rowViewsByID.values
             .filter { !$0.isHidden && $0.alphaValue > 0 }
             .sorted { $0.frame.minY < $1.frame.minY }
-            .first { $0.hoverFrameInDocument.contains(point) }
+    }
+
+    private func hoveredRow(at point: CGPoint) -> TranscriptRowView? {
+        let rows = visibleRowsInVisualOrder()
+        return rows.first { $0.frame.contains(point) } ?? rows.first { $0.hoverFrameInDocument.contains(point) }
     }
 }
 
@@ -2223,7 +2229,8 @@ private final class TranscriptRowView: NSView {
         static let actionRightInset = TranscriptRowInteractionMetrics.actionRightInset
         static let textLeftInset = TranscriptRowInteractionMetrics.textLeftInset
         static let verticalInset = TranscriptRowInteractionMetrics.verticalInset
-        static let hoverOutset = TranscriptRowInteractionMetrics.hoverOutset
+        static let hoverHorizontalOutset = TranscriptRowInteractionMetrics.hoverHorizontalOutset
+        static let hoverVerticalOutset = TranscriptRowInteractionMetrics.hoverVerticalOutset
         static let rowHoverAlpha = TranscriptRowInteractionMetrics.rowHoverAlpha
         static let actionGlyphPointSize = TranscriptRowInteractionMetrics.actionGlyphPointSize
     }
@@ -2240,7 +2247,7 @@ private final class TranscriptRowView: NSView {
 
     var rowID: String { row.id }
     var hoverFrameInDocument: CGRect {
-        frame.insetBy(dx: -LayoutMetrics.hoverOutset, dy: -max(3, LayoutMetrics.hoverOutset / 2))
+        frame.insetBy(dx: -LayoutMetrics.hoverHorizontalOutset, dy: -LayoutMetrics.hoverVerticalOutset)
     }
 
     init(
@@ -2324,7 +2331,7 @@ private final class TranscriptRowView: NSView {
 
     override func mouseExited(with event: NSEvent) {
         let point = convert(event.locationInWindow, from: nil)
-        if bounds.insetBy(dx: -LayoutMetrics.hoverOutset, dy: -max(3, LayoutMetrics.hoverOutset / 2)).contains(point) {
+        if bounds.insetBy(dx: -LayoutMetrics.hoverHorizontalOutset, dy: -LayoutMetrics.hoverVerticalOutset).contains(point) {
             onHoverChanged(rowID)
         } else {
             onHoverChanged(nil)
