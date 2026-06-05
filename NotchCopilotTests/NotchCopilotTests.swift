@@ -10889,13 +10889,21 @@ final class NotchCopilotTests: XCTestCase {
 
     func testTranscriptInlineActionsReserveCompactNonOverlappingSpace() {
         XCTAssertEqual(TranscriptInlineActionMetrics.buttonHitSize, 20)
-        XCTAssertEqual(TranscriptInlineActionMetrics.visibleButtonSize, 13)
+        XCTAssertEqual(TranscriptInlineActionMetrics.visibleButtonSize, 12)
         XCTAssertGreaterThan(TranscriptInlineActionMetrics.buttonHitSize, TranscriptInlineActionMetrics.visibleButtonSize)
         XCTAssertGreaterThanOrEqual(
             TranscriptInlineActionMetrics.rowTrailingReserve,
             TranscriptInlineActionMetrics.buttonHitSize * 2
         )
         XCTAssertLessThanOrEqual(TranscriptInlineActionMetrics.rowTrailingReserve, 44)
+        XCTAssertLessThanOrEqual(TranscriptInlineActionMetrics.glyphPointSize, 6.5)
+        XCTAssertGreaterThan(TranscriptInlineActionMetrics.rowHoverAlpha, 0.12)
+        XCTAssertGreaterThan(TranscriptInlineActionMetrics.visibleActionsAlpha, TranscriptInlineActionMetrics.idleActionsAlpha)
+
+        XCTAssertEqual(TranscriptRowInteractionMetrics.actionHitSize, 20)
+        XCTAssertLessThanOrEqual(TranscriptRowInteractionMetrics.actionGlyphPointSize, 6.5)
+        XCTAssertGreaterThan(TranscriptRowInteractionMetrics.rowHoverAlpha, 0.14)
+        XCTAssertGreaterThan(TranscriptRowInteractionMetrics.actionRowHoverAlpha, TranscriptRowInteractionMetrics.actionIdleAlpha)
     }
 
     func testMeetingDetectedIslandUsesNotchWidthAndTightCanvas() {

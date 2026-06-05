@@ -90,7 +90,7 @@ struct TranscriptLiveView: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(
             RoundedRectangle(cornerRadius: 6, style: .continuous)
-                .fill(Color.white.opacity(isHovered ? 0.105 : 0))
+                .fill(Color.white.opacity(isHovered ? TranscriptInlineActionMetrics.rowHoverAlpha : 0))
         )
         .overlay(alignment: .topTrailing) {
             if hasInlineActions {
@@ -151,10 +151,14 @@ struct TranscriptLiveView: View {
 
 enum TranscriptInlineActionMetrics {
     static let buttonHitSize: CGFloat = 20
-    static let visibleButtonSize: CGFloat = 13
+    static let visibleButtonSize: CGFloat = 12
+    static let glyphPointSize: CGFloat = 6.2
     static let visibleButtonCornerRadius: CGFloat = 3.5
     static let hitTargetCornerRadius: CGFloat = 5
     static let rowTrailingReserve: CGFloat = buttonHitSize * 2 + 2
+    static let rowHoverAlpha: Double = 0.14
+    static let idleActionsAlpha: Double = 0.20
+    static let visibleActionsAlpha: Double = 0.96
 }
 
 private struct TranscriptInlineActions: View {
@@ -178,7 +182,7 @@ private struct TranscriptInlineActions: View {
                 action: onDelete
             )
         }
-        .opacity(isVisible ? 0.92 : 0.24)
+        .opacity(isVisible ? TranscriptInlineActionMetrics.visibleActionsAlpha : TranscriptInlineActionMetrics.idleActionsAlpha)
         .allowsHitTesting(true)
         .animation(nil, value: isVisible)
         .contentShape(Rectangle())
@@ -201,8 +205,8 @@ private struct TranscriptInlineActionButton: View {
                     .fill(Color.white.opacity(isHovered ? 0.105 : 0.018))
                     .frame(width: TranscriptInlineActionMetrics.visibleButtonSize, height: TranscriptInlineActionMetrics.visibleButtonSize)
                 Image(systemName: systemName)
-                    .font(.system(size: 7.0, weight: .regular))
-                    .foregroundStyle(Color.white.opacity(isHovered ? 0.88 : 0.58))
+                    .font(.system(size: TranscriptInlineActionMetrics.glyphPointSize, weight: .regular))
+                    .foregroundStyle(Color.white.opacity(isHovered ? 0.90 : 0.55))
             }
             .frame(width: TranscriptInlineActionMetrics.buttonHitSize, height: TranscriptInlineActionMetrics.buttonHitSize)
             .background(

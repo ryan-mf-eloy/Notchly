@@ -2044,6 +2044,21 @@ private final class TranscriptScrollView: NSScrollView {
     }
 }
 
+enum TranscriptRowInteractionMetrics {
+    static let actionHitSize: CGFloat = 20
+    static let actionGap: CGFloat = 0
+    static let actionRightInset: CGFloat = 1
+    static let textLeftInset: CGFloat = 4
+    static let verticalInset: CGFloat = 1
+    static let hoverOutset: CGFloat = 14
+    static let rowHoverAlpha: CGFloat = 0.16
+    static let actionGlyphPointSize: CGFloat = 6.2
+    static let actionIdleAlpha: CGFloat = 0.20
+    static let actionRowHoverAlpha: CGFloat = 0.96
+    static let actionPointerHoverBackgroundAlpha: CGFloat = 0.14
+    static let actionRowHoverBackgroundAlpha: CGFloat = 0.045
+}
+
 private final class FlippedTranscriptDocumentView: NSView {
     override var isFlipped: Bool { true }
     private var rowViewsByID: [String: TranscriptRowView] = [:]
@@ -2112,7 +2127,7 @@ private final class FlippedTranscriptDocumentView: NSView {
         }
         let area = NSTrackingArea(
             rect: bounds,
-            options: [.mouseEnteredAndExited, .mouseMoved, .activeInActiveApp, .inVisibleRect],
+            options: [.mouseEnteredAndExited, .mouseMoved, .activeAlways, .enabledDuringMouseDrag, .inVisibleRect],
             owner: self,
             userInfo: nil
         )
@@ -2203,14 +2218,14 @@ private final class TranscriptRowView: NSView {
     override var isFlipped: Bool { true }
 
     private enum LayoutMetrics {
-        static let actionHitSize: CGFloat = 20
-        static let actionGap: CGFloat = 0
-        static let actionRightInset: CGFloat = 1
-        static let textLeftInset: CGFloat = 4
-        static let verticalInset: CGFloat = 1
-        static let hoverInset: CGFloat = -14
-        static let rowHoverAlpha: CGFloat = 0.132
-        static let actionGlyphPointSize: CGFloat = 7.0
+        static let actionHitSize = TranscriptRowInteractionMetrics.actionHitSize
+        static let actionGap = TranscriptRowInteractionMetrics.actionGap
+        static let actionRightInset = TranscriptRowInteractionMetrics.actionRightInset
+        static let textLeftInset = TranscriptRowInteractionMetrics.textLeftInset
+        static let verticalInset = TranscriptRowInteractionMetrics.verticalInset
+        static let hoverOutset = TranscriptRowInteractionMetrics.hoverOutset
+        static let rowHoverAlpha = TranscriptRowInteractionMetrics.rowHoverAlpha
+        static let actionGlyphPointSize = TranscriptRowInteractionMetrics.actionGlyphPointSize
     }
 
     private let label = NSTextField(labelWithString: "")
@@ -2225,7 +2240,7 @@ private final class TranscriptRowView: NSView {
 
     var rowID: String { row.id }
     var hoverFrameInDocument: CGRect {
-        frame.insetBy(dx: LayoutMetrics.hoverInset, dy: min(-3, LayoutMetrics.hoverInset / 2))
+        frame.insetBy(dx: -LayoutMetrics.hoverOutset, dy: -max(3, LayoutMetrics.hoverOutset / 2))
     }
 
     init(
@@ -2279,7 +2294,7 @@ private final class TranscriptRowView: NSView {
         }
         let area = NSTrackingArea(
             rect: bounds,
-            options: [.mouseEnteredAndExited, .mouseMoved, .activeInActiveApp, .inVisibleRect],
+            options: [.mouseEnteredAndExited, .mouseMoved, .activeAlways, .enabledDuringMouseDrag, .inVisibleRect],
             owner: self,
             userInfo: nil
         )
@@ -2309,7 +2324,7 @@ private final class TranscriptRowView: NSView {
 
     override func mouseExited(with event: NSEvent) {
         let point = convert(event.locationInWindow, from: nil)
-        if bounds.insetBy(dx: LayoutMetrics.hoverInset, dy: LayoutMetrics.hoverInset / 2).contains(point) {
+        if bounds.insetBy(dx: -LayoutMetrics.hoverOutset, dy: -max(3, LayoutMetrics.hoverOutset / 2)).contains(point) {
             onHoverChanged(rowID)
         } else {
             onHoverChanged(nil)
@@ -2427,10 +2442,10 @@ private final class TranscriptRowView: NSView {
 private final class TranscriptRowActionButton: NSButton {
     var onPointerHoverChanged: ((Bool) -> Void)?
     private enum Appearance {
-        static let idleAlpha: CGFloat = 0.26
-        static let rowHoverAlpha: CGFloat = 0.92
-        static let pointerHoverBackgroundAlpha: CGFloat = 0.120
-        static let rowHoverBackgroundAlpha: CGFloat = 0.036
+        static let idleAlpha = TranscriptRowInteractionMetrics.actionIdleAlpha
+        static let rowHoverAlpha = TranscriptRowInteractionMetrics.actionRowHoverAlpha
+        static let pointerHoverBackgroundAlpha = TranscriptRowInteractionMetrics.actionPointerHoverBackgroundAlpha
+        static let rowHoverBackgroundAlpha = TranscriptRowInteractionMetrics.actionRowHoverBackgroundAlpha
     }
 
     private var trackingArea: NSTrackingArea?
@@ -2450,7 +2465,7 @@ private final class TranscriptRowActionButton: NSButton {
         }
         let area = NSTrackingArea(
             rect: bounds,
-            options: [.mouseEnteredAndExited, .mouseMoved, .activeInActiveApp, .inVisibleRect],
+            options: [.mouseEnteredAndExited, .mouseMoved, .activeAlways, .enabledDuringMouseDrag, .inVisibleRect],
             owner: self,
             userInfo: nil
         )
@@ -2484,7 +2499,7 @@ private final class TranscriptRowActionButton: NSButton {
     func updateAppearance(rowHovered: Bool) {
         self.rowHovered = rowHovered
         alphaValue = rowHovered ? Appearance.rowHoverAlpha : Appearance.idleAlpha
-        contentTintColor = NSColor.white.withAlphaComponent(isPointerInside ? 0.84 : (rowHovered ? 0.58 : 0.30))
+        contentTintColor = NSColor.white.withAlphaComponent(isPointerInside ? 0.88 : (rowHovered ? 0.60 : 0.28))
         let backgroundAlpha: CGFloat
         if isPointerInside {
             backgroundAlpha = Appearance.pointerHoverBackgroundAlpha

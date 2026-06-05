@@ -223,9 +223,9 @@ final class AudioConditioningService: @unchecked Sendable {
     private static func weakSpeechContinuationFloor(for source: TranscriptAudioSource) -> (rms: Float, peak: Float, dynamicRange: Float, envelopeVariation: Double) {
         switch source {
         case .system:
-            return (0.0000025, 0.0000080, 0.000016, 0.0028)
+            return (0.0000014, 0.0000044, 0.000009, 0.0020)
         case .microphone:
-            return (0.0000030, 0.0000090, 0.000018, 0.0030)
+            return (0.0000016, 0.0000048, 0.000010, 0.0022)
         default:
             return (0.000040, 0.000070, 0.000060, 0.0040)
         }

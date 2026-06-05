@@ -613,8 +613,14 @@ final class TranscriptionPipelineTests: XCTestCase {
             )
             let firstTailDecision = detector.analyze(firstWeakTail, now: start.addingTimeInterval(0.52))
             XCTAssertTrue(firstTailDecision.shouldForwardToASR, "\(testCase.source.displayName): \(firstTailDecision)")
-            XCTAssertEqual(firstTailDecision.state, .lowAudio)
-            XCTAssertEqual(firstTailDecision.reason, "low_audio_speech_continuation")
+            XCTAssertTrue(
+                firstTailDecision.state == .lowAudio || firstTailDecision.state == .speechLikely,
+                "\(testCase.source.displayName) should keep the first weak tail connected: \(firstTailDecision)"
+            )
+            XCTAssertTrue(
+                firstTailDecision.reason == "low_audio_speech_continuation" || firstTailDecision.reason == "low_energy_speech_onset",
+                "\(testCase.source.displayName) should preserve speech-shaped weak tail: \(firstTailDecision)"
+            )
 
             let secondWeakTail = TranscriptionAudioFixtureGenerator.speechLikeBuffer(
                 amplitude: testCase.secondTailAmplitude,
@@ -623,8 +629,14 @@ final class TranscriptionPipelineTests: XCTestCase {
             )
             let secondTailDecision = detector.analyze(secondWeakTail, now: start.addingTimeInterval(1.04))
             XCTAssertTrue(secondTailDecision.shouldForwardToASR, "\(testCase.source.displayName): \(secondTailDecision)")
-            XCTAssertEqual(secondTailDecision.state, .lowAudio)
-            XCTAssertEqual(secondTailDecision.reason, "low_audio_speech_continuation")
+            XCTAssertTrue(
+                secondTailDecision.state == .lowAudio || secondTailDecision.state == .speechLikely,
+                "\(testCase.source.displayName) should keep the second weak tail connected: \(secondTailDecision)"
+            )
+            XCTAssertTrue(
+                secondTailDecision.reason == "low_audio_speech_continuation" || secondTailDecision.reason == "low_energy_speech_onset",
+                "\(testCase.source.displayName) should preserve speech-shaped weak tail: \(secondTailDecision)"
+            )
 
             var lateTailDetector = VoiceActivityDetector()
             XCTAssertTrue(lateTailDetector.analyze(activeSpeech, now: start).shouldForwardToASR)
@@ -636,17 +648,25 @@ final class TranscriptionPipelineTests: XCTestCase {
             let lateOffset = testCase.source == .system ? 2.68 : 2.43
             let lateTailDecision = lateTailDetector.analyze(lateWeakTail, now: start.addingTimeInterval(lateOffset))
             XCTAssertTrue(lateTailDecision.shouldForwardToASR, "\(testCase.source.displayName) late low-energy tail should remain connected: \(lateTailDecision)")
-            XCTAssertEqual(lateTailDecision.reason, "low_audio_speech_continuation")
+            XCTAssertTrue(
+                lateTailDecision.reason == "low_audio_speech_continuation" || lateTailDecision.reason == "low_energy_speech_onset",
+                "\(testCase.source.displayName) late low-energy tail should remain speech-shaped: \(lateTailDecision)"
+            )
 
             var expiredTailDetector = VoiceActivityDetector()
             XCTAssertTrue(expiredTailDetector.analyze(activeSpeech, now: start).shouldForwardToASR)
+            let expiredFlatAudio = TranscriptionAudioFixtureGenerator.buffer(
+                samples: Array(repeating: testCase.secondTailAmplitude, count: 1_600),
+                source: testCase.source,
+                offset: 4
+            )
             let expiredOffset = testCase.source == .system ? 2.98 : 2.72
-            let expiredTailDecision = expiredTailDetector.analyze(lateWeakTail, now: start.addingTimeInterval(expiredOffset))
-            XCTAssertFalse(expiredTailDecision.shouldForwardToASR, "\(testCase.source.displayName) weak tail after continuation window should not reopen ASR: \(expiredTailDecision)")
+            let expiredFlatDecision = expiredTailDetector.analyze(expiredFlatAudio, now: start.addingTimeInterval(expiredOffset))
+            XCTAssertFalse(expiredFlatDecision.shouldForwardToASR, "\(testCase.source.displayName) flat weak audio after continuation window should not reopen ASR: \(expiredFlatDecision)")
 
             var isolatedDetector = VoiceActivityDetector()
             let isolatedDecision = isolatedDetector.analyze(secondWeakTail)
-            XCTAssertFalse(isolatedDecision.shouldForwardToASR, "Isolated weak audio should not bypass the speech gate: \(isolatedDecision)")
+            XCTAssertTrue(isolatedDecision.shouldForwardToASR, "Isolated weak speech-shaped audio should now open ASR instead of cutting the start of a quiet speaker: \(isolatedDecision)")
         }
     }
 
@@ -682,7 +702,7 @@ final class TranscriptionPipelineTests: XCTestCase {
         let config = AudioConditioningConfig(accuracyMode: .highAccuracy, target: .nativeSpeech, audioSource: .microphone)
         let flags = TranscriptionFeatureFlags(vadGatingEnabled: true)
 
-        let quietLead = TranscriptionAudioFixtureGenerator.speechLikeBuffer(amplitude: 0.000002, source: .microphone, offset: 0)
+        let quietLead = TranscriptionAudioFixtureGenerator.speechLikeBuffer(amplitude: 0.00000035, source: .microphone, offset: 0)
         let leadTrace = service.conditionWithTrace(quietLead, config: config, featureFlags: flags)
         XCTAssertFalse(leadTrace.vadDecision.shouldForwardToASR)
         XCTAssertTrue(leadTrace.frames.isEmpty)
@@ -914,8 +934,8 @@ final class TranscriptionPipelineTests: XCTestCase {
         let flags = TranscriptionFeatureFlags(vadGatingEnabled: true)
 
         for testCase in [
-            (source: TranscriptAudioSource.microphone, speechAmplitude: Float(0.0000048), flatAmplitude: Float(0.0000048)),
-            (source: TranscriptAudioSource.system, speechAmplitude: Float(0.0000042), flatAmplitude: Float(0.0000042))
+            (source: TranscriptAudioSource.microphone, speechAmplitude: Float(0.0000028), flatAmplitude: Float(0.0000028)),
+            (source: TranscriptAudioSource.system, speechAmplitude: Float(0.0000024), flatAmplitude: Float(0.0000024))
         ] {
             let config = AudioConditioningConfig(accuracyMode: .highAccuracy, target: .nativeSpeech, audioSource: testCase.source)
             let speechService = AudioConditioningService(source: testCase.source, preRollDuration: 0.4)
@@ -934,12 +954,17 @@ final class TranscriptionPipelineTests: XCTestCase {
             }
 
             XCTAssertTrue(
-                speechTraces.contains { $0.vadDecision.shouldForwardToASR && !$0.frames.isEmpty },
-                "\(testCase.source.displayName) should open ASR for ultra-low speech-shaped audio: \(speechTraces.map(\.vadDecision))"
+                speechTraces.prefix(2).contains { $0.vadDecision.shouldForwardToASR && !$0.frames.isEmpty },
+                "\(testCase.source.displayName) should open ASR for ultra-low speech-shaped audio within the first two chunks: \(speechTraces.map(\.vadDecision))"
             )
             XCTAssertTrue(
-                speechTraces.contains { $0.conditionedBuffer.rms > $0.inputBuffer.rms * 20.0 },
+                speechTraces.contains { $0.conditionedBuffer.rms > $0.inputBuffer.rms * 28.0 },
                 "\(testCase.source.displayName) should apply stronger local gain before native ASR"
+            )
+            XCTAssertGreaterThanOrEqual(
+                speechTraces.filter { !$0.frames.isEmpty }.count,
+                4,
+                "\(testCase.source.displayName) should keep ultra-low continuous speech connected instead of cutting words: \(speechTraces.map(\.vadDecision))"
             )
 
             let flatService = AudioConditioningService(source: testCase.source, preRollDuration: 0.4)
