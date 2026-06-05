@@ -3838,7 +3838,7 @@ final class NotchCopilotTests: XCTestCase {
         XCTAssertFalse(result.quality.isClipping)
     }
 
-    func testAudioConditioningDoesNotNormalizeSystemAudioGain() {
+    func testAudioConditioningNormalizesSystemAudioGainForNativeSpeech() {
         let sampleRate = 48_000.0
         let frameCount = AVAudioFrameCount(0.08 * sampleRate)
         let format = AVAudioFormat(commonFormat: .pcmFormatFloat32, sampleRate: sampleRate, channels: 2, interleaved: false)!
@@ -3869,9 +3869,10 @@ final class NotchCopilotTests: XCTestCase {
             )
         )
 
-        XCTAssertEqual(result.appliedGain, 1)
+        XCTAssertGreaterThan(result.appliedGain, 1)
         XCTAssertEqual(result.buffer.pcmBuffer?.format.sampleRate, sampleRate)
         XCTAssertEqual(result.buffer.pcmBuffer?.format.channelCount, 2)
+        XCTAssertGreaterThan(result.buffer.rms, buffer.rms)
     }
 
     func testMicrophoneCaptureKeepsVoiceProcessingOptInByDefault() {
@@ -3992,7 +3993,7 @@ final class NotchCopilotTests: XCTestCase {
         XCTAssertTrue(assembledFinal?.isFinal == true)
     }
 
-    func testMeetingTranscriptLedgerSplitsShortFinalAndSeparatesSources() {
+    func testMeetingTranscriptLedgerPromotesLongDraftForShortFinalAndSeparatesSources() {
         let meetingId = UUID()
         let id = UUID()
         let draft = TranscriptSegment(
@@ -4039,13 +4040,13 @@ final class NotchCopilotTests: XCTestCase {
         let decision = ledger.decision(for: shortFinal, in: [draft])
 
         guard case let .replace(index, committed, tail) = decision else {
-            return XCTFail("Expected short final to commit its prefix and preserve a live draft tail.")
+            return XCTFail("Expected short final to promote the fuller draft in one transcript block.")
         }
         XCTAssertEqual(index, 0)
-        XCTAssertEqual(committed.text, shortFinal.text)
+        XCTAssertEqual(committed.text, draft.text)
         XCTAssertTrue(committed.isFinal)
-        XCTAssertEqual(tail?.text, "quadro opcao mas beleza")
-        XCTAssertEqual(tail?.transcriptionPhase, .draft)
+        XCTAssertEqual(committed.retentionReason, .appleDraftPromoted)
+        XCTAssertNil(tail)
 
         guard case .append = ledger.decision(for: systemFinal, in: [draft]) else {
             return XCTFail("System audio must not revise microphone segments.")
@@ -4201,6 +4202,47 @@ final class NotchCopilotTests: XCTestCase {
         XCTAssertEqual(replacement.id, firstDraft.id)
         XCTAssertEqual(replacement.text, revision.text)
         XCTAssertEqual(replacement.sourceFrameRange, AudioSourceFrameRange(start: 0, end: 28_000))
+        XCTAssertNil(tail)
+    }
+
+    func testMeetingTranscriptLedgerReplacesIncrementalDraftsAcrossChangedASRIDAndNaturalPause() {
+        let meetingId = UUID()
+        let firstDraft = TranscriptSegment(
+            id: UUID(),
+            meetingId: meetingId,
+            speakerLabel: "You",
+            audioSource: .microphone,
+            text: "Qual é",
+            transcriptionPhase: .draft,
+            transcriptionEngine: .appleSpeech,
+            sourceFrameRange: AudioSourceFrameRange(start: 0, end: 8_000),
+            startTime: 0,
+            endTime: 0.5,
+            isFinal: false
+        )
+        let revision = TranscriptSegment(
+            id: UUID(),
+            meetingId: meetingId,
+            speakerLabel: "You",
+            audioSource: .microphone,
+            text: "Qual é a capital do Brasil",
+            transcriptionPhase: .draft,
+            transcriptionEngine: .appleSpeech,
+            sourceFrameRange: AudioSourceFrameRange(start: 48_000, end: 64_000),
+            startTime: 2.55,
+            endTime: 3.55,
+            isFinal: false
+        )
+
+        let decision = MeetingTranscriptLedger().decision(for: revision, in: [firstDraft])
+
+        guard case let .replace(index, replacement, tail) = decision else {
+            return XCTFail("Incremental partials for the same phrase should keep one block even if Apple changes the segment id.")
+        }
+        XCTAssertEqual(index, 0)
+        XCTAssertEqual(replacement.id, firstDraft.id)
+        XCTAssertEqual(replacement.text, revision.text)
+        XCTAssertEqual(replacement.sourceFrameRange, AudioSourceFrameRange(start: 0, end: 64_000))
         XCTAssertNil(tail)
     }
 

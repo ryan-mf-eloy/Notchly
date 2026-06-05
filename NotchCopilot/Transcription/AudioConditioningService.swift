@@ -23,7 +23,7 @@ final class AudioConditioningService: @unchecked Sendable {
     private var wasForwardingSpeech = false
     private var lastForwardedSpeechAt: Date?
     private var bridgedNonSpeechDuration: TimeInterval = 0
-    private let nonDestructiveSpeechBridgeDuration: TimeInterval = 0.58
+    private let nonDestructiveSpeechBridgeDuration: TimeInterval = 0.95
 
     init(source: TranscriptAudioSource, preRollDuration: TimeInterval = 1.25) {
         self.processor = AudioConditioningStreamProcessor(source: source)

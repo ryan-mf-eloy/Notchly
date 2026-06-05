@@ -2049,6 +2049,7 @@ private final class FlippedTranscriptDocumentView: NSView {
     private var rowViewsByID: [String: TranscriptRowView] = [:]
     private var hoveredRowID: String?
     private var trackingArea: NSTrackingArea?
+    private var hoverClearTask: Task<Void, Never>?
 
     func replaceRows(
         _ rows: [TranscriptLayout.Row],
@@ -2114,7 +2115,7 @@ private final class FlippedTranscriptDocumentView: NSView {
         if bounds.contains(point) {
             updateHoveredRow(at: point)
         } else {
-            setHoveredRow(nil)
+            clearHoveredRowAfterGracePeriod()
         }
     }
 
@@ -2128,17 +2129,23 @@ private final class FlippedTranscriptDocumentView: NSView {
 
     private func updateHoveredRow(at point: CGPoint) {
         guard bounds.contains(point) else {
-            setHoveredRow(nil)
+            clearHoveredRowAfterGracePeriod()
             return
         }
         let hovered = rowViewsByID.values
             .filter { !$0.isHidden && $0.alphaValue > 0 }
             .sorted { $0.frame.minY < $1.frame.minY }
             .first { $0.hoverFrameInDocument.contains(point) }
-        setHoveredRow(hovered?.rowID)
+        if let hovered {
+            setHoveredRow(hovered.rowID)
+        } else {
+            clearHoveredRowAfterGracePeriod()
+        }
     }
 
     private func setHoveredRow(_ rowID: String?) {
+        hoverClearTask?.cancel()
+        hoverClearTask = nil
         guard hoveredRowID != rowID else { return }
         if let hoveredRowID {
             rowViewsByID[hoveredRowID]?.setHovered(false)
@@ -2148,13 +2155,22 @@ private final class FlippedTranscriptDocumentView: NSView {
             rowViewsByID[rowID]?.setHovered(true)
         }
     }
+
+    private func clearHoveredRowAfterGracePeriod() {
+        hoverClearTask?.cancel()
+        hoverClearTask = Task { @MainActor [weak self] in
+            try? await Task.sleep(for: .milliseconds(140))
+            guard !Task.isCancelled else { return }
+            self?.setHoveredRow(nil)
+        }
+    }
 }
 
 private final class TranscriptRowView: NSView {
     override var isFlipped: Bool { true }
 
     private enum LayoutMetrics {
-        static let actionSize: CGFloat = 14
+        static let actionSize: CGFloat = 16
         static let actionGap: CGFloat = 2
         static let actionRightInset: CGFloat = 5
         static let textLeftInset: CGFloat = 6
@@ -2285,20 +2301,20 @@ private final class TranscriptRowView: NSView {
         button.contentTintColor = NSColor.white.withAlphaComponent(0.58)
         button.wantsLayer = true
         button.layer?.cornerRadius = 3.5
-        button.layer?.backgroundColor = NSColor.white.withAlphaComponent(0.045).cgColor
+        button.layer?.backgroundColor = NSColor.white.withAlphaComponent(0.032).cgColor
         if let image = NSImage(systemSymbolName: systemName, accessibilityDescription: tooltip) {
-            button.image = image.withSymbolConfiguration(.init(pointSize: 7.8, weight: .regular))
+            button.image = image.withSymbolConfiguration(.init(pointSize: 7.4, weight: .regular))
         }
         button.isEnabled = true
     }
 
     func setHovered(_ hovered: Bool) {
         isHovered = hovered
-        layer?.backgroundColor = NSColor.white.withAlphaComponent(hovered ? 0.076 : 0).cgColor
-        copyButton.alphaValue = hovered ? 0.90 : 0.20
-        deleteButton.alphaValue = hovered ? 0.90 : 0.20
-        copyButton.layer?.backgroundColor = NSColor.white.withAlphaComponent(hovered ? 0.085 : 0.024).cgColor
-        deleteButton.layer?.backgroundColor = NSColor.white.withAlphaComponent(hovered ? 0.085 : 0.024).cgColor
+        layer?.backgroundColor = NSColor.white.withAlphaComponent(hovered ? 0.092 : 0).cgColor
+        copyButton.alphaValue = hovered ? 0.92 : 0.14
+        deleteButton.alphaValue = hovered ? 0.92 : 0.14
+        copyButton.layer?.backgroundColor = NSColor.white.withAlphaComponent(hovered ? 0.078 : 0.016).cgColor
+        deleteButton.layer?.backgroundColor = NSColor.white.withAlphaComponent(hovered ? 0.078 : 0.016).cgColor
     }
 
     @objc private func copyTranscriptBlock() {

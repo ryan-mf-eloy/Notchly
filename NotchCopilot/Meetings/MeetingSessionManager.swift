@@ -106,6 +106,9 @@ struct MeetingTranscriptLedger: Sendable, Hashable {
 
         if incoming.isFinal, !existing.isFinal {
             if isMeaningfullyShorter(incoming.text, than: existing.text) {
+                if shouldPromoteExistingDraftOverShortFinal(existing: existing, incoming: incoming) {
+                    return .replace(index: index, segment: promotedFinal(existing: existing, incoming: incoming), tail: nil)
+                }
                 if let tail = tailSegment(from: existing, after: incoming, phase: .draft) {
                     var committed = incoming
                     committed.id = existing.id
@@ -214,13 +217,92 @@ struct MeetingTranscriptLedger: Sendable, Hashable {
         if temporalOverlap(existing: existing, incoming: incoming) > 0 {
             return true
         }
+        let isIncrementalRevision = isIncrementalTextualRevision(existing: existing, incoming: incoming)
         if let existingRange = existing.sourceFrameRange, let incomingRange = incoming.sourceFrameRange {
             let frameGap = max(existingRange.start, incomingRange.start) - min(existingRange.end, incomingRange.end)
+            if isIncrementalRevision, frameGap <= 40_000 {
+                return true
+            }
             if frameGap <= 24_000 {
                 return true
             }
         }
-        return temporalGap(existing: existing, incoming: incoming) <= 1.50
+        let allowedTemporalGap: TimeInterval = isIncrementalRevision ? 2.40 : 1.50
+        return temporalGap(existing: existing, incoming: incoming) <= allowedTemporalGap
+    }
+
+    private func shouldPromoteExistingDraftOverShortFinal(existing: TranscriptSegment, incoming: TranscriptSegment) -> Bool {
+        guard incoming.isFinal, !existing.isFinal else { return false }
+        let existingText = normalized(existing.text)
+        let incomingText = normalized(incoming.text)
+        guard existingText.count > incomingText.count + 8 else { return false }
+        return existingText.hasPrefix(incomingText)
+    }
+
+    private func promotedFinal(existing: TranscriptSegment, incoming: TranscriptSegment) -> TranscriptSegment {
+        var promoted = existing
+        promoted.isFinal = true
+        promoted.transcriptionPhase = .final
+        promoted.finalizedBy = incoming.finalizedBy ?? incoming.transcriptionEngine ?? existing.transcriptionEngine
+        promoted.engineConfidence = max(existing.engineConfidence ?? 0, incoming.engineConfidence ?? 0)
+        promoted.confidence = max(existing.confidence, incoming.confidence)
+        promoted.originalLanguage = existing.originalLanguage ?? incoming.originalLanguage
+        promoted.languageConfidence = maxOptional(existing.languageConfidence, incoming.languageConfidence)
+        promoted.languageEvidenceSource = incoming.languageEvidenceSource ?? existing.languageEvidenceSource
+        promoted.languageDetectionWindowMs = maxOptional(existing.languageDetectionWindowMs, incoming.languageDetectionWindowMs)
+        promoted.languageSpanCodes = Array(NSOrderedSet(array: existing.languageSpanCodes + incoming.languageSpanCodes)) as? [String] ?? existing.languageSpanCodes
+        promoted.endTime = max(existing.endTime, incoming.endTime)
+        promoted.sourceFrameRange = mergedRange(existing.sourceFrameRange, incoming.sourceFrameRange)
+        promoted.revisionNumber = max(existing.revisionNumber, incoming.revisionNumber) + 1
+        promoted.retentionReason = .appleDraftPromoted
+        if promoted.wordTimestamps.isEmpty {
+            promoted.wordTimestamps = incoming.wordTimestamps
+        }
+        if !incoming.alternatives.isEmpty {
+            promoted.alternatives = mergedAlternatives(existing.alternatives, incoming.alternatives, limit: 8)
+        }
+        return promoted
+    }
+
+    private func isIncrementalTextualRevision(existing: TranscriptSegment, incoming: TranscriptSegment) -> Bool {
+        let existingText = normalized(existing.text)
+        let incomingText = normalized(incoming.text)
+        guard !existingText.isEmpty, !incomingText.isEmpty else { return false }
+        if existingText.hasPrefix(incomingText) || incomingText.hasPrefix(existingText) {
+            return true
+        }
+        let existingTokens = tokens(in: existingText)
+        let incomingTokens = tokens(in: incomingText)
+        return isTokenPrefix(existingTokens, of: incomingTokens) || isTokenPrefix(incomingTokens, of: existingTokens)
+    }
+
+    private func maxOptional(_ lhs: Double?, _ rhs: Double?) -> Double? {
+        switch (lhs, rhs) {
+        case let (.some(lhs), .some(rhs)):
+            return max(lhs, rhs)
+        case let (.some(value), .none), let (.none, .some(value)):
+            return value
+        case (.none, .none):
+            return nil
+        }
+    }
+
+    private func mergedAlternatives(
+        _ lhs: [TranscriptAlternative],
+        _ rhs: [TranscriptAlternative],
+        limit: Int
+    ) -> [TranscriptAlternative] {
+        var seen = Set<String>()
+        var merged: [TranscriptAlternative] = []
+        for alternative in lhs + rhs {
+            let key = normalized(alternative.text)
+            guard !key.isEmpty, seen.insert(key).inserted else { continue }
+            merged.append(alternative)
+            if merged.count == limit {
+                break
+            }
+        }
+        return merged
     }
 
     private func isMeaningfullyShorter(_ candidate: String, than reference: String) -> Bool {

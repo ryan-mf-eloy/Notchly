@@ -583,7 +583,7 @@ final class TranscriptionPipelineTests: XCTestCase {
         XCTAssertEqual(muteTrace.frames.count, 1)
         XCTAssertFalse(muteTrace.frames[0].isPreRollReplay)
 
-        for offset in 2...6 {
+        for offset in 2...10 {
             let pauseTrace = service.conditionWithTrace(
                 TranscriptionAudioFixtureGenerator.buffer(
                     samples: Array(repeating: 0, count: 1_600),
@@ -600,7 +600,7 @@ final class TranscriptionPipelineTests: XCTestCase {
         let longGap = TranscriptionAudioFixtureGenerator.buffer(
             samples: Array(repeating: 0, count: 1_600),
             source: .microphone,
-            offset: 7
+            offset: 11
         )
         let longGapTrace = service.conditionWithTrace(longGap, config: config, featureFlags: flags)
         XCTAssertFalse(longGapTrace.vadDecision.shouldForwardToASR)
@@ -753,19 +753,19 @@ final class TranscriptionPipelineTests: XCTestCase {
         XCTAssertTrue(smoother.observe(loop).isEmpty)
     }
 
-    func testTranscriptSegmentMergerSplitsTailWhenShortFinalWouldEraseLongDraft() {
+    func testTranscriptSegmentMergerPromotesLongDraftWhenShortFinalWouldEraseTail() {
         let merger = TranscriptSegmentMerger()
         let draft = segment(text: "we should keep the long draft tail", isFinal: false, start: 0, end: 3)
         let final = segment(id: draft.id, text: "we should keep", isFinal: true, start: 0, end: 1.2)
 
         let decision = merger.decision(for: final, in: [draft])
         guard case let .replace(_, replacement, tail) = decision else {
-            return XCTFail("Expected replacement with tail")
+            return XCTFail("Expected replacement that keeps the fuller utterance in one visible transcript block")
         }
         XCTAssertTrue(replacement.isFinal)
-        XCTAssertEqual(replacement.text, "we should keep")
-        XCTAssertEqual(tail?.text, "the long draft tail")
-        XCTAssertFalse(tail?.isFinal ?? true)
+        XCTAssertEqual(replacement.text, draft.text)
+        XCTAssertEqual(replacement.retentionReason, .appleDraftPromoted)
+        XCTAssertNil(tail)
     }
 
     func testRecentAudioWindowStoreScopesRefinerAudioToSegmentTimeRange() {

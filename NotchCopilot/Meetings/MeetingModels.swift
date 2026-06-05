@@ -839,6 +839,7 @@ struct TranscriptAlternative: Codable, Hashable, Sendable {
 enum TranscriptionRetentionReason: String, Codable, CaseIterable, Identifiable, Sendable {
     case appleFinalRetained
     case appleDraftRetained
+    case appleDraftPromoted
     case localRefinerAccepted
     case localRefinerRejected
     case lowEnergyRejected

@@ -87,7 +87,7 @@ struct TranscriptLiveView: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(
             RoundedRectangle(cornerRadius: 6, style: .continuous)
-                .fill(Color.white.opacity(isHovered ? 0.076 : 0))
+                .fill(Color.white.opacity(isHovered ? 0.092 : 0))
         )
         .overlay(alignment: .topTrailing) {
             if onCopySegment != nil || onDeleteSegment != nil {
@@ -144,7 +144,7 @@ private struct TranscriptInlineActions: View {
                 action: onDelete
             )
         }
-        .opacity(isVisible ? 0.90 : 0.20)
+        .opacity(isVisible ? 0.92 : 0.14)
         .allowsHitTesting(true)
         .animation(nil, value: isVisible)
     }
@@ -163,10 +163,10 @@ private struct TranscriptInlineActionButton: View {
             Image(systemName: systemName)
                 .font(.system(size: 7.8, weight: .regular))
                 .foregroundStyle(Color.white.opacity(isHovered ? 0.84 : 0.60))
-                .frame(width: 14, height: 14)
+                .frame(width: 16, height: 16)
                 .background(
                     RoundedRectangle(cornerRadius: 3.5, style: .continuous)
-                        .fill(Color.white.opacity(isHovered ? 0.085 : 0.024))
+                        .fill(Color.white.opacity(isHovered ? 0.078 : 0.016))
                 )
         }
         .buttonStyle(.plain)
