@@ -8,6 +8,7 @@ struct TranscriptLiveView: View {
     var onDeleteSegment: ((TranscriptSegment) -> Void)?
 
     @State private var hoveredSegmentID: UUID?
+    @State private var hoverClearTask: Task<Void, Never>?
 
     var body: some View {
         ScrollViewReader { proxy in
@@ -98,13 +99,35 @@ struct TranscriptLiveView: View {
                 )
                 .padding(.top, 2)
                 .padding(.trailing, 3)
+                .onHover { hovering in
+                    updateHoveredSegment(hovering ? segment.id : nil)
+                }
             }
         }
         .contentShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
         .onHover { hovering in
-            hoveredSegmentID = hovering ? segment.id : (hoveredSegmentID == segment.id ? nil : hoveredSegmentID)
+            updateHoveredSegment(hovering ? segment.id : nil)
+        }
+        .onDisappear {
+            if hoveredSegmentID == segment.id {
+                updateHoveredSegment(nil)
+            }
         }
         .animation(nil, value: isHovered)
+    }
+
+    private func updateHoveredSegment(_ segmentID: UUID?) {
+        hoverClearTask?.cancel()
+        hoverClearTask = nil
+        if let segmentID {
+            hoveredSegmentID = segmentID
+        } else if let current = hoveredSegmentID {
+            hoverClearTask = Task { @MainActor in
+                try? await Task.sleep(for: .milliseconds(140))
+                guard !Task.isCancelled, hoveredSegmentID == current else { return }
+                hoveredSegmentID = nil
+            }
+        }
     }
 
     private func transcriptColor(for segment: TranscriptSegment) -> Color {

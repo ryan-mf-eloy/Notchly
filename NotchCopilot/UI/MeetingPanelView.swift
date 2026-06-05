@@ -2262,6 +2262,17 @@ private final class TranscriptRowView: NSView {
         trackingArea = area
     }
 
+    override func hitTest(_ point: NSPoint) -> NSView? {
+        guard !isHidden, alphaValue > 0, bounds.contains(point) else { return nil }
+        if copyButton.frame.contains(point) {
+            return copyButton.hitTest(convert(point, to: copyButton)) ?? copyButton
+        }
+        if deleteButton.frame.contains(point) {
+            return deleteButton.hitTest(convert(point, to: deleteButton)) ?? deleteButton
+        }
+        return self
+    }
+
     override func mouseEntered(with event: NSEvent) {
         onHoverChanged(rowID)
         super.mouseEntered(with: event)
@@ -2288,7 +2299,7 @@ private final class TranscriptRowView: NSView {
         layer?.masksToBounds = true
 
         label.isEditable = false
-        label.isSelectable = true
+        label.isSelectable = false
         label.isBordered = false
         label.drawsBackground = false
         label.maximumNumberOfLines = 0
