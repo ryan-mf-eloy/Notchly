@@ -502,6 +502,37 @@ final class TranscriptionPipelineTests: XCTestCase {
         XCTAssertEqual(subtleSystemDecision.state, .speechLikely)
     }
 
+    func testVoiceActivityDetectorKeepsLowAudioSpeechContinuationAfterActiveSpeech() {
+        let cases: [(source: TranscriptAudioSource, tailAmplitude: Float)] = [
+            (.microphone, 0.00020),
+            (.system, 0.00016)
+        ]
+
+        for testCase in cases {
+            var detector = VoiceActivityDetector()
+            let activeSpeech = TranscriptionAudioFixtureGenerator.speechLikeBuffer(
+                amplitude: 0.004,
+                source: testCase.source,
+                offset: 0
+            )
+            XCTAssertTrue(detector.analyze(activeSpeech).shouldForwardToASR)
+
+            let weakTail = TranscriptionAudioFixtureGenerator.speechLikeBuffer(
+                amplitude: testCase.tailAmplitude,
+                source: testCase.source,
+                offset: 1
+            )
+            let tailDecision = detector.analyze(weakTail)
+            XCTAssertTrue(tailDecision.shouldForwardToASR, "\(testCase.source.displayName): \(tailDecision)")
+            XCTAssertEqual(tailDecision.state, .lowAudio)
+            XCTAssertEqual(tailDecision.reason, "low_audio_speech_continuation")
+
+            var isolatedDetector = VoiceActivityDetector()
+            let isolatedDecision = isolatedDetector.analyze(weakTail)
+            XCTAssertFalse(isolatedDecision.shouldForwardToASR, "Isolated weak audio should not bypass the speech gate: \(isolatedDecision)")
+        }
+    }
+
     func testVoiceActivityDetectorRejectsBreathingDuringSpeechHangover() {
         var detector = VoiceActivityDetector()
         let speech = TranscriptionAudioFixtureGenerator.speechLikeBuffer(offset: 0)

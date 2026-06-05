@@ -4,6 +4,7 @@ import Foundation
 enum VoiceActivityState: String, Sendable, Equatable {
     case silence
     case noise
+    case lowAudio
     case speechLikely
     case speechActive
     case hangover
@@ -33,7 +34,7 @@ struct VoiceActivityDecision: Sendable, Equatable {
     var reason: String
 
     var isSpeech: Bool {
-        state == .speechLikely || state == .speechActive || state == .hangover
+        state == .lowAudio || state == .speechLikely || state == .speechActive || state == .hangover
     }
 }
 
@@ -137,11 +138,19 @@ struct VoiceActivityDetector: Sendable {
         let lowEnergySpeechOnset = onsetSpeechShapeLikely &&
             features.rms >= max(sensitivity.onsetRMSFloor, adaptiveNoiseFloor * 1.02) &&
             features.peak >= sensitivity.onsetPeakFloor
+        let recentlyHadSpeech = lastSpeechAtBySource[source].map { timestamp.timeIntervalSince($0) <= 0.85 } ?? false
+        let lowEnergySpeechContinuation = recentlyHadSpeech &&
+            features.zeroCrossingRate > 0.008 &&
+            features.zeroCrossingRate < 0.50 &&
+            features.dynamicRange > sensitivity.minimumSpeechDynamicRange * 0.48 &&
+            features.envelopeVariation > 0.006 &&
+            features.rms >= max(sensitivity.silenceRMSFloor * 0.66, adaptiveNoiseFloor * 0.14) &&
+            (features.peak >= sensitivity.silencePeakFloor * 1.32 || snrDb >= -18.0)
 
         let state: VoiceActivityState
         let probability: Double
         let reason: String
-        if buffer.pcmBuffer == nil || features.rms <= sensitivity.silenceRMSFloor || features.peak <= sensitivity.silencePeakFloor {
+        if buffer.pcmBuffer == nil || ((features.rms <= sensitivity.silenceRMSFloor || features.peak <= sensitivity.silencePeakFloor) && !lowEnergySpeechContinuation) {
             state = .silence
             probability = 0.0
             reason = "below_floor"
@@ -173,6 +182,11 @@ struct VoiceActivityDetector: Sendable {
                 : min(0.88, max(0.52, 0.48 + snrDb / 60.0))
             reason = lowEnergySpeechOnset ? "low_energy_speech_onset" : "speech_likely"
             lastSpeechAtBySource[source] = timestamp
+        } else if lowEnergySpeechContinuation {
+            state = .lowAudio
+            probability = min(0.66, max(0.38, 0.36 + snrDb / 95.0))
+            reason = "low_audio_speech_continuation"
+            lastSpeechAtBySource[source] = timestamp
         } else if let lastSpeechAt = lastSpeechAtBySource[source],
                   timestamp.timeIntervalSince(lastSpeechAt) <= configuration.hangoverDuration,
                   features.rms >= max(sensitivity.hangoverRMSFloor, adaptiveNoiseFloor * 1.08) {
@@ -190,7 +204,7 @@ struct VoiceActivityDetector: Sendable {
             source: source,
             detectionEngine: .heuristicEnergy,
             state: state,
-            shouldForwardToASR: state == .speechLikely || state == .speechActive || state == .hangover,
+            shouldForwardToASR: state == .lowAudio || state == .speechLikely || state == .speechActive || state == .hangover,
             speechProbability: probability,
             rms: features.rms,
             peak: features.peak,

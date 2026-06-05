@@ -2070,12 +2070,22 @@ private final class FlippedTranscriptDocumentView: NSView {
             let rowView: TranscriptRowView
             if let existing = rowViewsByID[row.id] {
                 rowView = existing
-                rowView.update(row: row, onCopyBlock: onCopyBlock, onDeleteSegment: onDeleteSegment)
+                rowView.update(
+                    row: row,
+                    onCopyBlock: onCopyBlock,
+                    onDeleteSegment: onDeleteSegment,
+                    onHoverChanged: { [weak self] rowID in
+                        self?.setHoveredRow(rowID)
+                    }
+                )
             } else {
                 rowView = TranscriptRowView(
                     row: row,
                     onCopyBlock: onCopyBlock,
-                    onDeleteSegment: onDeleteSegment
+                    onDeleteSegment: onDeleteSegment,
+                    onHoverChanged: { [weak self] rowID in
+                        self?.setHoveredRow(rowID)
+                    }
                 )
                 rowViewsByID[row.id] = rowView
             }
@@ -2170,12 +2180,12 @@ private final class TranscriptRowView: NSView {
     override var isFlipped: Bool { true }
 
     private enum LayoutMetrics {
-        static let actionSize: CGFloat = 16
+        static let actionSize: CGFloat = 14
         static let actionGap: CGFloat = 2
-        static let actionRightInset: CGFloat = 5
-        static let textLeftInset: CGFloat = 6
-        static let verticalInset: CGFloat = 3
-        static let hoverInset: CGFloat = -12
+        static let actionRightInset: CGFloat = 4
+        static let textLeftInset: CGFloat = 5
+        static let verticalInset: CGFloat = 2
+        static let hoverInset: CGFloat = -10
     }
 
     private let label = NSTextField(labelWithString: "")
@@ -2184,7 +2194,9 @@ private final class TranscriptRowView: NSView {
     private var row: TranscriptLayout.Row
     private var onCopyBlock: (TranscriptSegment, String) -> Void
     private var onDeleteSegment: (TranscriptSegment) -> Void
+    private var onHoverChanged: (String?) -> Void
     private var isHovered = false
+    private var trackingArea: NSTrackingArea?
 
     var rowID: String { row.id }
     var hoverFrameInDocument: CGRect {
@@ -2194,11 +2206,13 @@ private final class TranscriptRowView: NSView {
     init(
         row: TranscriptLayout.Row,
         onCopyBlock: @escaping (TranscriptSegment, String) -> Void,
-        onDeleteSegment: @escaping (TranscriptSegment) -> Void
+        onDeleteSegment: @escaping (TranscriptSegment) -> Void,
+        onHoverChanged: @escaping (String?) -> Void
     ) {
         self.row = row
         self.onCopyBlock = onCopyBlock
         self.onDeleteSegment = onDeleteSegment
+        self.onHoverChanged = onHoverChanged
         super.init(frame: row.frame)
         configure()
         apply(row)
@@ -2211,7 +2225,7 @@ private final class TranscriptRowView: NSView {
 
     override func layout() {
         super.layout()
-        let actionsWidth = LayoutMetrics.actionSize * 2 + LayoutMetrics.actionGap + LayoutMetrics.actionRightInset + 3
+        let actionsWidth = LayoutMetrics.actionSize * 2 + LayoutMetrics.actionGap + LayoutMetrics.actionRightInset + 2
         label.frame = CGRect(
             x: LayoutMetrics.textLeftInset,
             y: LayoutMetrics.verticalInset,
@@ -2230,6 +2244,41 @@ private final class TranscriptRowView: NSView {
             width: LayoutMetrics.actionSize,
             height: LayoutMetrics.actionSize
         )
+    }
+
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        if let trackingArea {
+            removeTrackingArea(trackingArea)
+        }
+        let area = NSTrackingArea(
+            rect: bounds,
+            options: [.mouseEnteredAndExited, .mouseMoved, .activeInActiveApp, .inVisibleRect],
+            owner: self,
+            userInfo: nil
+        )
+        addTrackingArea(area)
+        trackingArea = area
+    }
+
+    override func mouseEntered(with event: NSEvent) {
+        onHoverChanged(rowID)
+        super.mouseEntered(with: event)
+    }
+
+    override func mouseMoved(with event: NSEvent) {
+        onHoverChanged(rowID)
+        super.mouseMoved(with: event)
+    }
+
+    override func mouseExited(with event: NSEvent) {
+        let point = convert(event.locationInWindow, from: nil)
+        if bounds.insetBy(dx: LayoutMetrics.hoverInset, dy: LayoutMetrics.hoverInset / 2).contains(point) {
+            onHoverChanged(rowID)
+        } else {
+            onHoverChanged(nil)
+        }
+        super.mouseExited(with: event)
     }
 
     private func configure() {
@@ -2267,10 +2316,12 @@ private final class TranscriptRowView: NSView {
     func update(
         row: TranscriptLayout.Row,
         onCopyBlock: @escaping (TranscriptSegment, String) -> Void,
-        onDeleteSegment: @escaping (TranscriptSegment) -> Void
+        onDeleteSegment: @escaping (TranscriptSegment) -> Void,
+        onHoverChanged: @escaping (String?) -> Void
     ) {
         self.onCopyBlock = onCopyBlock
         self.onDeleteSegment = onDeleteSegment
+        self.onHoverChanged = onHoverChanged
         apply(row)
     }
 
@@ -2300,21 +2351,22 @@ private final class TranscriptRowView: NSView {
         button.setAccessibilityHelp(tooltip)
         button.contentTintColor = NSColor.white.withAlphaComponent(0.58)
         button.wantsLayer = true
-        button.layer?.cornerRadius = 3.5
-        button.layer?.backgroundColor = NSColor.white.withAlphaComponent(0.032).cgColor
+        button.layer?.cornerRadius = 3
+        button.layer?.backgroundColor = NSColor.clear.cgColor
         if let image = NSImage(systemSymbolName: systemName, accessibilityDescription: tooltip) {
-            button.image = image.withSymbolConfiguration(.init(pointSize: 7.4, weight: .regular))
+            button.image = image.withSymbolConfiguration(.init(pointSize: 6.8, weight: .regular))
         }
         button.isEnabled = true
     }
 
     func setHovered(_ hovered: Bool) {
+        guard isHovered != hovered else { return }
         isHovered = hovered
-        layer?.backgroundColor = NSColor.white.withAlphaComponent(hovered ? 0.092 : 0).cgColor
-        copyButton.alphaValue = hovered ? 0.92 : 0.14
-        deleteButton.alphaValue = hovered ? 0.92 : 0.14
-        copyButton.layer?.backgroundColor = NSColor.white.withAlphaComponent(hovered ? 0.078 : 0.016).cgColor
-        deleteButton.layer?.backgroundColor = NSColor.white.withAlphaComponent(hovered ? 0.078 : 0.016).cgColor
+        layer?.backgroundColor = NSColor.white.withAlphaComponent(hovered ? 0.064 : 0).cgColor
+        copyButton.alphaValue = hovered ? 0.86 : 0.36
+        deleteButton.alphaValue = hovered ? 0.86 : 0.36
+        copyButton.layer?.backgroundColor = NSColor.white.withAlphaComponent(hovered ? 0.056 : 0).cgColor
+        deleteButton.layer?.backgroundColor = NSColor.white.withAlphaComponent(hovered ? 0.056 : 0).cgColor
     }
 
     @objc private func copyTranscriptBlock() {
@@ -2427,9 +2479,9 @@ private enum TranscriptLayout {
         questionHighlights: [TranscriptQuestionHighlight] = []
     ) -> (rows: [Row], documentHeight: CGFloat) {
         let rowWidth = max(1, min(width - 24, showTranslatedText ? 492 : 520))
-        let rowHorizontalInset: CGFloat = 6
-        let rowVerticalInset: CGFloat = 2.5
-        let actionReserve: CGFloat = 42
+        let rowHorizontalInset: CGFloat = 5
+        let rowVerticalInset: CGFloat = 2
+        let actionReserve: CGFloat = 38
         let measuredTextWidth = max(1, rowWidth - actionReserve)
         let rowX = max(0, (width - rowWidth) / 2)
         let verticalPadding: CGFloat = 0
@@ -2497,7 +2549,7 @@ private enum TranscriptLayout {
                             questionHighlights: questionHighlights
                         ),
                         copyText: copyText(originalText: pair.original, translatedText: pair.translation),
-                        spacingAfter: index == pairs.count - 1 ? 11 : 6
+                        spacingAfter: index == pairs.count - 1 ? 8 : 4
                     )
                 }
             }
@@ -2515,7 +2567,7 @@ private enum TranscriptLayout {
                         questionHighlights: questionHighlights
                     ),
                     copyText: chunk,
-                    spacingAfter: index == chunks.count - 1 ? 11 : 6
+                    spacingAfter: index == chunks.count - 1 ? 8 : 4
                 )
             }
         }
@@ -2533,7 +2585,7 @@ private enum TranscriptLayout {
                     questionHighlights: questionHighlights
                 ),
                 copyText: chunk,
-                spacingAfter: index == chunks.count - 1 ? 10 : 5
+                spacingAfter: index == chunks.count - 1 ? 7 : 4
             )
         }
     }
@@ -2561,18 +2613,18 @@ private enum TranscriptLayout {
         let translatedColor = NSColor.white.withAlphaComponent(0.96)
         let originalSecondaryColor = NSColor.white.withAlphaComponent(0.46)
         let primaryParagraph = NSMutableParagraphStyle()
-        primaryParagraph.lineSpacing = 2.4
-        primaryParagraph.paragraphSpacing = translatedText == nil ? 0.5 : 2.4
+        primaryParagraph.lineSpacing = 1.5
+        primaryParagraph.paragraphSpacing = translatedText == nil ? 0.3 : 1.6
         let secondaryParagraph = NSMutableParagraphStyle()
-        secondaryParagraph.lineSpacing = 2.0
-        secondaryParagraph.paragraphSpacing = 0.5
+        secondaryParagraph.lineSpacing = 1.2
+        secondaryParagraph.paragraphSpacing = 0.3
 
         if let translatedText {
             let translatedStart = result.length
             result.append(NSAttributedString(
                 string: translatedText,
                 attributes: [
-                    .font: NSFont.systemFont(ofSize: translationOnly ? 14.6 : 14.2, weight: .light),
+                    .font: NSFont.systemFont(ofSize: translationOnly ? 13.4 : 13.1, weight: .light),
                     .foregroundColor: translatedColor,
                     .paragraphStyle: primaryParagraph
                 ]
@@ -2590,7 +2642,7 @@ private enum TranscriptLayout {
                 result.append(NSAttributedString(
                     string: originalText,
                     attributes: [
-                        .font: NSFont.systemFont(ofSize: 12.4, weight: .light),
+                        .font: NSFont.systemFont(ofSize: 11.8, weight: .light),
                         .foregroundColor: originalSecondaryColor,
                         .paragraphStyle: secondaryParagraph
                     ]
@@ -2608,7 +2660,7 @@ private enum TranscriptLayout {
             result.append(NSAttributedString(
                 string: originalText,
                 attributes: [
-                    .font: NSFont.systemFont(ofSize: segment.audioSource.isUserSide ? 14.2 : 14.6, weight: .light),
+                    .font: NSFont.systemFont(ofSize: segment.audioSource.isUserSide ? 13.1 : 13.4, weight: .light),
                     .foregroundColor: transcriptionColor,
                     .paragraphStyle: primaryParagraph
                 ]

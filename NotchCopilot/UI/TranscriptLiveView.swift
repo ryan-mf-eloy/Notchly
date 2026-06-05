@@ -58,36 +58,36 @@ struct TranscriptLiveView: View {
 
             if let translatedText = translatedDisplayText(for: segment) {
                 Text(translatedText)
-                    .font(.system(size: segment.audioSource.isUserSide ? 13.2 : 13.8, weight: .regular))
+                    .font(.system(size: segment.audioSource.isUserSide ? 12.8 : 13.1, weight: .regular))
                     .foregroundStyle(MinimalTheme.historyText.opacity(0.96))
                     .multilineTextAlignment(.leading)
-                    .lineSpacing(2)
+                    .lineSpacing(1.4)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .textSelection(.enabled)
 
                 Text(segment.text)
-                    .font(.system(size: 12.0, weight: .regular))
+                    .font(.system(size: 11.6, weight: .regular))
                     .foregroundStyle(MinimalTheme.historyMuted.opacity(0.72))
                     .multilineTextAlignment(.leading)
-                    .lineSpacing(1.6)
+                    .lineSpacing(1.2)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .textSelection(.enabled)
             } else {
                 Text(segment.text)
-                    .font(.system(size: segment.audioSource.isUserSide ? 13.2 : 13.8, weight: .regular))
+                    .font(.system(size: segment.audioSource.isUserSide ? 12.8 : 13.1, weight: .regular))
                     .foregroundStyle(transcriptColor(for: segment))
                     .multilineTextAlignment(.leading)
-                    .lineSpacing(2)
+                    .lineSpacing(1.4)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .textSelection(.enabled)
             }
         }
-        .padding(.vertical, 6)
-        .padding(.horizontal, 6)
+        .padding(.vertical, 4)
+        .padding(.horizontal, 5)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(
             RoundedRectangle(cornerRadius: 6, style: .continuous)
-                .fill(Color.white.opacity(isHovered ? 0.092 : 0))
+                .fill(Color.white.opacity(isHovered ? 0.064 : 0))
         )
         .overlay(alignment: .topTrailing) {
             if onCopySegment != nil || onDeleteSegment != nil {
@@ -144,7 +144,7 @@ private struct TranscriptInlineActions: View {
                 action: onDelete
             )
         }
-        .opacity(isVisible ? 0.92 : 0.14)
+        .opacity(isVisible ? 0.88 : 0.36)
         .allowsHitTesting(true)
         .animation(nil, value: isVisible)
     }
@@ -161,15 +161,16 @@ private struct TranscriptInlineActionButton: View {
     var body: some View {
         Button(action: action) {
             Image(systemName: systemName)
-                .font(.system(size: 7.8, weight: .regular))
-                .foregroundStyle(Color.white.opacity(isHovered ? 0.84 : 0.60))
-                .frame(width: 16, height: 16)
+                .font(.system(size: 7.0, weight: .regular))
+                .foregroundStyle(Color.white.opacity(isHovered ? 0.82 : 0.58))
+                .frame(width: 14, height: 14)
                 .background(
-                    RoundedRectangle(cornerRadius: 3.5, style: .continuous)
-                        .fill(Color.white.opacity(isHovered ? 0.078 : 0.016))
+                    RoundedRectangle(cornerRadius: 3, style: .continuous)
+                        .fill(Color.white.opacity(isHovered ? 0.056 : 0))
                 )
         }
         .buttonStyle(.plain)
+        .contentShape(RoundedRectangle(cornerRadius: 3, style: .continuous))
         .help(accessibilityLabel)
         .accessibilityLabel(accessibilityLabel)
         .accessibilityIdentifier(accessibilityIdentifier)
