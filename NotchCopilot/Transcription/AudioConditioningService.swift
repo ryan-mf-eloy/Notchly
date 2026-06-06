@@ -113,16 +113,18 @@ final class AudioConditioningService: @unchecked Sendable {
             }
         }
 
+        let weakSpeechContinuationCandidate = !decision.shouldForwardToASR && isWeakSpeechContinuationCandidate(
+            decision,
+            buffer: conditioned,
+            quality: result.quality
+        )
         let shouldBridgeSpeechGap = shouldBridgeNonSpeechFrame(
             decision,
             buffer: conditioned,
-            quality: result.quality
+            quality: result.quality,
+            allowsExtendedBridge: weakSpeechContinuationCandidate
         )
-        let shouldMaintainWeakSpeechContinuation = shouldBridgeSpeechGap && isWeakSpeechContinuationCandidate(
-            decision,
-            buffer: conditioned,
-            quality: result.quality
-        )
+        let shouldMaintainWeakSpeechContinuation = shouldBridgeSpeechGap && weakSpeechContinuationCandidate
         let shouldForward = decision.shouldForwardToASR || shouldBridgeSpeechGap
 
         let frames: [ConditionedAudioFrame]
@@ -165,11 +167,13 @@ final class AudioConditioningService: @unchecked Sendable {
     private func shouldBridgeNonSpeechFrame(
         _ decision: VoiceActivityDecision,
         buffer: AudioBuffer,
-        quality: SpeechAudioQualitySnapshot
+        quality: SpeechAudioQualitySnapshot,
+        allowsExtendedBridge: Bool
     ) -> Bool {
-        let bridgeDuration = Self.nonDestructiveSpeechBridgeDuration(
-            for: decision.source == .unknown ? quality.source : decision.source
-        )
+        let source = decision.source == .unknown ? quality.source : decision.source
+        let bridgeDuration = allowsExtendedBridge
+            ? Self.nonDestructiveSpeechBridgeDuration(for: source)
+            : Self.passiveNonSpeechBridgeDuration(for: source)
         guard wasForwardingSpeech,
               !decision.shouldForwardToASR,
               buffer.pcmBuffer != nil,
@@ -217,6 +221,17 @@ final class AudioConditioningService: @unchecked Sendable {
             return 3.55
         default:
             return 2.50
+        }
+    }
+
+    private static func passiveNonSpeechBridgeDuration(for source: TranscriptAudioSource) -> TimeInterval {
+        switch source {
+        case .system:
+            return 0.65
+        case .microphone:
+            return 0.55
+        default:
+            return 0.45
         }
     }
 

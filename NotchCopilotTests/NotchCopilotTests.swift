@@ -4043,8 +4043,9 @@ final class NotchCopilotTests: XCTestCase {
             lastRestartAt: now.addingTimeInterval(-(policy.minimumRestartInterval + 0.05)),
             activeWindowStartedAt: now.addingTimeInterval(-(policy.minimumActiveWindowBeforeRestart - 0.05))
         ))
-        XCTAssertLessThanOrEqual(policy.noSegmentWindow, 2.5)
-        XCTAssertLessThanOrEqual(policy.minimumActiveWindowBeforeRestart, 0.95)
+        XCTAssertLessThanOrEqual(policy.noSegmentWindow, 1.9)
+        XCTAssertLessThanOrEqual(policy.minimumRestartInterval, 1.2)
+        XCTAssertLessThanOrEqual(policy.minimumActiveWindowBeforeRestart, 0.75)
     }
 
     func testSpeechActivityPolicyTreatsLowConsistentAudioAsSpeechLikely() {
@@ -11183,9 +11184,9 @@ final class NotchCopilotTests: XCTestCase {
 
         XCTAssertEqual(TranscriptRowInteractionMetrics.actionHitSize, 22)
         XCTAssertLessThanOrEqual(TranscriptRowInteractionMetrics.actionGlyphPointSize, 7.5)
-        XCTAssertGreaterThan(TranscriptRowInteractionMetrics.rowHoverAlpha, 0.06)
+        XCTAssertGreaterThan(TranscriptRowInteractionMetrics.rowHoverAlpha, 0.09)
         XCTAssertLessThan(TranscriptRowInteractionMetrics.rowHoverAlpha, 0.10)
-        XCTAssertGreaterThan(TranscriptRowInteractionMetrics.rowHoverBorderAlpha, 0)
+        XCTAssertGreaterThanOrEqual(TranscriptRowInteractionMetrics.rowHoverBorderAlpha, 0.04)
         XCTAssertGreaterThan(TranscriptRowInteractionMetrics.actionIdleAlpha, 0)
         XCTAssertLessThan(TranscriptRowInteractionMetrics.actionIdleAlpha, 0.02)
         XCTAssertGreaterThan(TranscriptRowInteractionMetrics.actionRowHoverAlpha, TranscriptRowInteractionMetrics.actionIdleAlpha)

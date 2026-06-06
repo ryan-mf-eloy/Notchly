@@ -791,8 +791,8 @@ final class TranscriptionPipelineTests: XCTestCase {
         let flags = TranscriptionFeatureFlags(vadGatingEnabled: true)
 
         for testCase in [
-            (source: TranscriptAudioSource.microphone, bridgedOffsets: 1...30, blockedOffset: 31),
-            (source: TranscriptAudioSource.system, bridgedOffsets: 1...33, blockedOffset: 34)
+            (source: TranscriptAudioSource.microphone, bridgedOffsets: 1...6, blockedOffset: 7),
+            (source: TranscriptAudioSource.system, bridgedOffsets: 1...7, blockedOffset: 8)
         ] {
             let isolatedService = AudioConditioningService(source: testCase.source, preRollDuration: 0.4)
             let config = AudioConditioningConfig(accuracyMode: .highAccuracy, target: .nativeSpeech, audioSource: testCase.source)
@@ -844,8 +844,8 @@ final class TranscriptionPipelineTests: XCTestCase {
         )
 
         for testCase in [
-            (source: TranscriptAudioSource.microphone, amplitude: Float(0.000014), lateOffset: 33),
-            (source: TranscriptAudioSource.system, amplitude: Float(0.000012), lateOffset: 36)
+            (source: TranscriptAudioSource.microphone, amplitude: Float(0.0000048), lateOffset: 33),
+            (source: TranscriptAudioSource.system, amplitude: Float(0.0000042), lateOffset: 36)
         ] {
             let config = AudioConditioningConfig(accuracyMode: .highAccuracy, target: .nativeSpeech, audioSource: testCase.source)
             let service = AudioConditioningService(source: testCase.source, preRollDuration: 0.4)
@@ -870,43 +870,43 @@ final class TranscriptionPipelineTests: XCTestCase {
 
             let silenceService = AudioConditioningService(source: testCase.source, preRollDuration: 0.4)
             XCTAssertFalse(silenceService.conditionWithTrace(firstSpeech, config: config, featureFlags: flags).frames.isEmpty)
-            let blockedOffset = testCase.source == .system ? 34 : 31
-            for offset in 1...blockedOffset {
+            let passiveBlockedOffset = testCase.source == .system ? 8 : 7
+            for offset in 1...passiveBlockedOffset {
                 let silence = TranscriptionAudioFixtureGenerator.buffer(
                     samples: Array(repeating: 0, count: 1_600),
                     source: testCase.source,
                     offset: offset
                 )
                 let trace = silenceService.conditionWithTrace(silence, config: config, featureFlags: flags)
-                if offset == blockedOffset {
+                if offset == passiveBlockedOffset {
                     XCTAssertTrue(trace.frames.isEmpty, "\(testCase.source.displayName) pure silence should still expire instead of renewing bridge")
                 }
             }
 
             let quietMusicService = AudioConditioningService(source: testCase.source, preRollDuration: 0.4)
             XCTAssertFalse(quietMusicService.conditionWithTrace(firstSpeech, config: config, featureFlags: flags).frames.isEmpty)
-            for offset in 1...blockedOffset {
+            for offset in 1...passiveBlockedOffset {
                 let quietMusic = TranscriptionAudioFixtureGenerator.tonalMusicBuffer(
                     amplitude: 0.00005,
                     source: testCase.source,
                     offset: offset
                 )
                 let trace = quietMusicService.conditionWithTrace(quietMusic, config: config, featureFlags: flags)
-                if offset == blockedOffset {
+                if offset == passiveBlockedOffset {
                     XCTAssertTrue(trace.frames.isEmpty, "\(testCase.source.displayName) quiet music should not renew speech bridge")
                 }
             }
 
             let quietBreathingService = AudioConditioningService(source: testCase.source, preRollDuration: 0.4)
             XCTAssertFalse(quietBreathingService.conditionWithTrace(firstSpeech, config: config, featureFlags: flags).frames.isEmpty)
-            for offset in 1...blockedOffset {
+            for offset in 1...passiveBlockedOffset {
                 let quietBreathing = TranscriptionAudioFixtureGenerator.breathingNoiseBuffer(
                     amplitude: 0.00005,
                     source: testCase.source,
                     offset: offset
                 )
                 let trace = quietBreathingService.conditionWithTrace(quietBreathing, config: config, featureFlags: flags)
-                if offset == blockedOffset {
+                if offset == passiveBlockedOffset {
                     XCTAssertTrue(trace.frames.isEmpty, "\(testCase.source.displayName) quiet breathing should not renew speech bridge")
                 }
             }

@@ -2052,8 +2052,8 @@ enum TranscriptRowInteractionMetrics {
     static let verticalInset: CGFloat = 0
     static let hoverHorizontalOutset: CGFloat = 22
     static let hoverVerticalOutset: CGFloat = 5
-    static let rowHoverAlpha: CGFloat = 0.085
-    static let rowHoverBorderAlpha: CGFloat = 0.025
+    static let rowHoverAlpha: CGFloat = 0.095
+    static let rowHoverBorderAlpha: CGFloat = 0.040
     static let actionGlyphPointSize: CGFloat = 7.4
     static let actionIdleAlpha: CGFloat = 0.008
     static let actionRowHoverAlpha: CGFloat = 0.86
@@ -2109,6 +2109,11 @@ private final class FlippedTranscriptDocumentView: NSView {
     ) {
         frame = CGRect(x: 0, y: 0, width: width, height: documentHeight)
         let activeIDs = Set(rows.map(\.id))
+        if let hoveredRowID, !activeIDs.contains(hoveredRowID) {
+            self.hoveredRowID = nil
+            hoverClearTask?.cancel()
+            hoverClearTask = nil
+        }
         let staleIDs = rowViewsByID.keys.filter { !activeIDs.contains($0) }
         for id in staleIDs {
             rowViewsByID[id]?.removeFromSuperview()
@@ -2210,9 +2215,14 @@ private final class FlippedTranscriptDocumentView: NSView {
     private func setHoveredRow(_ rowID: String?) {
         hoverClearTask?.cancel()
         hoverClearTask = nil
-        guard hoveredRowID != rowID else { return }
-        if let hoveredRowID {
-            rowViewsByID[hoveredRowID]?.setHovered(false)
+        if hoveredRowID == rowID {
+            if let rowID {
+                rowViewsByID[rowID]?.setHovered(true)
+            }
+            return
+        }
+        if let previousRowID = hoveredRowID {
+            rowViewsByID[previousRowID]?.setHovered(false)
         }
         hoveredRowID = rowID
         if let rowID {
