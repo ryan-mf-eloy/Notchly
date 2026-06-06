@@ -800,10 +800,10 @@ struct SpeechAnalyzerRangeKey: Hashable, Comparable, Sendable {
 
 struct SpeechRecognitionWatchdogPolicy: Sendable, Equatable {
     var significantAudioRMS: Float = 0.0012
-    var significantAudioWindow: TimeInterval = 5
-    var noSegmentWindow: TimeInterval = 4
-    var minimumRestartInterval: TimeInterval = 2
-    var minimumActiveWindowBeforeRestart: TimeInterval = 1.2
+    var significantAudioWindow: TimeInterval = 5.5
+    var noSegmentWindow: TimeInterval = 2.4
+    var minimumRestartInterval: TimeInterval = 1.4
+    var minimumActiveWindowBeforeRestart: TimeInterval = 0.9
 
     func shouldRestart(
         now: Date,

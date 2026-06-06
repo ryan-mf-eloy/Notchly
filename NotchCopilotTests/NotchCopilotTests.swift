@@ -4018,6 +4018,35 @@ final class NotchCopilotTests: XCTestCase {
         ))
     }
 
+    func testSpeechRecognitionWatchdogRecoversFasterForLowAudioWithoutTranscript() {
+        let policy = SpeechRecognitionWatchdogPolicy()
+        let now = Date(timeIntervalSince1970: 10)
+
+        XCTAssertTrue(policy.shouldRestart(
+            now: now,
+            lastSignificantAudioAt: now.addingTimeInterval(-0.15),
+            lastSegmentAt: now.addingTimeInterval(-(policy.noSegmentWindow + 0.05)),
+            lastRestartAt: now.addingTimeInterval(-(policy.minimumRestartInterval + 0.05)),
+            activeWindowStartedAt: now.addingTimeInterval(-(policy.minimumActiveWindowBeforeRestart + 0.05))
+        ))
+        XCTAssertFalse(policy.shouldRestart(
+            now: now,
+            lastSignificantAudioAt: now.addingTimeInterval(-0.15),
+            lastSegmentAt: now.addingTimeInterval(-(policy.noSegmentWindow - 0.05)),
+            lastRestartAt: now.addingTimeInterval(-(policy.minimumRestartInterval + 0.05)),
+            activeWindowStartedAt: now.addingTimeInterval(-(policy.minimumActiveWindowBeforeRestart + 0.05))
+        ))
+        XCTAssertFalse(policy.shouldRestart(
+            now: now,
+            lastSignificantAudioAt: now.addingTimeInterval(-0.15),
+            lastSegmentAt: now.addingTimeInterval(-(policy.noSegmentWindow + 0.05)),
+            lastRestartAt: now.addingTimeInterval(-(policy.minimumRestartInterval + 0.05)),
+            activeWindowStartedAt: now.addingTimeInterval(-(policy.minimumActiveWindowBeforeRestart - 0.05))
+        ))
+        XCTAssertLessThanOrEqual(policy.noSegmentWindow, 2.5)
+        XCTAssertLessThanOrEqual(policy.minimumActiveWindowBeforeRestart, 0.95)
+    }
+
     func testSpeechActivityPolicyTreatsLowConsistentAudioAsSpeechLikely() {
         let policy = SpeechActivityPolicy()
         let snapshot = SpeechAudioQualitySnapshot(

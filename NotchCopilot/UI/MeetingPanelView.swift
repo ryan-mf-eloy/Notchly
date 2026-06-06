@@ -2450,7 +2450,9 @@ private final class TranscriptRowView: NSView {
         button.layer?.backgroundColor = NSColor.clear.cgColor
         button.onPointerHoverChanged = { [weak self] hovering in
             guard let self else { return }
-            self.onHoverChanged(hovering ? self.rowID : nil)
+            if hovering {
+                self.onHoverChanged(self.rowID)
+            }
         }
         if let image = NSImage(systemSymbolName: systemName, accessibilityDescription: tooltip) {
             button.image = image.withSymbolConfiguration(.init(pointSize: LayoutMetrics.actionGlyphPointSize, weight: .regular))
@@ -2536,7 +2538,6 @@ private final class TranscriptRowActionButton: NSButton {
     override func mouseExited(with event: NSEvent) {
         isPointerInside = false
         updateAppearance(rowHovered: rowHovered)
-        onPointerHoverChanged?(false)
         super.mouseExited(with: event)
     }
 

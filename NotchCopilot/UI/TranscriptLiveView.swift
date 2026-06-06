@@ -187,7 +187,9 @@ private struct TranscriptInlineActions: View {
         .animation(nil, value: isVisible)
         .contentShape(Rectangle())
         .onHover { hovering in
-            onHoverChanged(hovering)
+            if hovering {
+                onHoverChanged(true)
+            }
         }
     }
 }
