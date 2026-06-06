@@ -11057,22 +11057,25 @@ final class NotchCopilotTests: XCTestCase {
     }
 
     func testTranscriptInlineActionsReserveCompactNonOverlappingSpace() {
-        XCTAssertEqual(TranscriptInlineActionMetrics.buttonHitSize, 22)
-        XCTAssertEqual(TranscriptInlineActionMetrics.visibleButtonSize, 14)
+        XCTAssertEqual(TranscriptInlineActionMetrics.buttonHitSize, 24)
+        XCTAssertEqual(TranscriptInlineActionMetrics.visibleButtonSize, 12)
         XCTAssertGreaterThan(TranscriptInlineActionMetrics.buttonHitSize, TranscriptInlineActionMetrics.visibleButtonSize)
         XCTAssertGreaterThanOrEqual(
             TranscriptInlineActionMetrics.rowTrailingReserve,
             TranscriptInlineActionMetrics.buttonHitSize * 2
         )
-        XCTAssertLessThanOrEqual(TranscriptInlineActionMetrics.rowTrailingReserve, 46)
-        XCTAssertLessThanOrEqual(TranscriptInlineActionMetrics.glyphPointSize, 8.5)
-        XCTAssertGreaterThan(TranscriptInlineActionMetrics.rowHoverAlpha, 0.12)
-        XCTAssertEqual(TranscriptInlineActionMetrics.idleActionsAlpha, 0)
+        XCTAssertLessThanOrEqual(TranscriptInlineActionMetrics.rowTrailingReserve, 50)
+        XCTAssertLessThanOrEqual(TranscriptInlineActionMetrics.glyphPointSize, 7.5)
+        XCTAssertGreaterThan(TranscriptInlineActionMetrics.rowHoverAlpha, 0.06)
+        XCTAssertLessThan(TranscriptInlineActionMetrics.rowHoverAlpha, 0.10)
+        XCTAssertGreaterThan(TranscriptInlineActionMetrics.idleActionsAlpha, 0)
+        XCTAssertLessThan(TranscriptInlineActionMetrics.idleActionsAlpha, 0.01)
         XCTAssertGreaterThan(TranscriptInlineActionMetrics.visibleActionsAlpha, TranscriptInlineActionMetrics.idleActionsAlpha)
 
         XCTAssertEqual(TranscriptRowInteractionMetrics.actionHitSize, 22)
-        XCTAssertLessThanOrEqual(TranscriptRowInteractionMetrics.actionGlyphPointSize, 8.5)
-        XCTAssertGreaterThan(TranscriptRowInteractionMetrics.rowHoverAlpha, 0.12)
+        XCTAssertLessThanOrEqual(TranscriptRowInteractionMetrics.actionGlyphPointSize, 7.5)
+        XCTAssertGreaterThan(TranscriptRowInteractionMetrics.rowHoverAlpha, 0.06)
+        XCTAssertLessThan(TranscriptRowInteractionMetrics.rowHoverAlpha, 0.10)
         XCTAssertGreaterThan(TranscriptRowInteractionMetrics.rowHoverBorderAlpha, 0)
         XCTAssertEqual(TranscriptRowInteractionMetrics.actionIdleAlpha, 0)
         XCTAssertGreaterThan(TranscriptRowInteractionMetrics.actionRowHoverAlpha, TranscriptRowInteractionMetrics.actionIdleAlpha)

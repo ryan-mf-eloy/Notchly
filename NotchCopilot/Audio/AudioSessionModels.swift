@@ -153,16 +153,16 @@ struct AudioConditioningPipeline: Sendable {
         if config.target == .cloudRealtime {
             targetRMS = 0.056
         } else if config.audioSource == .system {
-            targetRMS = 0.066
+            targetRMS = 0.078
         } else {
-            targetRMS = 0.074
+            targetRMS = 0.088
         }
         let minimumRMS: Float
         switch config.audioSource {
         case .system:
-            minimumRMS = 0.00000018
+            minimumRMS = 0.00000012
         case .microphone:
-            minimumRMS = 0.00000020
+            minimumRMS = 0.00000014
         default:
             minimumRMS = 0.000040
         }
@@ -170,9 +170,9 @@ struct AudioConditioningPipeline: Sendable {
         if config.target == .cloudRealtime {
             maxGain = 6.0
         } else if config.audioSource == .system {
-            maxGain = 192.0
+            maxGain = 256.0
         } else if config.audioSource == .microphone {
-            maxGain = 192.0
+            maxGain = 256.0
         } else {
             maxGain = 3.5
         }
@@ -442,9 +442,9 @@ struct SpeechAudioQualityMonitor: Sendable {
     private static func significantAudioFloor(for source: TranscriptAudioSource) -> Float {
         switch source {
         case .system:
-            0.000030
+            0.000026
         case .microphone:
-            0.000032
+            0.000028
         default:
             0.00020
         }
@@ -453,9 +453,9 @@ struct SpeechAudioQualityMonitor: Sendable {
     private static func noiseBootstrapFloor(for source: TranscriptAudioSource) -> Float {
         switch source {
         case .system:
-            0.000038
+            0.000032
         case .microphone:
-            0.000042
+            0.000036
         default:
             0.00016
         }
@@ -480,11 +480,11 @@ enum SpeechActivityLevel: String, Sendable, Equatable {
 struct SpeechActivityPolicy: Sendable, Equatable {
     var preRollDuration: TimeInterval = 2.0
     var hangoverDuration: TimeInterval = 3.0
-    var absoluteSpeechRMS: Float = 0.00030
-    var likelySpeechRMS: Float = 0.00054
-    var activeSpeechRMS: Float = 0.0028
-    var peakAssistThreshold: Float = 0.0046
-    var noiseFloorLift: Float = 1.32
+    var absoluteSpeechRMS: Float = 0.00024
+    var likelySpeechRMS: Float = 0.00046
+    var activeSpeechRMS: Float = 0.0024
+    var peakAssistThreshold: Float = 0.0038
+    var noiseFloorLift: Float = 1.22
 
     func classify(_ snapshot: SpeechAudioQualitySnapshot) -> SpeechActivityLevel {
         let sensitivity = SpeechActivitySourceSensitivity.profile(for: snapshot.source)
@@ -527,27 +527,27 @@ private struct SpeechActivitySourceSensitivity: Sendable, Equatable {
         switch source {
         case .system:
             SpeechActivitySourceSensitivity(
-                absoluteRMSMultiplier: 0.64,
-                likelyRMSMultiplier: 0.64,
-                activeRMSMultiplier: 0.74,
-                peakAssistMultiplier: 0.72,
+                absoluteRMSMultiplier: 0.58,
+                likelyRMSMultiplier: 0.58,
+                activeRMSMultiplier: 0.68,
+                peakAssistMultiplier: 0.66,
                 activePeakMultiplier: 0.88,
-                noiseFloorLiftMultiplier: 1.14,
-                lowAudioRMSMultiplier: 0.10,
-                lowAudioNoiseFloorLift: 0.42,
-                lowAudioPeakFloor: 0.000085
+                noiseFloorLiftMultiplier: 1.04,
+                lowAudioRMSMultiplier: 0.08,
+                lowAudioNoiseFloorLift: 0.34,
+                lowAudioPeakFloor: 0.000060
             )
         case .microphone:
             SpeechActivitySourceSensitivity(
-                absoluteRMSMultiplier: 0.72,
-                likelyRMSMultiplier: 0.72,
-                activeRMSMultiplier: 0.82,
-                peakAssistMultiplier: 0.78,
+                absoluteRMSMultiplier: 0.64,
+                likelyRMSMultiplier: 0.64,
+                activeRMSMultiplier: 0.74,
+                peakAssistMultiplier: 0.70,
                 activePeakMultiplier: 0.92,
-                noiseFloorLiftMultiplier: 1.20,
-                lowAudioRMSMultiplier: 0.11,
-                lowAudioNoiseFloorLift: 0.44,
-                lowAudioPeakFloor: 0.000095
+                noiseFloorLiftMultiplier: 1.08,
+                lowAudioRMSMultiplier: 0.09,
+                lowAudioNoiseFloorLift: 0.36,
+                lowAudioPeakFloor: 0.000068
             )
         default:
             SpeechActivitySourceSensitivity(
