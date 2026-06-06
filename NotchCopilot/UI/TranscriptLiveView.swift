@@ -125,7 +125,7 @@ struct TranscriptLiveView: View {
             hoveredSegmentID = segmentID
         } else if let current = hoveredSegmentID {
             hoverClearTask = Task { @MainActor in
-                try? await Task.sleep(for: .milliseconds(360))
+                try? await Task.sleep(for: .milliseconds(TranscriptInlineActionMetrics.hoverClearDelayMilliseconds))
                 guard !Task.isCancelled, hoveredSegmentID == current else { return }
                 hoveredSegmentID = nil
             }
@@ -156,9 +156,10 @@ enum TranscriptInlineActionMetrics {
     static let visibleButtonCornerRadius: CGFloat = 3.5
     static let hitTargetCornerRadius: CGFloat = 5
     static let rowTrailingReserve: CGFloat = buttonHitSize * 2 + 2
-    static let rowHoverAlpha: Double = 0.095
-    static let idleActionsAlpha: Double = 0.001
-    static let visibleActionsAlpha: Double = 0.86
+    static let rowHoverAlpha: Double = 0.12
+    static let idleActionsAlpha: Double = 0.16
+    static let visibleActionsAlpha: Double = 0.92
+    static let hoverClearDelayMilliseconds = 520
 }
 
 private struct TranscriptInlineActions: View {

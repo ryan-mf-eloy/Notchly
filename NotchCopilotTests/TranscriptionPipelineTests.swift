@@ -697,12 +697,16 @@ final class TranscriptionPipelineTests: XCTestCase {
         XCTAssertTrue(frames.contains { $0.buffer.rms > 0.001 })
     }
 
-    func testAudioConditioningServiceKeepsQuietLeadInPreRollBeforeSpeech() {
+    func testAudioConditioningServiceKeepsNearSilentLeadInPreRollBeforeSpeech() {
         let service = AudioConditioningService(source: .microphone, preRollDuration: 0.95)
         let config = AudioConditioningConfig(accuracyMode: .highAccuracy, target: .nativeSpeech, audioSource: .microphone)
         let flags = TranscriptionFeatureFlags(vadGatingEnabled: true)
 
-        let quietLead = TranscriptionAudioFixtureGenerator.speechLikeBuffer(amplitude: 0.00000035, source: .microphone, offset: 0)
+        let quietLead = TranscriptionAudioFixtureGenerator.buffer(
+            samples: Array(repeating: 0, count: 1_600),
+            source: .microphone,
+            offset: 0
+        )
         let leadTrace = service.conditionWithTrace(quietLead, config: config, featureFlags: flags)
         XCTAssertFalse(leadTrace.vadDecision.shouldForwardToASR)
         XCTAssertTrue(leadTrace.frames.isEmpty)
@@ -791,8 +795,8 @@ final class TranscriptionPipelineTests: XCTestCase {
         let flags = TranscriptionFeatureFlags(vadGatingEnabled: true)
 
         for testCase in [
-            (source: TranscriptAudioSource.microphone, bridgedOffsets: 1...6, blockedOffset: 7),
-            (source: TranscriptAudioSource.system, bridgedOffsets: 1...7, blockedOffset: 8)
+            (source: TranscriptAudioSource.microphone, bridgedOffsets: 1...9, blockedOffset: 10),
+            (source: TranscriptAudioSource.system, bridgedOffsets: 1...10, blockedOffset: 11)
         ] {
             let isolatedService = AudioConditioningService(source: testCase.source, preRollDuration: 0.4)
             let config = AudioConditioningConfig(accuracyMode: .highAccuracy, target: .nativeSpeech, audioSource: testCase.source)
@@ -844,8 +848,8 @@ final class TranscriptionPipelineTests: XCTestCase {
         )
 
         for testCase in [
-            (source: TranscriptAudioSource.microphone, amplitude: Float(0.0000048), lateOffset: 33),
-            (source: TranscriptAudioSource.system, amplitude: Float(0.0000042), lateOffset: 36)
+            (source: TranscriptAudioSource.microphone, amplitude: Float(0.0000048), lateOffset: 45),
+            (source: TranscriptAudioSource.system, amplitude: Float(0.0000042), lateOffset: 48)
         ] {
             let config = AudioConditioningConfig(accuracyMode: .highAccuracy, target: .nativeSpeech, audioSource: testCase.source)
             let service = AudioConditioningService(source: testCase.source, preRollDuration: 0.4)
@@ -870,7 +874,7 @@ final class TranscriptionPipelineTests: XCTestCase {
 
             let silenceService = AudioConditioningService(source: testCase.source, preRollDuration: 0.4)
             XCTAssertFalse(silenceService.conditionWithTrace(firstSpeech, config: config, featureFlags: flags).frames.isEmpty)
-            let passiveBlockedOffset = testCase.source == .system ? 8 : 7
+            let passiveBlockedOffset = testCase.source == .system ? 11 : 10
             for offset in 1...passiveBlockedOffset {
                 let silence = TranscriptionAudioFixtureGenerator.buffer(
                     samples: Array(repeating: 0, count: 1_600),
@@ -910,6 +914,50 @@ final class TranscriptionPipelineTests: XCTestCase {
                     XCTAssertTrue(trace.frames.isEmpty, "\(testCase.source.displayName) quiet breathing should not renew speech bridge")
                 }
             }
+        }
+    }
+
+    func testVoiceActivityDetectorCarriesVeryQuietSpeechAfterLongNaturalPause() {
+        for testCase in [
+            (source: TranscriptAudioSource.microphone, amplitude: Float(0.0000036), offset: 4.35),
+            (source: TranscriptAudioSource.system, amplitude: Float(0.0000032), offset: 4.55)
+        ] {
+            var detector = VoiceActivityDetector()
+            let start = Date()
+            let activeSpeech = TranscriptionAudioFixtureGenerator.speechLikeBuffer(
+                amplitude: 0.004,
+                source: testCase.source,
+                offset: 0
+            )
+            XCTAssertTrue(detector.analyze(activeSpeech, now: start).shouldForwardToASR)
+
+            let quietContinuation = TranscriptionAudioFixtureGenerator.speechLikeBuffer(
+                amplitude: testCase.amplitude,
+                source: testCase.source,
+                offset: 44
+            )
+            let continuationDecision = detector.analyze(
+                quietContinuation,
+                now: start.addingTimeInterval(testCase.offset)
+            )
+            XCTAssertTrue(
+                continuationDecision.shouldForwardToASR,
+                "\(testCase.source.displayName) should not cut a very quiet word after a natural pause: \(continuationDecision)"
+            )
+            XCTAssertEqual(continuationDecision.reason, "low_audio_speech_continuation")
+
+            var flatDetector = VoiceActivityDetector()
+            XCTAssertTrue(flatDetector.analyze(activeSpeech, now: start).shouldForwardToASR)
+            let flatContinuation = TranscriptionAudioFixtureGenerator.buffer(
+                samples: Array(repeating: testCase.amplitude, count: 1_600),
+                source: testCase.source,
+                offset: 44
+            )
+            let flatDecision = flatDetector.analyze(flatContinuation, now: start.addingTimeInterval(testCase.offset))
+            XCTAssertFalse(
+                flatDecision.shouldForwardToASR,
+                "\(testCase.source.displayName) flat near-floor audio must stay gated despite longer speech continuity: \(flatDecision)"
+            )
         }
     }
 

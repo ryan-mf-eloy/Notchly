@@ -954,7 +954,7 @@ final class RAGPipelineTests: XCTestCase {
         let container = try DatabaseFactory.makeContainer(inMemory: true)
         let store = LocalKnowledgeStore(container: container, workspaceId: "alpha", cryptor: try testCryptor())
         try store.addDocument(name: "Security.md", content: "Security action: rotate customer demo tokens every Friday.", workspaceId: "alpha")
-        let provider = LocalEmbeddingProvider(tier: .fast)
+        let provider = StubEmbeddingProvider()
 
         let indexed = try await store.indexMissingEmbeddings(provider: provider, workspaceId: "alpha")
         let coverage = try store.embeddingCoverage(model: provider.modelIdentifier, workspaceId: "alpha")
@@ -978,7 +978,7 @@ final class RAGPipelineTests: XCTestCase {
         let blobStore = try LocalVectorBlobStore(root: vectorRoot)
         let store = LocalKnowledgeStore(container: container, workspaceId: "alpha", cryptor: cryptor, vectorBlobStore: blobStore)
         try store.addDocument(name: "Security.md", content: "Security action: rotate customer demo tokens every Friday.", workspaceId: "alpha")
-        let provider = LocalEmbeddingProvider(tier: .fast)
+        let provider = StubEmbeddingProvider()
 
         let indexed = try await store.indexMissingEmbeddings(provider: provider, workspaceId: "alpha")
         let context = ModelContext(container)

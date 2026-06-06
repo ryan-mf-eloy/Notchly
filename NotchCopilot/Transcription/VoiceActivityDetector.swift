@@ -238,11 +238,11 @@ struct VoiceActivityDetector: Sendable {
     private static func lowAudioContinuationWindow(for source: TranscriptAudioSource) -> TimeInterval {
         switch source {
         case .system:
-            return 3.80
+            return 4.85
         case .microphone:
-            return 3.55
+            return 4.60
         default:
-            return 2.55
+            return 3.20
         }
     }
 

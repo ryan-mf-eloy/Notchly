@@ -2045,20 +2045,21 @@ private final class TranscriptScrollView: NSScrollView {
 }
 
 enum TranscriptRowInteractionMetrics {
-    static let actionHitSize: CGFloat = 22
+    static let actionHitSize: CGFloat = 24
     static let actionGap: CGFloat = 0
     static let actionRightInset: CGFloat = 0
     static let textLeftInset: CGFloat = 3
     static let verticalInset: CGFloat = 0
-    static let hoverHorizontalOutset: CGFloat = 22
-    static let hoverVerticalOutset: CGFloat = 5
-    static let rowHoverAlpha: CGFloat = 0.095
-    static let rowHoverBorderAlpha: CGFloat = 0.040
+    static let hoverHorizontalOutset: CGFloat = 26
+    static let hoverVerticalOutset: CGFloat = 6
+    static let rowHoverAlpha: CGFloat = 0.12
+    static let rowHoverBorderAlpha: CGFloat = 0.050
     static let actionGlyphPointSize: CGFloat = 7.0
-    static let actionIdleAlpha: CGFloat = 0.008
-    static let actionRowHoverAlpha: CGFloat = 0.86
-    static let actionPointerHoverBackgroundAlpha: CGFloat = 0.13
-    static let actionRowHoverBackgroundAlpha: CGFloat = 0.032
+    static let actionIdleAlpha: CGFloat = 0.16
+    static let actionRowHoverAlpha: CGFloat = 0.92
+    static let actionPointerHoverBackgroundAlpha: CGFloat = 0.14
+    static let actionRowHoverBackgroundAlpha: CGFloat = 0.040
+    static let hoverClearDelayMilliseconds = 520
 }
 
 struct TranscriptRowHoverCandidate: Equatable {
@@ -2233,7 +2234,7 @@ private final class FlippedTranscriptDocumentView: NSView {
     private func clearHoveredRowAfterGracePeriod() {
         hoverClearTask?.cancel()
         hoverClearTask = Task { @MainActor [weak self] in
-            try? await Task.sleep(for: .milliseconds(360))
+            try? await Task.sleep(for: .milliseconds(TranscriptRowInteractionMetrics.hoverClearDelayMilliseconds))
             guard !Task.isCancelled else { return }
             guard let self else { return }
             if let hovered = self.hoveredRowUnderCurrentMouse() {
@@ -2556,7 +2557,7 @@ private final class TranscriptRowActionButton: NSButton {
         self.rowHovered = rowHovered
         isEnabled = true
         alphaValue = (rowHovered || isPointerInside) ? Appearance.rowHoverAlpha : Appearance.idleAlpha
-        contentTintColor = NSColor.white.withAlphaComponent(isPointerInside ? 0.90 : (rowHovered ? 0.66 : 0))
+        contentTintColor = NSColor.white.withAlphaComponent(isPointerInside ? 0.90 : (rowHovered ? 0.68 : 0.36))
         let backgroundAlpha: CGFloat
         if isPointerInside {
             backgroundAlpha = Appearance.pointerHoverBackgroundAlpha
