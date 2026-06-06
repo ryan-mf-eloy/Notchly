@@ -64,6 +64,22 @@ struct SpeechContextRanker: Sendable, Hashable {
     }
 }
 
+enum MeetingASRAudioDeliveryBuffer {
+    static func selectedBuffer(
+        raw: AudioBuffer,
+        conditioned: AudioBuffer,
+        source: TranscriptAudioSource,
+        yieldsConditionedAudio: Bool
+    ) -> AudioBuffer {
+        guard !yieldsConditionedAudio else { return conditioned }
+        var sourceTaggedBuffer = raw
+        if sourceTaggedBuffer.audioSource == .unknown {
+            sourceTaggedBuffer.audioSource = source
+        }
+        return sourceTaggedBuffer
+    }
+}
+
 struct MeetingTranscriptLedger: Sendable, Hashable {
     private static let sequentialDraftAppendGap: TimeInterval = 0.30
     private static let sequentialDraftAppendFrameGap: Int64 = 4_800
@@ -1654,21 +1670,32 @@ final class MeetingSessionManager {
         let audioStream: AsyncStream<AudioBuffer>
         let configAudioSource: TranscriptAudioSource
         let sourceCount = [micStream, systemStream].compactMap { $0 }.count
-        let conditioningTarget: AudioConditioningTarget = providerRouter.shouldUseCloudRealtimeTranscription(preferences: appState.preferences) ? .cloudRealtime : .nativeSpeech
+        let usesCloudRealtime = providerRouter.shouldUseCloudRealtimeTranscription(preferences: appState.preferences)
+        let conditioningTarget: AudioConditioningTarget = usesCloudRealtime ? .cloudRealtime : .nativeSpeech
         var sourceSeparatedSources: [MultiSourceAutoLanguageTranscriptionService.Source] = []
 
         if let systemStream {
             sourceSeparatedSources.append(.init(
                 speakerLabel: "System",
                 audioSource: .system,
-                audioStream: meteredAudioStream(systemStream, conditioningTarget: conditioningTarget, source: .system)
+                audioStream: meteredAudioStream(
+                    systemStream,
+                    conditioningTarget: conditioningTarget,
+                    source: .system,
+                    yieldsConditionedAudio: usesCloudRealtime
+                )
             ))
         }
         if let micStream {
             sourceSeparatedSources.append(.init(
                 speakerLabel: "You",
                 audioSource: .microphone,
-                audioStream: meteredAudioStream(micStream, conditioningTarget: conditioningTarget, source: .microphone)
+                audioStream: meteredAudioStream(
+                    micStream,
+                    conditioningTarget: conditioningTarget,
+                    source: .microphone,
+                    yieldsConditionedAudio: usesCloudRealtime
+                )
             ))
         }
         transcriptionService = providerRouter.meetingTranscriptionService(preferences: appState.preferences, sources: sourceSeparatedSources)
@@ -1790,7 +1817,8 @@ final class MeetingSessionManager {
     private func meteredAudioStream(
         _ stream: AsyncStream<AudioBuffer>,
         conditioningTarget: AudioConditioningTarget = .nativeSpeech,
-        source: TranscriptAudioSource = .unknown
+        source: TranscriptAudioSource = .unknown,
+        yieldsConditionedAudio: Bool = false
     ) -> AsyncStream<AudioBuffer> {
         let processor = AudioConditioningStreamProcessor(source: source)
         let config = AudioConditioningConfig(
@@ -1810,7 +1838,12 @@ final class MeetingSessionManager {
                             self?.audioRecorder.append(pcmBuffer)
                         }
                     }
-                    continuation.yield(conditioned)
+                    continuation.yield(MeetingASRAudioDeliveryBuffer.selectedBuffer(
+                        raw: buffer,
+                        conditioned: conditioned,
+                        source: source,
+                        yieldsConditionedAudio: yieldsConditionedAudio
+                    ))
                 }
                 continuation.finish()
             }

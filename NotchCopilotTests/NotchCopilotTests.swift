@@ -3898,6 +3898,45 @@ final class NotchCopilotTests: XCTestCase {
         XCTAssertGreaterThan(result.buffer.rms, buffer.rms)
     }
 
+    func testMeetingASRAudioDeliveryAvoidsDoubleConditioningForLocalRouter() {
+        let raw = NotchCopilot.AudioBuffer(
+            pcmBuffer: nil,
+            time: nil,
+            rms: 0.00042,
+            peak: 0.00080,
+            createdAt: Date(timeIntervalSince1970: 10),
+            audioSource: .unknown
+        )
+        let conditioned = NotchCopilot.AudioBuffer(
+            pcmBuffer: nil,
+            time: nil,
+            rms: 0.052,
+            peak: 0.11,
+            createdAt: Date(timeIntervalSince1970: 10),
+            audioSource: .microphone
+        )
+
+        let localDelivery = MeetingASRAudioDeliveryBuffer.selectedBuffer(
+            raw: raw,
+            conditioned: conditioned,
+            source: .microphone,
+            yieldsConditionedAudio: false
+        )
+        XCTAssertEqual(localDelivery.rms, raw.rms)
+        XCTAssertEqual(localDelivery.peak, raw.peak)
+        XCTAssertEqual(localDelivery.audioSource, .microphone)
+
+        let cloudDelivery = MeetingASRAudioDeliveryBuffer.selectedBuffer(
+            raw: raw,
+            conditioned: conditioned,
+            source: .microphone,
+            yieldsConditionedAudio: true
+        )
+        XCTAssertEqual(cloudDelivery.rms, conditioned.rms)
+        XCTAssertEqual(cloudDelivery.peak, conditioned.peak)
+        XCTAssertEqual(cloudDelivery.audioSource, .microphone)
+    }
+
     func testMicrophoneCaptureKeepsVoiceProcessingOptInByDefault() {
         XCTAssertEqual(AppleMicrophoneCaptureService.defaultVoiceProcessingPolicy, .disabled)
         XCTAssertFalse(MicrophoneVoiceProcessingSelector.decision(policy: .disabled, deviceName: "Built-in Microphone").shouldEnable)
