@@ -212,20 +212,20 @@ final class AudioConditioningService: @unchecked Sendable {
     private static func nonDestructiveSpeechBridgeDuration(for source: TranscriptAudioSource) -> TimeInterval {
         switch source {
         case .system:
-            return 3.25
+            return 3.80
         case .microphone:
-            return 3.00
+            return 3.55
         default:
-            return 2.15
+            return 2.50
         }
     }
 
     private static func weakSpeechContinuationFloor(for source: TranscriptAudioSource) -> (rms: Float, peak: Float, dynamicRange: Float, envelopeVariation: Double) {
         switch source {
         case .system:
-            return (0.0000014, 0.0000044, 0.000009, 0.0020)
+            return (0.0000010, 0.0000032, 0.0000065, 0.0015)
         case .microphone:
-            return (0.0000016, 0.0000048, 0.000010, 0.0022)
+            return (0.0000011, 0.0000035, 0.0000070, 0.0016)
         default:
             return (0.000040, 0.000070, 0.000060, 0.0040)
         }

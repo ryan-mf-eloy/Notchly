@@ -2045,19 +2045,19 @@ private final class TranscriptScrollView: NSScrollView {
 }
 
 enum TranscriptRowInteractionMetrics {
-    static let actionHitSize: CGFloat = 20
+    static let actionHitSize: CGFloat = 22
     static let actionGap: CGFloat = 0
-    static let actionRightInset: CGFloat = 1
-    static let textLeftInset: CGFloat = 4
-    static let verticalInset: CGFloat = 1
-    static let hoverHorizontalOutset: CGFloat = 14
-    static let hoverVerticalOutset: CGFloat = 2
-    static let rowHoverAlpha: CGFloat = 0.16
-    static let actionGlyphPointSize: CGFloat = 6.2
-    static let actionIdleAlpha: CGFloat = 0.20
-    static let actionRowHoverAlpha: CGFloat = 0.96
-    static let actionPointerHoverBackgroundAlpha: CGFloat = 0.14
-    static let actionRowHoverBackgroundAlpha: CGFloat = 0.045
+    static let actionRightInset: CGFloat = 0
+    static let textLeftInset: CGFloat = 3
+    static let verticalInset: CGFloat = 0
+    static let hoverHorizontalOutset: CGFloat = 18
+    static let hoverVerticalOutset: CGFloat = 4
+    static let rowHoverAlpha: CGFloat = 0.115
+    static let actionGlyphPointSize: CGFloat = 6.8
+    static let actionIdleAlpha: CGFloat = 0.34
+    static let actionRowHoverAlpha: CGFloat = 0.92
+    static let actionPointerHoverBackgroundAlpha: CGFloat = 0.16
+    static let actionRowHoverBackgroundAlpha: CGFloat = 0.030
 }
 
 struct TranscriptRowHoverCandidate: Equatable {
@@ -2076,9 +2076,19 @@ enum TranscriptRowHoverResolver {
         if let exact = visibleRows.first(where: { $0.frame.contains(point) }) {
             return exact.id
         }
-        return visibleRows.first {
-            $0.frame.insetBy(dx: -horizontalOutset, dy: -verticalOutset).contains(point)
-        }?.id
+        return visibleRows
+            .filter { $0.frame.insetBy(dx: -horizontalOutset, dy: -verticalOutset).contains(point) }
+            .min { lhs, rhs in
+                distance(from: point, to: lhs.frame) < distance(from: point, to: rhs.frame)
+            }?
+            .id
+    }
+
+    private static func distance(from point: CGPoint, to frame: CGRect) -> CGFloat {
+        if frame.contains(point) { return 0 }
+        let dx = max(frame.minX - point.x, 0, point.x - frame.maxX)
+        let dy = max(frame.minY - point.y, 0, point.y - frame.maxY)
+        return hypot(dx, dy)
     }
 }
 
@@ -2212,7 +2222,7 @@ private final class FlippedTranscriptDocumentView: NSView {
     private func clearHoveredRowAfterGracePeriod() {
         hoverClearTask?.cancel()
         hoverClearTask = Task { @MainActor [weak self] in
-            try? await Task.sleep(for: .milliseconds(220))
+            try? await Task.sleep(for: .milliseconds(360))
             guard !Task.isCancelled else { return }
             guard let self else { return }
             if let hovered = self.hoveredRowUnderCurrentMouse() {
@@ -2365,7 +2375,7 @@ private final class TranscriptRowView: NSView {
 
     private func configure() {
         wantsLayer = true
-        layer?.cornerRadius = 5
+        layer?.cornerRadius = 4
         layer?.masksToBounds = true
 
         label.isEditable = false
@@ -2432,7 +2442,7 @@ private final class TranscriptRowView: NSView {
         button.setAccessibilityLabel(tooltip)
         button.setAccessibilityHelp(tooltip)
         button.wantsLayer = true
-        button.layer?.cornerRadius = 4
+        button.layer?.cornerRadius = 5.5
         button.layer?.backgroundColor = NSColor.clear.cgColor
         button.onPointerHoverChanged = { [weak self] hovering in
             guard let self else { return }

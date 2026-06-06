@@ -160,9 +160,9 @@ struct AudioConditioningPipeline: Sendable {
         let minimumRMS: Float
         switch config.audioSource {
         case .system:
-            minimumRMS = 0.00000030
+            minimumRMS = 0.00000018
         case .microphone:
-            minimumRMS = 0.00000035
+            minimumRMS = 0.00000020
         default:
             minimumRMS = 0.000040
         }
@@ -170,9 +170,9 @@ struct AudioConditioningPipeline: Sendable {
         if config.target == .cloudRealtime {
             maxGain = 6.0
         } else if config.audioSource == .system {
-            maxGain = 64.0
+            maxGain = 96.0
         } else if config.audioSource == .microphone {
-            maxGain = 64.0
+            maxGain = 96.0
         } else {
             maxGain = 3.5
         }
@@ -444,7 +444,7 @@ struct SpeechAudioQualityMonitor: Sendable {
         case .system:
             0.000050
         case .microphone:
-            0.000055
+            0.000048
         default:
             0.00020
         }
@@ -453,9 +453,9 @@ struct SpeechAudioQualityMonitor: Sendable {
     private static func noiseBootstrapFloor(for source: TranscriptAudioSource) -> Float {
         switch source {
         case .system:
-            0.000075
+            0.000064
         case .microphone:
-            0.000085
+            0.000070
         default:
             0.00016
         }

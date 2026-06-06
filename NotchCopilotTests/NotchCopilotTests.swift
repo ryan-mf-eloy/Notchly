@@ -10888,24 +10888,24 @@ final class NotchCopilotTests: XCTestCase {
     }
 
     func testTranscriptInlineActionsReserveCompactNonOverlappingSpace() {
-        XCTAssertEqual(TranscriptInlineActionMetrics.buttonHitSize, 20)
-        XCTAssertEqual(TranscriptInlineActionMetrics.visibleButtonSize, 12)
+        XCTAssertEqual(TranscriptInlineActionMetrics.buttonHitSize, 22)
+        XCTAssertEqual(TranscriptInlineActionMetrics.visibleButtonSize, 11)
         XCTAssertGreaterThan(TranscriptInlineActionMetrics.buttonHitSize, TranscriptInlineActionMetrics.visibleButtonSize)
         XCTAssertGreaterThanOrEqual(
             TranscriptInlineActionMetrics.rowTrailingReserve,
             TranscriptInlineActionMetrics.buttonHitSize * 2
         )
-        XCTAssertLessThanOrEqual(TranscriptInlineActionMetrics.rowTrailingReserve, 44)
-        XCTAssertLessThanOrEqual(TranscriptInlineActionMetrics.glyphPointSize, 6.5)
-        XCTAssertGreaterThan(TranscriptInlineActionMetrics.rowHoverAlpha, 0.12)
+        XCTAssertLessThanOrEqual(TranscriptInlineActionMetrics.rowTrailingReserve, 46)
+        XCTAssertLessThanOrEqual(TranscriptInlineActionMetrics.glyphPointSize, 7.0)
+        XCTAssertGreaterThan(TranscriptInlineActionMetrics.rowHoverAlpha, 0.10)
         XCTAssertGreaterThan(TranscriptInlineActionMetrics.visibleActionsAlpha, TranscriptInlineActionMetrics.idleActionsAlpha)
 
-        XCTAssertEqual(TranscriptRowInteractionMetrics.actionHitSize, 20)
-        XCTAssertLessThanOrEqual(TranscriptRowInteractionMetrics.actionGlyphPointSize, 6.5)
-        XCTAssertGreaterThan(TranscriptRowInteractionMetrics.rowHoverAlpha, 0.14)
+        XCTAssertEqual(TranscriptRowInteractionMetrics.actionHitSize, 22)
+        XCTAssertLessThanOrEqual(TranscriptRowInteractionMetrics.actionGlyphPointSize, 7.0)
+        XCTAssertGreaterThan(TranscriptRowInteractionMetrics.rowHoverAlpha, 0.10)
         XCTAssertGreaterThan(TranscriptRowInteractionMetrics.actionRowHoverAlpha, TranscriptRowInteractionMetrics.actionIdleAlpha)
-        XCTAssertGreaterThanOrEqual(TranscriptRowInteractionMetrics.hoverHorizontalOutset, 12)
-        XCTAssertLessThanOrEqual(TranscriptRowInteractionMetrics.hoverVerticalOutset, 2)
+        XCTAssertGreaterThanOrEqual(TranscriptRowInteractionMetrics.hoverHorizontalOutset, 18)
+        XCTAssertLessThanOrEqual(TranscriptRowInteractionMetrics.hoverVerticalOutset, 4)
     }
 
     func testTranscriptRowHoverResolverPrefersExactRowOverExpandedNeighbor() {
@@ -10921,6 +10921,10 @@ final class NotchCopilotTests: XCTestCase {
         XCTAssertEqual(
             TranscriptRowHoverResolver.hoveredRowID(at: CGPoint(x: 228, y: 12), candidates: rows),
             "first"
+        )
+        XCTAssertEqual(
+            TranscriptRowHoverResolver.hoveredRowID(at: CGPoint(x: 228, y: 31.5), candidates: rows),
+            "second"
         )
         XCTAssertNil(
             TranscriptRowHoverResolver.hoveredRowID(at: CGPoint(x: 20, y: 70), candidates: rows)

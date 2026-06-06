@@ -102,7 +102,7 @@ struct TranscriptLiveView: View {
                         updateHoveredSegment(hovering ? segment.id : nil)
                     }
                 )
-                .padding(.top, 1)
+                .padding(.top, 0)
                 .padding(.trailing, 0)
             }
         }
@@ -125,7 +125,7 @@ struct TranscriptLiveView: View {
             hoveredSegmentID = segmentID
         } else if let current = hoveredSegmentID {
             hoverClearTask = Task { @MainActor in
-                try? await Task.sleep(for: .milliseconds(220))
+                try? await Task.sleep(for: .milliseconds(360))
                 guard !Task.isCancelled, hoveredSegmentID == current else { return }
                 hoveredSegmentID = nil
             }
@@ -150,15 +150,15 @@ struct TranscriptLiveView: View {
 }
 
 enum TranscriptInlineActionMetrics {
-    static let buttonHitSize: CGFloat = 20
-    static let visibleButtonSize: CGFloat = 12
-    static let glyphPointSize: CGFloat = 6.2
-    static let visibleButtonCornerRadius: CGFloat = 3.5
-    static let hitTargetCornerRadius: CGFloat = 5
+    static let buttonHitSize: CGFloat = 22
+    static let visibleButtonSize: CGFloat = 11
+    static let glyphPointSize: CGFloat = 6.8
+    static let visibleButtonCornerRadius: CGFloat = 3
+    static let hitTargetCornerRadius: CGFloat = 5.5
     static let rowTrailingReserve: CGFloat = buttonHitSize * 2 + 2
-    static let rowHoverAlpha: Double = 0.14
-    static let idleActionsAlpha: Double = 0.20
-    static let visibleActionsAlpha: Double = 0.96
+    static let rowHoverAlpha: Double = 0.115
+    static let idleActionsAlpha: Double = 0.34
+    static let visibleActionsAlpha: Double = 0.92
 }
 
 private struct TranscriptInlineActions: View {
@@ -186,7 +186,11 @@ private struct TranscriptInlineActions: View {
         .allowsHitTesting(true)
         .animation(nil, value: isVisible)
         .contentShape(Rectangle())
-        .onHover(perform: onHoverChanged)
+        .onHover { hovering in
+            if hovering {
+                onHoverChanged(true)
+            }
+        }
     }
 }
 
@@ -202,11 +206,11 @@ private struct TranscriptInlineActionButton: View {
         Button(action: action) {
             ZStack {
                 RoundedRectangle(cornerRadius: TranscriptInlineActionMetrics.visibleButtonCornerRadius, style: .continuous)
-                    .fill(Color.white.opacity(isHovered ? 0.105 : 0.018))
+                    .fill(Color.white.opacity(isHovered ? 0.13 : 0.012))
                     .frame(width: TranscriptInlineActionMetrics.visibleButtonSize, height: TranscriptInlineActionMetrics.visibleButtonSize)
                 Image(systemName: systemName)
                     .font(.system(size: TranscriptInlineActionMetrics.glyphPointSize, weight: .regular))
-                    .foregroundStyle(Color.white.opacity(isHovered ? 0.90 : 0.55))
+                    .foregroundStyle(Color.white.opacity(isHovered ? 0.92 : 0.62))
             }
             .frame(width: TranscriptInlineActionMetrics.buttonHitSize, height: TranscriptInlineActionMetrics.buttonHitSize)
             .background(

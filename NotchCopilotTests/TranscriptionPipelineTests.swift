@@ -1039,6 +1039,62 @@ final class TranscriptionPipelineTests: XCTestCase {
         }
     }
 
+    func testAudioConditioningServiceKeepsWhisperLevelSentenceThroughMicroDropouts() {
+        let flags = TranscriptionFeatureFlags(vadGatingEnabled: true)
+
+        for testCase in [
+            (
+                source: TranscriptAudioSource.microphone,
+                amplitudes: [Float(0.00000042), 0.0000012, 0.00000028, 0.0000010, 0.00000024, 0.0000011, 0.00000036, 0.0000013]
+            ),
+            (
+                source: TranscriptAudioSource.system,
+                amplitudes: [Float(0.00000036), 0.0000010, 0.00000024, 0.0000009, 0.00000022, 0.00000095, 0.00000032, 0.0000011]
+            )
+        ] {
+            let config = AudioConditioningConfig(accuracyMode: .highAccuracy, target: .nativeSpeech, audioSource: testCase.source)
+            let service = AudioConditioningService(source: testCase.source, preRollDuration: 0.4)
+            let traces = testCase.amplitudes.enumerated().map { offset, amplitude in
+                service.conditionWithTrace(
+                    TranscriptionAudioFixtureGenerator.speechLikeBuffer(
+                        amplitude: amplitude,
+                        source: testCase.source,
+                        offset: offset
+                    ),
+                    config: config,
+                    featureFlags: flags
+                )
+            }
+
+            XCTAssertTrue(
+                traces.prefix(2).contains { !$0.frames.isEmpty },
+                "\(testCase.source.displayName) should open before the first quiet words disappear: \(traces.map(\.vadDecision))"
+            )
+            XCTAssertEqual(
+                traces.filter { !$0.frames.isEmpty }.count,
+                testCase.amplitudes.count,
+                "\(testCase.source.displayName) should keep a whisper-level sentence continuous through micro-dropouts: \(traces.map(\.vadDecision))"
+            )
+            XCTAssertTrue(
+                traces.contains { $0.conditionedBuffer.rms > $0.inputBuffer.rms * 80.0 },
+                "\(testCase.source.displayName) should apply stronger native gain for whisper-level speech"
+            )
+
+            let flatService = AudioConditioningService(source: testCase.source, preRollDuration: 0.4)
+            let flatTrace = flatService.conditionWithTrace(
+                TranscriptionAudioFixtureGenerator.buffer(
+                    samples: Array(repeating: testCase.amplitudes[0], count: 1_600),
+                    source: testCase.source,
+                    offset: 40
+                ),
+                config: config,
+                featureFlags: flags
+            )
+            XCTAssertTrue(flatTrace.frames.isEmpty, "\(testCase.source.displayName) flat near-floor audio must stay gated: \(flatTrace.vadDecision)")
+            XCTAssertFalse(flatTrace.vadDecision.shouldForwardToASR)
+        }
+    }
+
     func testLanguageContinuityResolverKeepsTechnicalCodeSwitchFromChangingGlobalSourceLanguage() {
         var resolver = LanguageContinuityResolver()
         let first = resolver.resolve(
