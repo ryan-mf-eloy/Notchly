@@ -153,9 +153,9 @@ struct AudioConditioningPipeline: Sendable {
         if config.target == .cloudRealtime {
             targetRMS = 0.056
         } else if config.audioSource == .system {
-            targetRMS = 0.052
+            targetRMS = 0.066
         } else {
-            targetRMS = 0.062
+            targetRMS = 0.074
         }
         let minimumRMS: Float
         switch config.audioSource {
@@ -170,9 +170,9 @@ struct AudioConditioningPipeline: Sendable {
         if config.target == .cloudRealtime {
             maxGain = 6.0
         } else if config.audioSource == .system {
-            maxGain = 96.0
+            maxGain = 192.0
         } else if config.audioSource == .microphone {
-            maxGain = 96.0
+            maxGain = 192.0
         } else {
             maxGain = 3.5
         }
@@ -442,9 +442,9 @@ struct SpeechAudioQualityMonitor: Sendable {
     private static func significantAudioFloor(for source: TranscriptAudioSource) -> Float {
         switch source {
         case .system:
-            0.000050
+            0.000030
         case .microphone:
-            0.000048
+            0.000032
         default:
             0.00020
         }
@@ -453,9 +453,9 @@ struct SpeechAudioQualityMonitor: Sendable {
     private static func noiseBootstrapFloor(for source: TranscriptAudioSource) -> Float {
         switch source {
         case .system:
-            0.000064
+            0.000038
         case .microphone:
-            0.000070
+            0.000042
         default:
             0.00016
         }
@@ -533,9 +533,9 @@ private struct SpeechActivitySourceSensitivity: Sendable, Equatable {
                 peakAssistMultiplier: 0.72,
                 activePeakMultiplier: 0.88,
                 noiseFloorLiftMultiplier: 1.14,
-                lowAudioRMSMultiplier: 0.18,
-                lowAudioNoiseFloorLift: 0.68,
-                lowAudioPeakFloor: 0.00028
+                lowAudioRMSMultiplier: 0.10,
+                lowAudioNoiseFloorLift: 0.42,
+                lowAudioPeakFloor: 0.000085
             )
         case .microphone:
             SpeechActivitySourceSensitivity(
@@ -545,9 +545,9 @@ private struct SpeechActivitySourceSensitivity: Sendable, Equatable {
                 peakAssistMultiplier: 0.78,
                 activePeakMultiplier: 0.92,
                 noiseFloorLiftMultiplier: 1.20,
-                lowAudioRMSMultiplier: 0.20,
-                lowAudioNoiseFloorLift: 0.72,
-                lowAudioPeakFloor: 0.00032
+                lowAudioRMSMultiplier: 0.11,
+                lowAudioNoiseFloorLift: 0.44,
+                lowAudioPeakFloor: 0.000095
             )
         default:
             SpeechActivitySourceSensitivity(

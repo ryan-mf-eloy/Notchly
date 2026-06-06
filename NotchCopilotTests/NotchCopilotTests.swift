@@ -3898,6 +3898,39 @@ final class NotchCopilotTests: XCTestCase {
         XCTAssertGreaterThan(result.buffer.rms, buffer.rms)
     }
 
+    func testAudioConditioningBoostsWhisperSpeechEnoughToWakeNativeSpeech() {
+        let flags = TranscriptionFeatureFlags(vadGatingEnabled: true)
+        let cases: [(source: TranscriptAudioSource, amplitude: Float, wakeFloor: Float)] = [
+            (.microphone, 0.00000042, 0.000032),
+            (.system, 0.00000036, 0.000030)
+        ]
+
+        for testCase in cases {
+            let service = AudioConditioningService(source: testCase.source, preRollDuration: 0.4)
+            let config = AudioConditioningConfig(
+                accuracyMode: .highAccuracy,
+                target: .nativeSpeech,
+                audioSource: testCase.source
+            )
+            let input = TranscriptionAudioFixtureGenerator.speechLikeBuffer(
+                amplitude: testCase.amplitude,
+                source: testCase.source,
+                offset: 0
+            )
+
+            let trace = service.conditionWithTrace(input, config: config, featureFlags: flags)
+            var monitor = SpeechAudioQualityMonitor(source: testCase.source)
+            let snapshot = monitor.ingest(trace.conditionedBuffer)
+            let activity = SpeechActivityPolicy().classify(snapshot)
+
+            XCTAssertFalse(trace.frames.isEmpty, "\(testCase.source.displayName) whisper speech should reach ASR: \(trace.vadDecision)")
+            XCTAssertGreaterThanOrEqual(trace.conditionedBuffer.rms, testCase.wakeFloor)
+            XCTAssertGreaterThan(trace.conditionedBuffer.rms, trace.inputBuffer.rms * 140)
+            XCTAssertTrue(activity.shouldDriveRecognition, "\(testCase.source.displayName) conditioned whisper should wake native speech: \(snapshot)")
+            XCTAssertFalse(activity.isSignificant)
+        }
+    }
+
     func testMeetingASRAudioDeliveryAvoidsDoubleConditioningForLocalRouter() {
         let raw = NotchCopilot.AudioBuffer(
             pcmBuffer: nil,
@@ -4076,6 +4109,32 @@ final class NotchCopilotTests: XCTestCase {
 
         XCTAssertEqual(policy.classify(verySubtleSystemAudio), .lowAudio)
 
+        let whisperMicrophoneAudio = SpeechAudioQualitySnapshot(
+            source: .microphone,
+            rms: 0.000036,
+            peak: 0.000070,
+            isClipping: false,
+            isTooQuiet: true,
+            noiseFloor: 0.000040,
+            gapCount: 0,
+            lastAudioAt: Date()
+        )
+
+        XCTAssertEqual(policy.classify(whisperMicrophoneAudio), .lowAudio)
+
+        let whisperSystemAudio = SpeechAudioQualitySnapshot(
+            source: .system,
+            rms: 0.000031,
+            peak: 0.000060,
+            isClipping: false,
+            isTooQuiet: true,
+            noiseFloor: 0.000038,
+            gapCount: 0,
+            lastAudioAt: Date()
+        )
+
+        XCTAssertEqual(policy.classify(whisperSystemAudio), .lowAudio)
+
         let nearFloorMicrophoneAudio = SpeechAudioQualitySnapshot(
             source: .microphone,
             rms: 0.00013,
@@ -4119,7 +4178,7 @@ final class NotchCopilotTests: XCTestCase {
     func testSpeechAudioQualityMonitorTracksVeryLowSourceAudioWithoutMarkingSilenceRecent() {
         var microphoneMonitor = SpeechAudioQualityMonitor(source: .microphone)
         let lowMicrophone = TranscriptionAudioFixtureGenerator.buffer(
-            samples: Array(repeating: Float(0.000060), count: 1_600),
+            samples: Array(repeating: Float(0.000034), count: 1_600),
             source: .microphone,
             offset: 0
         )
@@ -4129,7 +4188,7 @@ final class NotchCopilotTests: XCTestCase {
 
         var systemMonitor = SpeechAudioQualityMonitor(source: .system)
         let lowSystem = TranscriptionAudioFixtureGenerator.buffer(
-            samples: Array(repeating: Float(0.000054), count: 1_600),
+            samples: Array(repeating: Float(0.000032), count: 1_600),
             source: .system,
             offset: 0
         )
@@ -10928,23 +10987,26 @@ final class NotchCopilotTests: XCTestCase {
 
     func testTranscriptInlineActionsReserveCompactNonOverlappingSpace() {
         XCTAssertEqual(TranscriptInlineActionMetrics.buttonHitSize, 22)
-        XCTAssertEqual(TranscriptInlineActionMetrics.visibleButtonSize, 11)
+        XCTAssertEqual(TranscriptInlineActionMetrics.visibleButtonSize, 14)
         XCTAssertGreaterThan(TranscriptInlineActionMetrics.buttonHitSize, TranscriptInlineActionMetrics.visibleButtonSize)
         XCTAssertGreaterThanOrEqual(
             TranscriptInlineActionMetrics.rowTrailingReserve,
             TranscriptInlineActionMetrics.buttonHitSize * 2
         )
         XCTAssertLessThanOrEqual(TranscriptInlineActionMetrics.rowTrailingReserve, 46)
-        XCTAssertLessThanOrEqual(TranscriptInlineActionMetrics.glyphPointSize, 7.0)
-        XCTAssertGreaterThan(TranscriptInlineActionMetrics.rowHoverAlpha, 0.10)
+        XCTAssertLessThanOrEqual(TranscriptInlineActionMetrics.glyphPointSize, 8.5)
+        XCTAssertGreaterThan(TranscriptInlineActionMetrics.rowHoverAlpha, 0.12)
+        XCTAssertEqual(TranscriptInlineActionMetrics.idleActionsAlpha, 0)
         XCTAssertGreaterThan(TranscriptInlineActionMetrics.visibleActionsAlpha, TranscriptInlineActionMetrics.idleActionsAlpha)
 
         XCTAssertEqual(TranscriptRowInteractionMetrics.actionHitSize, 22)
-        XCTAssertLessThanOrEqual(TranscriptRowInteractionMetrics.actionGlyphPointSize, 7.0)
-        XCTAssertGreaterThan(TranscriptRowInteractionMetrics.rowHoverAlpha, 0.10)
+        XCTAssertLessThanOrEqual(TranscriptRowInteractionMetrics.actionGlyphPointSize, 8.5)
+        XCTAssertGreaterThan(TranscriptRowInteractionMetrics.rowHoverAlpha, 0.12)
+        XCTAssertGreaterThan(TranscriptRowInteractionMetrics.rowHoverBorderAlpha, 0)
+        XCTAssertEqual(TranscriptRowInteractionMetrics.actionIdleAlpha, 0)
         XCTAssertGreaterThan(TranscriptRowInteractionMetrics.actionRowHoverAlpha, TranscriptRowInteractionMetrics.actionIdleAlpha)
-        XCTAssertGreaterThanOrEqual(TranscriptRowInteractionMetrics.hoverHorizontalOutset, 18)
-        XCTAssertLessThanOrEqual(TranscriptRowInteractionMetrics.hoverVerticalOutset, 4)
+        XCTAssertGreaterThanOrEqual(TranscriptRowInteractionMetrics.hoverHorizontalOutset, 22)
+        XCTAssertLessThanOrEqual(TranscriptRowInteractionMetrics.hoverVerticalOutset, 5)
     }
 
     func testTranscriptRowHoverResolverPrefersExactRowOverExpandedNeighbor() {

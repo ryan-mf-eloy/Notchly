@@ -2050,14 +2050,15 @@ enum TranscriptRowInteractionMetrics {
     static let actionRightInset: CGFloat = 0
     static let textLeftInset: CGFloat = 3
     static let verticalInset: CGFloat = 0
-    static let hoverHorizontalOutset: CGFloat = 18
-    static let hoverVerticalOutset: CGFloat = 4
-    static let rowHoverAlpha: CGFloat = 0.115
-    static let actionGlyphPointSize: CGFloat = 6.8
-    static let actionIdleAlpha: CGFloat = 0.34
-    static let actionRowHoverAlpha: CGFloat = 0.92
-    static let actionPointerHoverBackgroundAlpha: CGFloat = 0.16
-    static let actionRowHoverBackgroundAlpha: CGFloat = 0.030
+    static let hoverHorizontalOutset: CGFloat = 22
+    static let hoverVerticalOutset: CGFloat = 5
+    static let rowHoverAlpha: CGFloat = 0.14
+    static let rowHoverBorderAlpha: CGFloat = 0.055
+    static let actionGlyphPointSize: CGFloat = 8.2
+    static let actionIdleAlpha: CGFloat = 0
+    static let actionRowHoverAlpha: CGFloat = 0.96
+    static let actionPointerHoverBackgroundAlpha: CGFloat = 0.18
+    static let actionRowHoverBackgroundAlpha: CGFloat = 0.052
 }
 
 struct TranscriptRowHoverCandidate: Equatable {
@@ -2266,6 +2267,7 @@ private final class TranscriptRowView: NSView {
         static let hoverHorizontalOutset = TranscriptRowInteractionMetrics.hoverHorizontalOutset
         static let hoverVerticalOutset = TranscriptRowInteractionMetrics.hoverVerticalOutset
         static let rowHoverAlpha = TranscriptRowInteractionMetrics.rowHoverAlpha
+        static let rowHoverBorderAlpha = TranscriptRowInteractionMetrics.rowHoverBorderAlpha
         static let actionGlyphPointSize = TranscriptRowInteractionMetrics.actionGlyphPointSize
     }
 
@@ -2345,7 +2347,7 @@ private final class TranscriptRowView: NSView {
 
     override func hitTest(_ point: NSPoint) -> NSView? {
         guard !isHidden, alphaValue > 0, bounds.contains(point) else { return nil }
-        if let actionButton = actionButtonHit(at: point) {
+        if isHovered, let actionButton = actionButtonHit(at: point) {
             onHoverChanged(rowID)
             return actionButton.hitTest(convert(point, to: actionButton)) ?? actionButton
         }
@@ -2377,6 +2379,8 @@ private final class TranscriptRowView: NSView {
         wantsLayer = true
         layer?.cornerRadius = 4
         layer?.masksToBounds = true
+        layer?.borderWidth = 0.5
+        layer?.borderColor = NSColor.clear.cgColor
 
         label.isEditable = false
         label.isSelectable = false
@@ -2446,9 +2450,7 @@ private final class TranscriptRowView: NSView {
         button.layer?.backgroundColor = NSColor.clear.cgColor
         button.onPointerHoverChanged = { [weak self] hovering in
             guard let self else { return }
-            if hovering {
-                self.onHoverChanged(self.rowID)
-            }
+            self.onHoverChanged(hovering ? self.rowID : nil)
         }
         if let image = NSImage(systemSymbolName: systemName, accessibilityDescription: tooltip) {
             button.image = image.withSymbolConfiguration(.init(pointSize: LayoutMetrics.actionGlyphPointSize, weight: .regular))
@@ -2461,6 +2463,7 @@ private final class TranscriptRowView: NSView {
         guard isHovered != hovered else { return }
         isHovered = hovered
         layer?.backgroundColor = NSColor.white.withAlphaComponent(hovered ? LayoutMetrics.rowHoverAlpha : 0).cgColor
+        layer?.borderColor = NSColor.white.withAlphaComponent(hovered ? LayoutMetrics.rowHoverBorderAlpha : 0).cgColor
         copyButton.updateAppearance(rowHovered: hovered)
         deleteButton.updateAppearance(rowHovered: hovered)
     }
@@ -2533,13 +2536,15 @@ private final class TranscriptRowActionButton: NSButton {
     override func mouseExited(with event: NSEvent) {
         isPointerInside = false
         updateAppearance(rowHovered: rowHovered)
+        onPointerHoverChanged?(false)
         super.mouseExited(with: event)
     }
 
     func updateAppearance(rowHovered: Bool) {
         self.rowHovered = rowHovered
-        alphaValue = rowHovered ? Appearance.rowHoverAlpha : Appearance.idleAlpha
-        contentTintColor = NSColor.white.withAlphaComponent(isPointerInside ? 0.88 : (rowHovered ? 0.60 : 0.28))
+        isEnabled = rowHovered || isPointerInside
+        alphaValue = (rowHovered || isPointerInside) ? Appearance.rowHoverAlpha : Appearance.idleAlpha
+        contentTintColor = NSColor.white.withAlphaComponent(isPointerInside ? 0.90 : (rowHovered ? 0.66 : 0))
         let backgroundAlpha: CGFloat
         if isPointerInside {
             backgroundAlpha = Appearance.pointerHoverBackgroundAlpha

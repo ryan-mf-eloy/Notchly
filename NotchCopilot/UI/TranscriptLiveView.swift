@@ -151,14 +151,14 @@ struct TranscriptLiveView: View {
 
 enum TranscriptInlineActionMetrics {
     static let buttonHitSize: CGFloat = 22
-    static let visibleButtonSize: CGFloat = 11
-    static let glyphPointSize: CGFloat = 6.8
-    static let visibleButtonCornerRadius: CGFloat = 3
+    static let visibleButtonSize: CGFloat = 14
+    static let glyphPointSize: CGFloat = 8.2
+    static let visibleButtonCornerRadius: CGFloat = 4
     static let hitTargetCornerRadius: CGFloat = 5.5
     static let rowTrailingReserve: CGFloat = buttonHitSize * 2 + 2
-    static let rowHoverAlpha: Double = 0.115
-    static let idleActionsAlpha: Double = 0.34
-    static let visibleActionsAlpha: Double = 0.92
+    static let rowHoverAlpha: Double = 0.14
+    static let idleActionsAlpha: Double = 0
+    static let visibleActionsAlpha: Double = 0.96
 }
 
 private struct TranscriptInlineActions: View {
@@ -183,13 +183,11 @@ private struct TranscriptInlineActions: View {
             )
         }
         .opacity(isVisible ? TranscriptInlineActionMetrics.visibleActionsAlpha : TranscriptInlineActionMetrics.idleActionsAlpha)
-        .allowsHitTesting(true)
+        .allowsHitTesting(isVisible)
         .animation(nil, value: isVisible)
         .contentShape(Rectangle())
         .onHover { hovering in
-            if hovering {
-                onHoverChanged(true)
-            }
+            onHoverChanged(hovering)
         }
     }
 }
@@ -206,11 +204,11 @@ private struct TranscriptInlineActionButton: View {
         Button(action: action) {
             ZStack {
                 RoundedRectangle(cornerRadius: TranscriptInlineActionMetrics.visibleButtonCornerRadius, style: .continuous)
-                    .fill(Color.white.opacity(isHovered ? 0.13 : 0.012))
+                    .fill(Color.white.opacity(isHovered ? 0.18 : 0.050))
                     .frame(width: TranscriptInlineActionMetrics.visibleButtonSize, height: TranscriptInlineActionMetrics.visibleButtonSize)
                 Image(systemName: systemName)
                     .font(.system(size: TranscriptInlineActionMetrics.glyphPointSize, weight: .regular))
-                    .foregroundStyle(Color.white.opacity(isHovered ? 0.92 : 0.62))
+                    .foregroundStyle(Color.white.opacity(isHovered ? 0.92 : 0.68))
             }
             .frame(width: TranscriptInlineActionMetrics.buttonHitSize, height: TranscriptInlineActionMetrics.buttonHitSize)
             .background(
