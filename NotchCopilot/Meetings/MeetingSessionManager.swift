@@ -264,7 +264,7 @@ struct MeetingTranscriptLedger: Sendable, Hashable {
               !existing.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
               !incoming.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
               !hasTerminalSentencePunctuation(existing.text),
-              startsWithContinuationCue(incoming.text) else {
+              (startsWithContinuationCue(incoming.text) || isShortTailAfterDanglingContinuation(existing: existing.text, incoming: incoming.text)) else {
             return false
         }
 
@@ -328,6 +328,17 @@ struct MeetingTranscriptLedger: Sendable, Hashable {
     private func startsWithContinuationCue(_ text: String) -> Bool {
         guard let first = tokens(in: normalized(text)).first else { return false }
         return Self.continuationLeadTokens.contains(first)
+    }
+
+    private func isShortTailAfterDanglingContinuation(existing: String, incoming: String) -> Bool {
+        let existingTokens = tokens(in: normalized(existing))
+        let incomingTokens = tokens(in: normalized(incoming))
+        guard let lastExistingToken = existingTokens.last,
+              !incomingTokens.isEmpty,
+              incomingTokens.count <= 3 else {
+            return false
+        }
+        return Self.continuationLeadTokens.contains(lastExistingToken)
     }
 
     private func shouldPromoteExistingDraftOverShortFinal(existing: TranscriptSegment, incoming: TranscriptSegment) -> Bool {

@@ -4621,6 +4621,48 @@ final class NotchCopilotTests: XCTestCase {
         XCTAssertNil(tailSegment)
     }
 
+    func testMeetingTranscriptLedgerMergesSingleWordTailAfterDanglingConnector() {
+        let meetingId = UUID()
+        let committed = TranscriptSegment(
+            id: UUID(),
+            meetingId: meetingId,
+            speakerLabel: "You",
+            audioSource: .microphone,
+            text: "Qual é a capital do",
+            transcriptionPhase: .final,
+            transcriptionEngine: .appleSpeech,
+            sourceFrameRange: AudioSourceFrameRange(start: 0, end: 20_000),
+            startTime: 0,
+            endTime: 1.25,
+            isFinal: true
+        )
+        let tail = TranscriptSegment(
+            id: UUID(),
+            meetingId: meetingId,
+            speakerLabel: "You",
+            audioSource: .microphone,
+            text: "Brasil",
+            transcriptionPhase: .draft,
+            transcriptionEngine: .appleSpeech,
+            sourceFrameRange: AudioSourceFrameRange(start: 24_000, end: 30_000),
+            startTime: 1.50,
+            endTime: 1.88,
+            isFinal: false
+        )
+
+        let decision = MeetingTranscriptLedger().decision(for: tail, in: [committed])
+
+        guard case let .replace(index, replacement, tailSegment) = decision else {
+            return XCTFail("A single-word tail after a dangling connector should stay in the same transcript block.")
+        }
+        XCTAssertEqual(index, 0)
+        XCTAssertEqual(replacement.id, committed.id)
+        XCTAssertEqual(replacement.text, "Qual é a capital do Brasil")
+        XCTAssertFalse(replacement.isFinal)
+        XCTAssertEqual(replacement.sourceFrameRange, AudioSourceFrameRange(start: 0, end: 30_000))
+        XCTAssertNil(tailSegment)
+    }
+
     func testMeetingTranscriptLedgerDoesNotMergeFreshSentenceWithoutContinuationCue() {
         let meetingId = UUID()
         let committed = TranscriptSegment(
