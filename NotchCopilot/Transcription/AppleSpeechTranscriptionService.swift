@@ -490,7 +490,8 @@ final class SpeechAnalyzerTranscriptionService: TranscriptionService {
         watchdogTask?.cancel()
         watchdogTask = Task { @MainActor [weak self] in
             while !Task.isCancelled {
-                try? await Task.sleep(for: .seconds(1))
+                let interval = self?.watchdogPolicy.evaluationInterval ?? 0.5
+                try? await Task.sleep(for: .milliseconds(Int(max(0.25, interval) * 1_000)))
                 guard let self, !Task.isCancelled else { return }
                 guard self.fallbackService == nil, self.fallbackActivationTask == nil else { continue }
                 let now = Date()

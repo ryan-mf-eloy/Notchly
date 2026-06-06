@@ -151,12 +151,12 @@ struct TranscriptLiveView: View {
 
 enum TranscriptInlineActionMetrics {
     static let buttonHitSize: CGFloat = 24
-    static let visibleButtonSize: CGFloat = 12
-    static let glyphPointSize: CGFloat = 7.4
+    static let visibleButtonSize: CGFloat = 11
+    static let glyphPointSize: CGFloat = 7.0
     static let visibleButtonCornerRadius: CGFloat = 3.5
     static let hitTargetCornerRadius: CGFloat = 5
     static let rowTrailingReserve: CGFloat = buttonHitSize * 2 + 2
-    static let rowHoverAlpha: Double = 0.085
+    static let rowHoverAlpha: Double = 0.095
     static let idleActionsAlpha: Double = 0.001
     static let visibleActionsAlpha: Double = 0.86
 }

@@ -804,6 +804,7 @@ struct SpeechRecognitionWatchdogPolicy: Sendable, Equatable {
     var noSegmentWindow: TimeInterval = 1.8
     var minimumRestartInterval: TimeInterval = 1.1
     var minimumActiveWindowBeforeRestart: TimeInterval = 0.65
+    var evaluationInterval: TimeInterval = 0.5
 
     func shouldRestart(
         now: Date,

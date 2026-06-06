@@ -2054,7 +2054,7 @@ enum TranscriptRowInteractionMetrics {
     static let hoverVerticalOutset: CGFloat = 5
     static let rowHoverAlpha: CGFloat = 0.095
     static let rowHoverBorderAlpha: CGFloat = 0.040
-    static let actionGlyphPointSize: CGFloat = 7.4
+    static let actionGlyphPointSize: CGFloat = 7.0
     static let actionIdleAlpha: CGFloat = 0.008
     static let actionRowHoverAlpha: CGFloat = 0.86
     static let actionPointerHoverBackgroundAlpha: CGFloat = 0.13
