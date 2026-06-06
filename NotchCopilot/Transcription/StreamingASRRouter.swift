@@ -273,9 +273,9 @@ final class RecentAudioWindowStore: @unchecked Sendable {
     private static func firstAudioRMSFloor(for source: TranscriptAudioSource) -> Float {
         switch source {
         case .system:
-            return 0.000078
+            return 0.000030
         case .microphone:
-            return 0.000088
+            return 0.000034
         default:
             return 0.00018
         }

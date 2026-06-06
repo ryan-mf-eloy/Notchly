@@ -2055,7 +2055,7 @@ enum TranscriptRowInteractionMetrics {
     static let rowHoverAlpha: CGFloat = 0.085
     static let rowHoverBorderAlpha: CGFloat = 0.025
     static let actionGlyphPointSize: CGFloat = 7.4
-    static let actionIdleAlpha: CGFloat = 0
+    static let actionIdleAlpha: CGFloat = 0.008
     static let actionRowHoverAlpha: CGFloat = 0.86
     static let actionPointerHoverBackgroundAlpha: CGFloat = 0.13
     static let actionRowHoverBackgroundAlpha: CGFloat = 0.032
@@ -2442,6 +2442,7 @@ private final class TranscriptRowView: NSView {
         button.target = self
         button.action = action
         button.toolTip = tooltip
+        button.focusRingType = .none
         button.setAccessibilityIdentifier(accessibilityIdentifier)
         button.setAccessibilityLabel(tooltip)
         button.setAccessibilityHelp(tooltip)

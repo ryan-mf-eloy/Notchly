@@ -1268,7 +1268,7 @@ final class TranscriptionPipelineTests: XCTestCase {
         systemStore.append(TranscriptionAudioFixtureGenerator.buffers(profile: .silence, source: .system, chunks: 1).first!)
         XCTAssertNil(systemStore.firstAudioAt())
 
-        let lowSystemSamples = Array(repeating: Float(0.000080), count: 1_600)
+        let lowSystemSamples = Array(repeating: Float(0.000032), count: 1_600)
         let lowSystem = TranscriptionAudioFixtureGenerator.buffer(samples: lowSystemSamples, source: .system, offset: 1)
         systemStore.append(lowSystem)
         XCTAssertEqual(systemStore.firstAudioAt(), lowSystem.createdAt)
@@ -1277,10 +1277,24 @@ final class TranscriptionPipelineTests: XCTestCase {
         microphoneStore.append(TranscriptionAudioFixtureGenerator.buffers(profile: .silence, source: .microphone, chunks: 1).first!)
         XCTAssertNil(microphoneStore.firstAudioAt())
 
-        let lowMicrophoneSamples = Array(repeating: Float(0.000090), count: 1_600)
+        let lowMicrophoneSamples = Array(repeating: Float(0.000036), count: 1_600)
         let lowMicrophone = TranscriptionAudioFixtureGenerator.buffer(samples: lowMicrophoneSamples, source: .microphone, offset: 2)
         microphoneStore.append(lowMicrophone)
         XCTAssertEqual(microphoneStore.firstAudioAt(), lowMicrophone.createdAt)
+    }
+
+    func testRecentAudioWindowStoreDoesNotTreatSubSpeechFloorAsFirstAudio() {
+        let systemStore = RecentAudioWindowStore(maxDuration: 9)
+        let subSpeechSystemSamples = Array(repeating: Float(0.000024), count: 1_600)
+        let subSpeechSystem = TranscriptionAudioFixtureGenerator.buffer(samples: subSpeechSystemSamples, source: .system, offset: 1)
+        systemStore.append(subSpeechSystem)
+        XCTAssertNil(systemStore.firstAudioAt())
+
+        let microphoneStore = RecentAudioWindowStore(maxDuration: 9)
+        let subSpeechMicrophoneSamples = Array(repeating: Float(0.000027), count: 1_600)
+        let subSpeechMicrophone = TranscriptionAudioFixtureGenerator.buffer(samples: subSpeechMicrophoneSamples, source: .microphone, offset: 2)
+        microphoneStore.append(subSpeechMicrophone)
+        XCTAssertNil(microphoneStore.firstAudioAt())
     }
 
     func testRecentAudioWindowStorePreservesDurationWindowForSmallChunks() {
