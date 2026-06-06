@@ -78,6 +78,14 @@ final class RealtimeQuestionAnsweringFlowTests: XCTestCase {
         XCTAssertLessThanOrEqual(deleteButton.frame.width, 26)
         XCTAssertLessThanOrEqual(deleteButton.frame.height, 26)
 
+        anyElement(in: harness, "qa-transcript-stream").hover()
+        copyButton.hover()
+        XCTAssertTrue(copyButton.exists)
+        XCTAssertTrue(deleteButton.exists)
+        deleteButton.hover()
+        XCTAssertTrue(copyButton.exists)
+        XCTAssertTrue(deleteButton.exists)
+
         copyButton.click()
         deleteButton.click()
     }
