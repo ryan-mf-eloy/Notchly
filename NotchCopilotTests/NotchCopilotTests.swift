@@ -4663,6 +4663,81 @@ final class NotchCopilotTests: XCTestCase {
         XCTAssertNil(tailSegment)
     }
 
+    func testMeetingTranscriptLedgerMergesImmediateShortTailWithoutCue() {
+        let meetingId = UUID()
+        let committed = TranscriptSegment(
+            id: UUID(),
+            meetingId: meetingId,
+            speakerLabel: "You",
+            audioSource: .microphone,
+            text: "A gente vai revisar",
+            transcriptionPhase: .final,
+            transcriptionEngine: .appleSpeech,
+            sourceFrameRange: AudioSourceFrameRange(start: 0, end: 24_000),
+            startTime: 0,
+            endTime: 1.50,
+            isFinal: true
+        )
+        let tail = TranscriptSegment(
+            id: UUID(),
+            meetingId: meetingId,
+            speakerLabel: "You",
+            audioSource: .microphone,
+            text: "amanha",
+            transcriptionPhase: .draft,
+            transcriptionEngine: .appleSpeech,
+            sourceFrameRange: AudioSourceFrameRange(start: 29_000, end: 35_000),
+            startTime: 1.81,
+            endTime: 2.19,
+            isFinal: false
+        )
+
+        let decision = MeetingTranscriptLedger().decision(for: tail, in: [committed])
+
+        guard case let .replace(index, replacement, tailSegment) = decision else {
+            return XCTFail("An immediate one-word ASR tail should stay in the same transcript block.")
+        }
+        XCTAssertEqual(index, 0)
+        XCTAssertEqual(replacement.id, committed.id)
+        XCTAssertEqual(replacement.text, "A gente vai revisar amanha")
+        XCTAssertFalse(replacement.isFinal)
+        XCTAssertNil(tailSegment)
+    }
+
+    func testMeetingTranscriptLedgerDoesNotMergeShortStandaloneResponse() {
+        let meetingId = UUID()
+        let committed = TranscriptSegment(
+            id: UUID(),
+            meetingId: meetingId,
+            speakerLabel: "You",
+            audioSource: .microphone,
+            text: "Vamos revisar o plano",
+            transcriptionPhase: .final,
+            transcriptionEngine: .appleSpeech,
+            sourceFrameRange: AudioSourceFrameRange(start: 0, end: 24_000),
+            startTime: 0,
+            endTime: 1.50,
+            isFinal: true
+        )
+        let response = TranscriptSegment(
+            id: UUID(),
+            meetingId: meetingId,
+            speakerLabel: "You",
+            audioSource: .microphone,
+            text: "sim",
+            transcriptionPhase: .draft,
+            transcriptionEngine: .appleSpeech,
+            sourceFrameRange: AudioSourceFrameRange(start: 29_000, end: 35_000),
+            startTime: 1.81,
+            endTime: 2.19,
+            isFinal: false
+        )
+
+        guard case .append = MeetingTranscriptLedger().decision(for: response, in: [committed]) else {
+            return XCTFail("A short standalone answer should remain its own transcript block.")
+        }
+    }
+
     func testMeetingTranscriptLedgerDoesNotMergeFreshSentenceWithoutContinuationCue() {
         let meetingId = UUID()
         let committed = TranscriptSegment(
@@ -4694,6 +4769,40 @@ final class NotchCopilotTests: XCTestCase {
 
         guard case .append = MeetingTranscriptLedger().decision(for: newSentence, in: [committed]) else {
             return XCTFail("A fresh sentence without a continuation cue should append as its own block.")
+        }
+    }
+
+    func testMeetingTranscriptLedgerDoesNotMergeAnswerAfterCompleteQuestion() {
+        let meetingId = UUID()
+        let committed = TranscriptSegment(
+            id: UUID(),
+            meetingId: meetingId,
+            speakerLabel: "You",
+            audioSource: .microphone,
+            text: "Qual é a capital do Brasil",
+            transcriptionPhase: .final,
+            transcriptionEngine: .appleSpeech,
+            sourceFrameRange: AudioSourceFrameRange(start: 0, end: 24_000),
+            startTime: 0,
+            endTime: 1.50,
+            isFinal: true
+        )
+        let answer = TranscriptSegment(
+            id: UUID(),
+            meetingId: meetingId,
+            speakerLabel: "You",
+            audioSource: .microphone,
+            text: "Brasilia",
+            transcriptionPhase: .draft,
+            transcriptionEngine: .appleSpeech,
+            sourceFrameRange: AudioSourceFrameRange(start: 29_000, end: 35_000),
+            startTime: 1.81,
+            endTime: 2.19,
+            isFinal: false
+        )
+
+        guard case .append = MeetingTranscriptLedger().decision(for: answer, in: [committed]) else {
+            return XCTFail("A one-word answer after a complete question should not be glued into the question.")
         }
     }
 

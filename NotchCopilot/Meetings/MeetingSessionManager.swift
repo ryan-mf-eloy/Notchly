@@ -258,23 +258,24 @@ struct MeetingTranscriptLedger: Sendable, Hashable {
     }
 
     private func shouldContinueSentence(existing: TranscriptSegment, incoming: TranscriptSegment) -> Bool {
+        let continuity = sentenceContinuityKind(existing: existing.text, incoming: incoming.text)
         guard existing.audioSource == incoming.audioSource,
               existing.meetingId == incoming.meetingId,
               existing.id != incoming.id,
               !existing.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
               !incoming.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
               !hasTerminalSentencePunctuation(existing.text),
-              (startsWithContinuationCue(incoming.text) || isShortTailAfterDanglingContinuation(existing: existing.text, incoming: incoming.text)) else {
+              continuity != nil else {
             return false
         }
 
         if let existingRange = existing.sourceFrameRange, let incomingRange = incoming.sourceFrameRange {
             let frameGap = incomingRange.start - existingRange.end
-            return frameGap >= 0 && frameGap <= 22_000
+            return frameGap >= 0 && frameGap <= maxContinuationFrameGap(for: continuity)
         }
 
         let gap = incoming.startTime - existing.endTime
-        return gap >= 0 && gap <= 1.35
+        return gap >= 0 && gap <= maxContinuationTemporalGap(for: continuity)
     }
 
     private func continuedSentence(existing: TranscriptSegment, incoming: TranscriptSegment) -> TranscriptSegment {
@@ -330,6 +331,33 @@ struct MeetingTranscriptLedger: Sendable, Hashable {
         return Self.continuationLeadTokens.contains(first)
     }
 
+    private enum SentenceContinuityKind {
+        case explicitCue
+        case danglingConnectorTail
+        case immediateShortTail
+    }
+
+    private func sentenceContinuityKind(existing: String, incoming: String) -> SentenceContinuityKind? {
+        if startsWithContinuationCue(incoming) {
+            return .explicitCue
+        }
+        if isShortTailAfterDanglingContinuation(existing: existing, incoming: incoming) {
+            return .danglingConnectorTail
+        }
+        if isImmediateShortContinuationTail(existing: existing, incoming: incoming) {
+            return .immediateShortTail
+        }
+        return nil
+    }
+
+    private func maxContinuationFrameGap(for kind: SentenceContinuityKind?) -> Int64 {
+        kind == .immediateShortTail ? 9_600 : 22_000
+    }
+
+    private func maxContinuationTemporalGap(for kind: SentenceContinuityKind?) -> TimeInterval {
+        kind == .immediateShortTail ? 0.60 : 1.35
+    }
+
     private func isShortTailAfterDanglingContinuation(existing: String, incoming: String) -> Bool {
         let existingTokens = tokens(in: normalized(existing))
         let incomingTokens = tokens(in: normalized(incoming))
@@ -339,6 +367,30 @@ struct MeetingTranscriptLedger: Sendable, Hashable {
             return false
         }
         return Self.continuationLeadTokens.contains(lastExistingToken)
+    }
+
+    private func isImmediateShortContinuationTail(existing: String, incoming: String) -> Bool {
+        let existingTokens = tokens(in: normalized(existing))
+        let incomingTokens = tokens(in: normalized(incoming))
+        guard existingTokens.count >= 2,
+              !incomingTokens.isEmpty,
+              incomingTokens.count <= 2,
+              let firstIncomingToken = incomingTokens.first,
+              !Self.shortStandaloneResponseTokens.contains(firstIncomingToken),
+              !isLikelyCompleteQuestion(existingTokens) else {
+            return false
+        }
+        return true
+    }
+
+    private func isLikelyCompleteQuestion(_ tokens: [String]) -> Bool {
+        guard let first = tokens.first,
+              Self.questionLeadTokens.contains(first),
+              tokens.count >= 5,
+              let last = tokens.last else {
+            return false
+        }
+        return !Self.continuationLeadTokens.contains(last)
     }
 
     private func shouldPromoteExistingDraftOverShortFinal(existing: TranscriptSegment, incoming: TranscriptSegment) -> Bool {
@@ -492,6 +544,18 @@ struct MeetingTranscriptLedger: Sendable, Hashable {
         "and", "because", "but", "for", "in", "of", "or", "so", "that", "to", "with",
         "y", "o", "pero", "porque", "que", "con", "de", "del", "en", "para",
         "そして", "でも", "ので", "から"
+    ]
+    private static let questionLeadTokens: Set<String> = [
+        "como", "onde", "por", "qual", "quais", "quando", "quanto", "quantos", "que", "quem",
+        "can", "could", "did", "do", "does", "how", "is", "should", "what", "when", "where", "which", "who", "why", "would",
+        "como", "cual", "cuando", "cuanto", "donde", "por", "que", "quien",
+        "いつ", "だれ", "どこ", "どう", "なぜ", "何"
+    ]
+    private static let shortStandaloneResponseTokens: Set<String> = [
+        "beleza", "certo", "claro", "nao", "não", "ok", "sim",
+        "no", "okay", "right", "sure", "yes",
+        "bueno", "no", "ok", "si", "sí",
+        "はい", "いいえ"
     ]
 
     private func isTokenPrefix(_ prefix: [String], of full: [String]) -> Bool {
