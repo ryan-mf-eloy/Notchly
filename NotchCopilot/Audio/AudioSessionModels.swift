@@ -478,8 +478,8 @@ enum SpeechActivityLevel: String, Sendable, Equatable {
 }
 
 struct SpeechActivityPolicy: Sendable, Equatable {
-    var preRollDuration: TimeInterval = 2.0
-    var hangoverDuration: TimeInterval = 3.0
+    var preRollDuration: TimeInterval = 2.8
+    var hangoverDuration: TimeInterval = 3.8
     var absoluteSpeechRMS: Float = 0.00024
     var likelySpeechRMS: Float = 0.00046
     var activeSpeechRMS: Float = 0.0024
@@ -800,11 +800,11 @@ struct SpeechAnalyzerRangeKey: Hashable, Comparable, Sendable {
 
 struct SpeechRecognitionWatchdogPolicy: Sendable, Equatable {
     var significantAudioRMS: Float = 0.0012
-    var significantAudioWindow: TimeInterval = 5.5
-    var noSegmentWindow: TimeInterval = 1.8
-    var minimumRestartInterval: TimeInterval = 1.1
-    var minimumActiveWindowBeforeRestart: TimeInterval = 0.65
-    var evaluationInterval: TimeInterval = 0.5
+    var significantAudioWindow: TimeInterval = 6.2
+    var noSegmentWindow: TimeInterval = 1.45
+    var minimumRestartInterval: TimeInterval = 0.95
+    var minimumActiveWindowBeforeRestart: TimeInterval = 0.55
+    var evaluationInterval: TimeInterval = 0.35
 
     func shouldRestart(
         now: Date,

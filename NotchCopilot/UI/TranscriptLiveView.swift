@@ -92,6 +92,10 @@ struct TranscriptLiveView: View {
             RoundedRectangle(cornerRadius: 6, style: .continuous)
                 .fill(Color.white.opacity(isHovered ? TranscriptInlineActionMetrics.rowHoverAlpha : 0))
         )
+        .overlay(
+            RoundedRectangle(cornerRadius: 6, style: .continuous)
+                .stroke(Color.white.opacity(isHovered ? TranscriptInlineActionMetrics.rowHoverBorderAlpha : 0), lineWidth: 0.5)
+        )
         .overlay(alignment: .topTrailing) {
             if hasInlineActions {
                 TranscriptInlineActions(
@@ -104,6 +108,7 @@ struct TranscriptLiveView: View {
                 )
                 .padding(.top, 0)
                 .padding(.trailing, 0)
+                .zIndex(1)
             }
         }
         .contentShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
@@ -159,7 +164,9 @@ enum TranscriptInlineActionMetrics {
     static let visibleButtonCornerRadius: CGFloat = 3.0
     static let hitTargetCornerRadius: CGFloat = 5
     static let rowTrailingReserve: CGFloat = buttonHitSize * 2 + 2
+    static let actionsHoverSlop: CGFloat = 8
     static let rowHoverAlpha: Double = 0.155
+    static let rowHoverBorderAlpha: Double = 0.065
     static let idleActionsAlpha: Double = 0.26
     static let visibleActionsAlpha: Double = 0.98
     static let hoverClearDelayMilliseconds = 520
@@ -226,6 +233,11 @@ private struct TranscriptInlineActions: View {
                 action: onDelete
             )
         }
+        .frame(
+            width: TranscriptInlineActionMetrics.rowTrailingReserve + TranscriptInlineActionMetrics.actionsHoverSlop,
+            height: TranscriptInlineActionMetrics.buttonHitSize + TranscriptInlineActionMetrics.actionsHoverSlop * 2,
+            alignment: .topTrailing
+        )
         .opacity(isVisible ? TranscriptInlineActionMetrics.visibleActionsAlpha : TranscriptInlineActionMetrics.idleActionsAlpha)
         .allowsHitTesting(true)
         .animation(nil, value: isVisible)

@@ -4049,6 +4049,9 @@ final class NotchCopilotTests: XCTestCase {
         XCTAssertLessThanOrEqual(policy.minimumActiveWindowBeforeRestart, 0.75)
         XCTAssertLessThanOrEqual(policy.evaluationInterval, 0.55)
         XCTAssertGreaterThanOrEqual(policy.evaluationInterval, 0.25)
+        XCTAssertGreaterThanOrEqual(policy.significantAudioWindow, 6.0)
+        XCTAssertGreaterThanOrEqual(SpeechActivityPolicy().preRollDuration, 2.8)
+        XCTAssertGreaterThanOrEqual(SpeechActivityPolicy().hangoverDuration, 3.8)
     }
 
     func testSpeechActivityPolicyTreatsLowConsistentAudioAsSpeechLikely() {
@@ -6447,7 +6450,7 @@ final class NotchCopilotTests: XCTestCase {
         let decision = policy.decision(
             errorDescription: "No speech detected",
             now: now,
-            lastSignificantAudioAt: now.addingTimeInterval(-2.95),
+            lastSignificantAudioAt: now.addingTimeInterval(-4.55),
             lastRestartAt: now.addingTimeInterval(-10)
         )
 
@@ -11181,6 +11184,8 @@ final class NotchCopilotTests: XCTestCase {
         XCTAssertLessThanOrEqual(TranscriptInlineActionMetrics.glyphPointSize, 6.6)
         XCTAssertGreaterThanOrEqual(TranscriptInlineActionMetrics.rowHoverAlpha, 0.15)
         XCTAssertLessThanOrEqual(TranscriptInlineActionMetrics.rowHoverAlpha, 0.17)
+        XCTAssertGreaterThanOrEqual(TranscriptInlineActionMetrics.rowHoverBorderAlpha, 0.06)
+        XCTAssertGreaterThanOrEqual(TranscriptInlineActionMetrics.actionsHoverSlop, 8)
         XCTAssertGreaterThanOrEqual(TranscriptInlineActionMetrics.idleActionsAlpha, 0.24)
         XCTAssertLessThanOrEqual(TranscriptInlineActionMetrics.idleActionsAlpha, 0.28)
         XCTAssertGreaterThan(TranscriptInlineActionMetrics.visibleActionsAlpha, TranscriptInlineActionMetrics.idleActionsAlpha)

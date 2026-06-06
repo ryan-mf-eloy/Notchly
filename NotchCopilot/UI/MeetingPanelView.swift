@@ -2166,8 +2166,11 @@ private final class FlippedTranscriptDocumentView: NSView {
             removeTrackingArea(trackingArea)
         }
         let area = NSTrackingArea(
-            rect: bounds,
-            options: [.mouseEnteredAndExited, .mouseMoved, .activeAlways, .enabledDuringMouseDrag, .inVisibleRect],
+            rect: bounds.insetBy(
+                dx: -TranscriptRowInteractionMetrics.hoverHorizontalOutset,
+                dy: -TranscriptRowInteractionMetrics.hoverVerticalOutset
+            ),
+            options: [.mouseEnteredAndExited, .mouseMoved, .activeAlways, .enabledDuringMouseDrag],
             owner: self,
             userInfo: nil
         )
