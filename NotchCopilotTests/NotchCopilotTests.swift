@@ -3928,7 +3928,7 @@ final class NotchCopilotTests: XCTestCase {
             XCTAssertGreaterThanOrEqual(trace.conditionedBuffer.rms, testCase.wakeFloor)
             XCTAssertGreaterThan(trace.conditionedBuffer.rms, trace.inputBuffer.rms * 140)
             XCTAssertTrue(activity.shouldDriveRecognition, "\(testCase.source.displayName) conditioned whisper should wake native speech: \(snapshot)")
-            XCTAssertFalse(activity.isSignificant)
+            XCTAssertNotEqual(activity, .speechActive, "\(testCase.source.displayName) conditioned whisper should wake ASR without looking clipped/loud: \(snapshot)")
         }
     }
 
@@ -11171,32 +11171,49 @@ final class NotchCopilotTests: XCTestCase {
 
     func testTranscriptInlineActionsReserveCompactNonOverlappingSpace() {
         XCTAssertEqual(TranscriptInlineActionMetrics.buttonHitSize, 24)
-        XCTAssertEqual(TranscriptInlineActionMetrics.visibleButtonSize, 11)
+        XCTAssertEqual(TranscriptInlineActionMetrics.visibleButtonSize, 10)
         XCTAssertGreaterThan(TranscriptInlineActionMetrics.buttonHitSize, TranscriptInlineActionMetrics.visibleButtonSize)
         XCTAssertGreaterThanOrEqual(
             TranscriptInlineActionMetrics.rowTrailingReserve,
             TranscriptInlineActionMetrics.buttonHitSize * 2
         )
         XCTAssertLessThanOrEqual(TranscriptInlineActionMetrics.rowTrailingReserve, 50)
-        XCTAssertLessThanOrEqual(TranscriptInlineActionMetrics.glyphPointSize, 7.0)
-        XCTAssertGreaterThanOrEqual(TranscriptInlineActionMetrics.rowHoverAlpha, 0.11)
-        XCTAssertLessThanOrEqual(TranscriptInlineActionMetrics.rowHoverAlpha, 0.13)
-        XCTAssertGreaterThanOrEqual(TranscriptInlineActionMetrics.idleActionsAlpha, 0.12)
-        XCTAssertLessThanOrEqual(TranscriptInlineActionMetrics.idleActionsAlpha, 0.18)
+        XCTAssertLessThanOrEqual(TranscriptInlineActionMetrics.glyphPointSize, 6.6)
+        XCTAssertGreaterThanOrEqual(TranscriptInlineActionMetrics.rowHoverAlpha, 0.15)
+        XCTAssertLessThanOrEqual(TranscriptInlineActionMetrics.rowHoverAlpha, 0.17)
+        XCTAssertGreaterThanOrEqual(TranscriptInlineActionMetrics.idleActionsAlpha, 0.24)
+        XCTAssertLessThanOrEqual(TranscriptInlineActionMetrics.idleActionsAlpha, 0.28)
         XCTAssertGreaterThan(TranscriptInlineActionMetrics.visibleActionsAlpha, TranscriptInlineActionMetrics.idleActionsAlpha)
         XCTAssertGreaterThanOrEqual(TranscriptInlineActionMetrics.hoverClearDelayMilliseconds, 500)
 
         XCTAssertEqual(TranscriptRowInteractionMetrics.actionHitSize, 24)
-        XCTAssertLessThanOrEqual(TranscriptRowInteractionMetrics.actionGlyphPointSize, 7.0)
-        XCTAssertGreaterThanOrEqual(TranscriptRowInteractionMetrics.rowHoverAlpha, 0.11)
-        XCTAssertLessThanOrEqual(TranscriptRowInteractionMetrics.rowHoverAlpha, 0.13)
-        XCTAssertGreaterThanOrEqual(TranscriptRowInteractionMetrics.rowHoverBorderAlpha, 0.05)
-        XCTAssertGreaterThanOrEqual(TranscriptRowInteractionMetrics.actionIdleAlpha, 0.12)
-        XCTAssertLessThanOrEqual(TranscriptRowInteractionMetrics.actionIdleAlpha, 0.18)
+        XCTAssertLessThanOrEqual(TranscriptRowInteractionMetrics.actionGlyphPointSize, 6.6)
+        XCTAssertGreaterThanOrEqual(TranscriptRowInteractionMetrics.rowHoverAlpha, 0.15)
+        XCTAssertLessThanOrEqual(TranscriptRowInteractionMetrics.rowHoverAlpha, 0.17)
+        XCTAssertGreaterThanOrEqual(TranscriptRowInteractionMetrics.rowHoverBorderAlpha, 0.06)
+        XCTAssertGreaterThanOrEqual(TranscriptRowInteractionMetrics.actionIdleAlpha, 0.24)
+        XCTAssertLessThanOrEqual(TranscriptRowInteractionMetrics.actionIdleAlpha, 0.28)
         XCTAssertGreaterThan(TranscriptRowInteractionMetrics.actionRowHoverAlpha, TranscriptRowInteractionMetrics.actionIdleAlpha)
         XCTAssertGreaterThanOrEqual(TranscriptRowInteractionMetrics.hoverHorizontalOutset, 26)
         XCTAssertLessThanOrEqual(TranscriptRowInteractionMetrics.hoverVerticalOutset, 6)
         XCTAssertGreaterThanOrEqual(TranscriptRowInteractionMetrics.hoverClearDelayMilliseconds, 500)
+    }
+
+    func testTranscriptInlineHoverStateKeepsActionsStableAcrossBoundaryTransitions() {
+        var hoverState = TranscriptInlineHoverState()
+        let segmentID = UUID()
+
+        XCTAssertFalse(hoverState.update(segmentID: segmentID, zone: .row, isInside: true))
+        XCTAssertEqual(hoverState.hoveredSegmentID, segmentID)
+        XCTAssertFalse(hoverState.update(segmentID: segmentID, zone: .actions, isInside: true))
+        XCTAssertEqual(hoverState.hoveredSegmentID, segmentID)
+        XCTAssertFalse(hoverState.update(segmentID: segmentID, zone: .row, isInside: false))
+        hoverState.clearIfIdle(segmentID)
+        XCTAssertEqual(hoverState.hoveredSegmentID, segmentID, "hover should not flicker while the pointer is inside inline actions")
+
+        XCTAssertTrue(hoverState.update(segmentID: segmentID, zone: .actions, isInside: false))
+        hoverState.clearIfIdle(segmentID)
+        XCTAssertNil(hoverState.hoveredSegmentID)
     }
 
     func testTranscriptRowHoverResolverPrefersExactRowOverExpandedNeighbor() {

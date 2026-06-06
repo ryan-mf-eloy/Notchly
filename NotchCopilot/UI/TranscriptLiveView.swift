@@ -7,7 +7,7 @@ struct TranscriptLiveView: View {
     var onCopySegment: ((TranscriptSegment) -> Void)?
     var onDeleteSegment: ((TranscriptSegment) -> Void)?
 
-    @State private var hoveredSegmentID: UUID?
+    @State private var hoverState = TranscriptInlineHoverState()
     @State private var hoverClearTask: Task<Void, Never>?
 
     var body: some View {
@@ -41,7 +41,7 @@ struct TranscriptLiveView: View {
     }
 
     private func segmentRow(_ segment: TranscriptSegment) -> some View {
-        let isHovered = hoveredSegmentID == segment.id
+        let isHovered = hoverState.hoveredSegmentID == segment.id
         let hasInlineActions = onCopySegment != nil || onDeleteSegment != nil
         return VStack(alignment: .leading, spacing: 4) {
             HStack(spacing: 6) {
@@ -99,7 +99,7 @@ struct TranscriptLiveView: View {
                     onCopy: { onCopySegment?(segment) },
                     onDelete: { onDeleteSegment?(segment) },
                     onHoverChanged: { hovering in
-                        updateHoveredSegment(hovering ? segment.id : nil)
+                        updateHoveredSegment(segment.id, zone: .actions, isInside: hovering)
                     }
                 )
                 .padding(.top, 0)
@@ -108,28 +108,31 @@ struct TranscriptLiveView: View {
         }
         .contentShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
         .onHover { hovering in
-            updateHoveredSegment(hovering ? segment.id : nil)
+            updateHoveredSegment(segment.id, zone: .row, isInside: hovering)
         }
         .onDisappear {
-            if hoveredSegmentID == segment.id {
-                updateHoveredSegment(nil)
-            }
+            removeHoveredSegment(segment.id)
         }
         .animation(nil, value: isHovered)
     }
 
-    private func updateHoveredSegment(_ segmentID: UUID?) {
+    private func updateHoveredSegment(_ segmentID: UUID, zone: TranscriptInlineHoverZone, isInside: Bool) {
         hoverClearTask?.cancel()
         hoverClearTask = nil
-        if let segmentID {
-            hoveredSegmentID = segmentID
-        } else if let current = hoveredSegmentID {
+        let shouldClearAfterDelay = hoverState.update(segmentID: segmentID, zone: zone, isInside: isInside)
+        if shouldClearAfterDelay {
             hoverClearTask = Task { @MainActor in
                 try? await Task.sleep(for: .milliseconds(TranscriptInlineActionMetrics.hoverClearDelayMilliseconds))
-                guard !Task.isCancelled, hoveredSegmentID == current else { return }
-                hoveredSegmentID = nil
+                guard !Task.isCancelled else { return }
+                hoverState.clearIfIdle(segmentID)
             }
         }
+    }
+
+    private func removeHoveredSegment(_ segmentID: UUID) {
+        hoverClearTask?.cancel()
+        hoverClearTask = nil
+        hoverState.removeSegment(segmentID)
     }
 
     private func transcriptColor(for segment: TranscriptSegment) -> Color {
@@ -151,15 +154,55 @@ struct TranscriptLiveView: View {
 
 enum TranscriptInlineActionMetrics {
     static let buttonHitSize: CGFloat = 24
-    static let visibleButtonSize: CGFloat = 11
-    static let glyphPointSize: CGFloat = 7.0
-    static let visibleButtonCornerRadius: CGFloat = 3.5
+    static let visibleButtonSize: CGFloat = 10
+    static let glyphPointSize: CGFloat = 6.6
+    static let visibleButtonCornerRadius: CGFloat = 3.0
     static let hitTargetCornerRadius: CGFloat = 5
     static let rowTrailingReserve: CGFloat = buttonHitSize * 2 + 2
-    static let rowHoverAlpha: Double = 0.12
-    static let idleActionsAlpha: Double = 0.16
-    static let visibleActionsAlpha: Double = 0.92
+    static let rowHoverAlpha: Double = 0.155
+    static let idleActionsAlpha: Double = 0.26
+    static let visibleActionsAlpha: Double = 0.98
     static let hoverClearDelayMilliseconds = 520
+}
+
+enum TranscriptInlineHoverZone: Hashable {
+    case row
+    case actions
+}
+
+struct TranscriptInlineHoverState: Equatable {
+    private(set) var hoveredSegmentID: UUID?
+    private var activeZonesBySegmentID: [UUID: Set<TranscriptInlineHoverZone>] = [:]
+
+    mutating func update(segmentID: UUID, zone: TranscriptInlineHoverZone, isInside: Bool) -> Bool {
+        if isInside {
+            var zones = activeZonesBySegmentID[segmentID, default: []]
+            zones.insert(zone)
+            activeZonesBySegmentID[segmentID] = zones
+            hoveredSegmentID = segmentID
+            return false
+        }
+
+        var zones = activeZonesBySegmentID[segmentID] ?? []
+        zones.remove(zone)
+        activeZonesBySegmentID[segmentID] = zones.isEmpty ? nil : zones
+        return hoveredSegmentID == segmentID && zones.isEmpty
+    }
+
+    mutating func clearIfIdle(_ segmentID: UUID) {
+        guard activeZonesBySegmentID[segmentID]?.isEmpty ?? true else { return }
+        activeZonesBySegmentID[segmentID] = nil
+        if hoveredSegmentID == segmentID {
+            hoveredSegmentID = nil
+        }
+    }
+
+    mutating func removeSegment(_ segmentID: UUID) {
+        activeZonesBySegmentID[segmentID] = nil
+        if hoveredSegmentID == segmentID {
+            hoveredSegmentID = nil
+        }
+    }
 }
 
 private struct TranscriptInlineActions: View {

@@ -2052,11 +2052,11 @@ enum TranscriptRowInteractionMetrics {
     static let verticalInset: CGFloat = 0
     static let hoverHorizontalOutset: CGFloat = 26
     static let hoverVerticalOutset: CGFloat = 6
-    static let rowHoverAlpha: CGFloat = 0.12
-    static let rowHoverBorderAlpha: CGFloat = 0.050
-    static let actionGlyphPointSize: CGFloat = 7.0
-    static let actionIdleAlpha: CGFloat = 0.16
-    static let actionRowHoverAlpha: CGFloat = 0.92
+    static let rowHoverAlpha: CGFloat = 0.155
+    static let rowHoverBorderAlpha: CGFloat = 0.065
+    static let actionGlyphPointSize: CGFloat = 6.6
+    static let actionIdleAlpha: CGFloat = 0.26
+    static let actionRowHoverAlpha: CGFloat = 0.98
     static let actionPointerHoverBackgroundAlpha: CGFloat = 0.14
     static let actionRowHoverBackgroundAlpha: CGFloat = 0.040
     static let hoverClearDelayMilliseconds = 520
@@ -2557,7 +2557,7 @@ private final class TranscriptRowActionButton: NSButton {
         self.rowHovered = rowHovered
         isEnabled = true
         alphaValue = (rowHovered || isPointerInside) ? Appearance.rowHoverAlpha : Appearance.idleAlpha
-        contentTintColor = NSColor.white.withAlphaComponent(isPointerInside ? 0.90 : (rowHovered ? 0.68 : 0.36))
+        contentTintColor = NSColor.white.withAlphaComponent(isPointerInside ? 0.92 : (rowHovered ? 0.74 : 0.44))
         let backgroundAlpha: CGFloat
         if isPointerInside {
             backgroundAlpha = Appearance.pointerHoverBackgroundAlpha

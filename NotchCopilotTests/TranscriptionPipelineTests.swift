@@ -1143,6 +1143,48 @@ final class TranscriptionPipelineTests: XCTestCase {
         }
     }
 
+    func testAudioConditioningServiceLiftsNearFloorSpeechIntoUsableNativeRange() {
+        let flags = TranscriptionFeatureFlags(vadGatingEnabled: true)
+
+        for testCase in [
+            (source: TranscriptAudioSource.microphone, amplitude: Float(0.00000014), minimumConditionedRMS: Float(0.00013)),
+            (source: TranscriptAudioSource.system, amplitude: Float(0.00000012), minimumConditionedRMS: Float(0.00013))
+        ] {
+            let config = AudioConditioningConfig(accuracyMode: .highAccuracy, target: .nativeSpeech, audioSource: testCase.source)
+            let service = AudioConditioningService(source: testCase.source, preRollDuration: 0.4)
+            let speechTrace = service.conditionWithTrace(
+                TranscriptionAudioFixtureGenerator.speechLikeBuffer(
+                    amplitude: testCase.amplitude,
+                    source: testCase.source,
+                    offset: 0
+                ),
+                config: config,
+                featureFlags: flags
+            )
+
+            XCTAssertGreaterThanOrEqual(
+                speechTrace.conditionedBuffer.rms,
+                testCase.minimumConditionedRMS,
+                "\(testCase.source.displayName) near-floor speech should be lifted enough for native ASR: \(speechTrace.conditionedBuffer.rms)"
+            )
+            XCTAssertTrue(speechTrace.vadDecision.shouldForwardToASR, "\(testCase.source.displayName) near-floor speech should reach ASR: \(speechTrace.vadDecision)")
+            XCTAssertFalse(speechTrace.frames.isEmpty)
+
+            let flatService = AudioConditioningService(source: testCase.source, preRollDuration: 0.4)
+            let flatTrace = flatService.conditionWithTrace(
+                TranscriptionAudioFixtureGenerator.buffer(
+                    samples: Array(repeating: testCase.amplitude, count: 1_600),
+                    source: testCase.source,
+                    offset: 1
+                ),
+                config: config,
+                featureFlags: flags
+            )
+            XCTAssertFalse(flatTrace.vadDecision.shouldForwardToASR, "\(testCase.source.displayName) flat near-floor signal must stay gated: \(flatTrace.vadDecision)")
+            XCTAssertTrue(flatTrace.frames.isEmpty)
+        }
+    }
+
     func testLanguageContinuityResolverKeepsTechnicalCodeSwitchFromChangingGlobalSourceLanguage() {
         var resolver = LanguageContinuityResolver()
         let first = resolver.resolve(
